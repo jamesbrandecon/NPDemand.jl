@@ -1,4 +1,4 @@
-function price_elasticity_priceIndex(inv_sigma, s, p_points, deltas, bO, whichProducts, included, trueS,maxes)
+function price_elasticity_priceIndex(inv_sigma, s, p_points, deltas, bO, whichProducts, included, trueS, maxes)
 # --------------------------------------------------------------------
 # Code takes in estimates from inverse_demand and returns implied price
 # elasticity of first good
@@ -14,14 +14,8 @@ function price_elasticity_priceIndex(inv_sigma, s, p_points, deltas, bO, whichPr
 # trueS         -- evaluate derivatives at realized shares or calculate
 #                   counterfactual shares
 # maxes         -- object with maxes.maxs = max(s), maxes.mins = min(s),
-#                   used if s is small and needs to be rescaled
+#                   used if s is small enough to cause numerical issues and needs to be rescaled
 
-# include("solve_s_nested_flexible.jl")
-# include("fullInteraction.jl")
-# include("bern.jl")
-# include("dbern.jl")
-# include("b.jl")
-# include("db.jl")
 
 J = size(s,2);
 numBadMarkets = 0;
@@ -52,7 +46,7 @@ svec = similar(deltas)
 if trueS == 0
     for p_i = 1:size(deltas,1)
         s!(sj) = solve_s_nested_flexible(sj, inv_sigma, deltas[p_i,:]', J, bernO, included, maxes,nothing);
-        ans = nlsolve(s!, 0.1*ones(J))
+        ans = nlsolve(s!, 1/(2*J) .* ones(J))
         svec[p_i,:] =  ans.zero;
     end
 else
@@ -113,7 +107,7 @@ for j1 = 1:J
     end
 end
 
-Jmat = zeros(1,size(svec,1));
+Jmat = [];
 J_sp = zeros(size(svec[:,1]));
 all_own = zeros(size(svec,1),J);
 if !isempty(maxes)
@@ -139,6 +133,7 @@ for ii = 1:length(dsids[1,1,:])
         end
     end
     temp = -1*inv(J_s);
+    push!(Jmat, temp)
     ps = p_points[ii,:]./svec2[ii,:]
     all_own[ii,:] = -1*inv(J_s)*ps;
     J_sp[ii,1] = temp[whichProducts[1],whichProducts[2]];
@@ -147,8 +142,8 @@ end
 
 esep = J_sp.*p_points[:,1]./svec2[:,1]; # own-price varying
 numBadMarkets = 0
-if trueS==1
-    print("There were $numBadMarkets bad markets")
-end
-return esep, Jmat, svec, numBadMarkets, all_own
+# if trueS==1
+#     print("There were $numBadMarkets bad markets")
+# end
+return esep, Jmat, svec, all_own
 end

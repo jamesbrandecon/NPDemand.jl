@@ -167,7 +167,7 @@ else
             return result
         end
         opt = Opt(:LN_COBYLA, size(designtemp,2))
-        opt.xtol_rel = 1e-5
+        opt.xtol_rel = 1e-4
         opt.min_objective = obj
         inequality_constraint!(opt, (result,x,g) -> constraint(result, x, g, constMat), dropdims(1e-8.*ones(1,size(designtemp,2)),dims=1) )
         (minf,minx,ret) = NLopt.optimize(opt, dropdims(ones(size(designtemp,2),1),dims = 2) )
