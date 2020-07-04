@@ -2,16 +2,17 @@ function inverse_demand(s,pt,xt,zt, bO, iv,numVars,constrained,included,marketva
 # Function to estimate inverse demand function as in Compiani (2018)
     # bO should be a (J x 1) matrix where each entry is
     # the order of the polynomials for the demand function for one product.
-include("fullInteraction.jl")
-include("bern.jl")
-include("dbern.jl")
-include("b.jl")
-include("db.jl")
+# include("fullInteraction.jl")
+# include("bern.jl")
+# include("dbern.jl")
+# include("b.jl")
+# include("db.jl")
 
 bernO = bO;
 order = bO;
 IVbernO = bO.+iv;
 J = size(s,2);
+T = size(s,1);
 if size(bO,1) !=J
     if size(bO,2)==J
         bO=bO';

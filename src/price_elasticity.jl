@@ -16,12 +16,12 @@ function price_elasticity_priceIndex(inv_sigma, s, p_points, deltas, bO, whichPr
 # maxes         -- object with maxes.maxs = max(s), maxes.mins = min(s),
 #                   used if s is small and needs to be rescaled
 
-include("solve_s_nested_flexible.jl")
-include("fullInteraction.jl")
-include("bern.jl")
-include("dbern.jl")
-include("b.jl")
-include("db.jl")
+# include("solve_s_nested_flexible.jl")
+# include("fullInteraction.jl")
+# include("bern.jl")
+# include("dbern.jl")
+# include("b.jl")
+# include("db.jl")
 
 J = size(s,2);
 numBadMarkets = 0;
