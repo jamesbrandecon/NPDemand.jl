@@ -16,7 +16,7 @@ BERN = []
 for xj = 1:J
     if xj>1
         if xj<J
-            perm_order = hcat(xj:J, 1:xj-1);
+            perm_order = hcat(convert.(Integer,xj:J)', convert.(Integer,1:xj-1)');
             perm_order = convert.(Integer, perm_order)
         else
             perm_order = convert.(Integer,1:J)
