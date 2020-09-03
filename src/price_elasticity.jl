@@ -58,7 +58,7 @@ dsids = zeros(J,J,size(deltas,1)) # initialize matrix of \partial s^{-1} /\parti
 for j1 = 1:J
     if j1>1
         if j1<J
-            perm_order = hcat(j1:J, 1:j1-1);
+            perm_order = hcat(convert.(Integer,j1:J)', convert.(Integer, 1:j1-1)');
             perm_order = convert.(Integer, perm_order)
         else
             perm_order = convert.(Integer,1:J)
