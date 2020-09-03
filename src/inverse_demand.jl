@@ -7,6 +7,12 @@ function inverse_demand(s,pt,xt,zt, bO, iv,numVars,constrained,included,marketva
 # include("dbern.jl")
 # include("b.jl")
 # include("db.jl")
+ if size(pt,2) > 4
+     bigProblem = 1
+ else
+     bigProblem = 0
+ end
+
 
 bernO = bO;
 order = bO;
@@ -48,7 +54,7 @@ for xj = 1:J
     BERN_xj = zeros(T,1)
     if xj>1
         if xj<J
-            perm_order = hcat(xj:J, 1:xj-1);
+            perm_order = hcat(convert.(Integer, xj:J)', convert.(Integer, 1:xj-1)');
             perm_order = convert.(Integer, perm_order)
         else
             perm_order = convert.(Integer,1:J)
@@ -62,30 +68,32 @@ for xj = 1:J
     for i = 1:J
         s_perm[:,i] = s[:,perm_order[i]];
     end
-# Market shares
-for j = 1:1:J
-     if included[xj,perm_order[j]]==1
-        BERN_xj = [BERN_xj bern(s_perm[:,j],convert(Integer, bernO[xj,1])) ]
-     end
-end
-
-# Market characteristics
-if marketvars!=nothing
-    for j = 1:1:size(marketvars,2)
-        BERN_xj = [BERN_xj bern(marketvars[:,j], bernO[xj,1])]
+    # Market shares
+    for j = 1:1:J
+         if included[xj,perm_order[j]]==1
+            BERN_xj = [BERN_xj bern(s_perm[:,j],convert(Integer, bernO[xj,1])) ]
+         end
     end
-end
 
-print("Done Constructing Design Matrix \n")
-# Define instruments
+    # Market characteristics
+    if marketvars!=nothing
+        for j = 1:1:size(marketvars,2)
+            BERN_xj = [BERN_xj bern(marketvars[:,j], bernO[xj,1])]
+        end
+    end
+
+    if bigProblem == 1
+        print("Done Constructing Design Matrix \n")
+    end
+    # Define instruments
     cols = convert.(Bool, included[xj,:]); # only need instruments for included products
     z_xj = zt[:,cols];
     if marketvars!=nothing
         z_xj = [zt[:,cols] marketvars];
     end
 
-# --------------------------------------------
-# Instruments
+    # --------------------------------------------
+    # Instruments
     A_xj = zeros(T,1)
     ztemp = z_xj;
     for zj = 1:1:size(ztemp, 2)
@@ -95,9 +103,11 @@ print("Done Constructing Design Matrix \n")
 
     numVars = convert(Integer, size(A_xj, 2)./(IVbernO[xj,1]+1) )
     A_xj = fullInteraction(A_xj, numVars, convert(Integer, IVbernO[xj,1]))
-print("Done with instruments \n")
-# --------------------------------------------
-# Prep for estimation
+    if bigProblem == 1
+        print("Done with instruments \n")
+    end
+    # --------------------------------------------
+    # Prep for estimation
     if marketvars==nothing
         numVars = sum(included[xj,:]);
     else
@@ -105,11 +115,12 @@ print("Done with instruments \n")
     end
     BERN_xj = BERN_xj[:,2:end]
     design_xj = fullInteraction(BERN_xj, convert(Integer, numVars), convert(Integer,bernO[xj,1]) )
-
-print("Done with estimation prep \n")
-push!(BERN, BERN_xj)
-push!(design, design_xj)
-push!(A, A_xj)
+    if bigProblem == 1
+        print("Done with estimation prep \n")
+    end
+    push!(BERN, BERN_xj)
+    push!(design, design_xj)
+    push!(A, A_xj)
 end
 
 # --------------------------------------------
@@ -120,22 +131,31 @@ if constrained==0
     designs = []
     for xj = 1:J
         # Unconstrained Estimator
-        print("UNCONSTRAINED ESTIMATIION BEGINNING \n")
+        if bigProblem == 1
+            print("UNCONSTRAINED ESTIMATIION BEGINNING \n")
+        end
         deltatemp = delta[:,xj]
         Atemp = A[xj]
         designtemp = design[xj]
         sdt = size(designtemp,2)
-        print("Number of parameters to estimate is: $sdt \n")
-        sigtemp = pinv((designtemp'*Atemp*pinv(Atemp'*Atemp)*Atemp'*designtemp))*designtemp'*Atemp*pinv(Atemp'*Atemp)*Atemp'deltatemp;
+        if bigProblem == 1
+            print("Number of parameters to estimate is: $sdt \n")
+        end
+        TOL = sqrt(eps(real(float(one(eltype(Atemp))))))
+        sigtemp = pinv((designtemp'*Atemp*pinv(Atemp'*Atemp, rtol = TOL)*Atemp'*designtemp), rtol=TOL)*designtemp'*Atemp*pinv(Atemp'*Atemp, rtol=TOL)*Atemp'deltatemp;
         push!(sig, sigtemp)
         push!(designs, designtemp)
-        print("Estimation for product $xj is done \n")
+        if bigProblem == 1
+            print("Estimation for product $xj is done \n")
+        end
     end
 else
     sig = []
     for xj = 1:1:J
         # Constrained Estimator
-        print("CONSTRAINED ESTIMATIION BEGINNING \n")
+        if bigProblem == 1
+            print("CONSTRAINED ESTIMATIION BEGINNING \n")
+        end
         deltatemp = delta[:,xj]
         Atemp = A[xj]
         designtemp = design[xj]
@@ -152,18 +172,37 @@ else
         constMat = makeConstraint(BERN[xj], numVars, bernO[xj,1],1,1,1);
         ineqMat = 0*ones(size(constMat[1],1),1);
         sdt =size(designtemp,2)
-        print("Number of parameters to estimate is: $sdt \n")
+        if bigProblem == 1
+            print("Number of parameters to estimate is: $sdt \n")
+        end
         ApA = pinv(ApA);
         constMat = constMat[1];
         bigA = Atemp*ApA*Atemp';
         #obj(x) = objective_priceIndex(x, designtemp ,deltatemp , Atemp, ApA);
-        function obj(x::Vector, g::Vector)
+        function obj1(x::Vector)
             xi = (deltatemp - designtemp*x);
             out = xi'*bigA*xi;
             return out
         end
-        function constraint(result::Vector, x::Vector, g::Matrix, constMat)
+        function con1(x::Vector)
+            out = constMat*x
+            return out
+        end
+        g = x -> ForwardDiff.gradient(obj1, x)
+        g2 = x-> ForwardDiff.gradient(con1, x)
+        function obj(x::Vector, grad::Vector)
+            if length(grad) > 0
+                grad = g(x);
+            end
+            xi = (deltatemp - designtemp*x);
+            out = xi'*bigA*xi;
+            return out
+        end
+        function constraint(result::Vector, x::Vector, grad::Matrix, constMat)
             result = constMat*x
+            if length(grad) > 0
+                grad = g2(x);
+            end
             return result
         end
         opt = Opt(:LN_COBYLA, size(designtemp,2))
