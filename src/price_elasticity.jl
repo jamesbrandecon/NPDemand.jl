@@ -102,7 +102,7 @@ for j1 = 1:J
             end
         else
             zerotemp = zeros(size(svec,1),1);
-            dsids[j1,j2] = zerotemp;
+            dsids[j1,j2,:] = zerotemp;
         end
     end
 end

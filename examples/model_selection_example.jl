@@ -4,15 +4,15 @@
 # Written by James Brand
 # ------------------------------------------------------------------
 using Statistics, NPDemand
-using RCall, DataFrames¿
+using RCall, DataFrames
 @rlibrary ggplot2
 
-J=3; # products
+J=3; # number of products
 T =500;
-beta = -0.4; # price coefficient
+beta = -0.4; # price coefficient in utility function
 sdxi = 0.15; # standard deviation of xi
 
-S = 1;
+S = 20; # number of simulations
 G = 10; # size of grid on which to evaluate price elasticities
 esep_own = zeros(S,G);
 esep_cross = zeros(S,G);
@@ -47,6 +47,7 @@ nboot = 10;
 included_symmetric_pct = zeros(2J,2J)
 included_pct = zeros(2J,2J)
 for si = 1:1:S
+    # Simulate demand in two groups -- each product only substitutes to J-1 others
     s, pt, zt = NPDemand.simulate_logit(J,T, beta, sdxi);
     s2, pt2, zt2  = NPDemand.simulate_logit(J,T, beta, sdxi);
 
@@ -70,13 +71,12 @@ for si = 1:1:S
     # Calculate price elasticities
     deltas = -1*median(pt).*ones(G,2J);
     deltas[:,1] = -1*p_points;
-    JMB most recent issue is here. issues with trueS=1, and with trueS=0 + model selection
     esep, Jacobians, share_vec = NPDemand.price_elasticity_priceIndex(inv_sigma, s, p_points, deltas, bernO, own, included_symmetric, trueS,[]);
     trueEsep = beta.*p_points.*(1 .- share_vec[:,1])
     #
     esep_own[si,:] = esep;
     esepTrue[si,:] = trueEsep;
-    included_pct[:,:] += included./S;
+    included_pct[:,:] += included./S; # summarizing selection patterns. See pure_model_selection.jl
     included_symmetric_pct[:,:] += included_symmetric./S;
 end
 

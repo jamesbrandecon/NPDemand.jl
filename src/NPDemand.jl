@@ -23,5 +23,5 @@ include("inverse_demand.jl")
 include("price_elasticity.jl")
 include("hierNet.jl")
 include("hierNet_boot.jl")
-#activate ~/.julia/dev/NPDemand.jl/Project.toml
+
 end
