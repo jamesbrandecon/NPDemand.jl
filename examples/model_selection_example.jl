@@ -8,7 +8,7 @@ using RCall, DataFrames
 @rlibrary ggplot2
 
 J=3; # number of products
-T =500;
+T =1000;
 beta = -0.4; # price coefficient in utility function
 sdxi = 0.15; # standard deviation of xi
 
@@ -28,7 +28,7 @@ p_points = convert.(Float64, p_points)
 # Set options for estimation and elasticity calculation
 # ------------------------------------------------------
 bernO = 3*ones(2J,1);        # Order of Bernstein Polynomial
-iv=1;                       # Order of IV Polynomial = (bernO + iv)
+iv=0;                       # Order of IV Polynomial = (bernO + iv)
 constrained = 0;            # Monotonicity Constraint (experience says you always want this on)
 xt = zeros(T,2J);       # No exogenous product characteristics
 trueS = 0;                    # Evaluate at true market shares or not
