@@ -58,7 +58,7 @@ for si = 1:1:S
     deltas[:,1] = -1*p_points;
 
     esep, Jacobians, share_vec = NPDemand.price_elasticity_priceIndex(inv_sigma, s, p_points, deltas, bernO, own, included, trueS,[])
-    trueEsep = beta.*p_points.*(1 .- share_vec[:,1])
+    trueEsep = beta.*p_points.*(1 .- 2 .* share_vec[:,1])
 
     esep_own[si,:] = esep;
     esepTrue[si,:] = trueEsep;

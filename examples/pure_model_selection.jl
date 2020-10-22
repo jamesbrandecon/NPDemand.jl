@@ -6,7 +6,7 @@ using Statistics, NPDemand
 using RCall, DataFrames, PrettyTables
 @rlibrary ggplot2
 
-J=3; # number of products
+J=4; # number of products
 T =500;
 beta = -0.4; # price coefficient in utility function
 sdxi = 0.15; # standard deviation of xi

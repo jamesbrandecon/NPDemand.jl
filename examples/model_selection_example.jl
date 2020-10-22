@@ -7,8 +7,8 @@ using Statistics, NPDemand
 using RCall, DataFrames
 @rlibrary ggplot2
 
-J=3; # number of products
-T =1000;
+J=4; # number of products
+T =2000;
 beta = -0.4; # price coefficient in utility function
 sdxi = 0.15; # standard deviation of xi
 
@@ -27,7 +27,7 @@ p_points = convert.(Float64, p_points)
 # ------------------------------------------------------
 # Set options for estimation and elasticity calculation
 # ------------------------------------------------------
-bernO = 3*ones(2J,1);        # Order of Bernstein Polynomial
+bernO = 2*ones(2J,1);        # Order of Bernstein Polynomial
 iv=0;                       # Order of IV Polynomial = (bernO + iv)
 constrained = 0;            # Monotonicity Constraint (experience says you always want this on)
 xt = zeros(T,2J);       # No exogenous product characteristics
@@ -38,7 +38,7 @@ nfolds = 5; # number of cross-validation folds
 nlam = 10; # number of regularization parameters to try. Actual values chosen automatically by hierNet
 strong = true; # boolean for whether or not to impose strong hierarchy constraint
 # Note: "strong = true" takes much longer than "strong = false."
-nboot = 10;
+nboot = 1;
 
 # ------------------------------------------------------
 # Simulation
@@ -72,7 +72,7 @@ for si = 1:1:S
     deltas = -1*median(pt).*ones(G,2J);
     deltas[:,1] = -1*p_points;
     esep, Jacobians, share_vec = NPDemand.price_elasticity_priceIndex(inv_sigma, s, p_points, deltas, bernO, own, included_symmetric, trueS,[]);
-    trueEsep = beta.*p_points.*(1 .- share_vec[:,1])
+    trueEsep = beta.*p_points.*(1 .- 2 .* share_vec[:,1])
     #
     esep_own[si,:] = esep;
     esepTrue[si,:] = trueEsep;
