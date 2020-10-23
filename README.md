@@ -24,8 +24,11 @@ One helpful additional function is `simulate_logit`, which allows one to easily 
 
 Rather than run through some short examples here, I've included example files in `/examples` which demonstrates the use of the most important functions and provides descriptions of the relevant inputs.
 
+## Calling from Python/R 
+Some researchers may wish to call this package directly from Python code. The easiest way to do this is through a Jupyter notebook. In IPython, after running the command `%load_ext julia.magic`, one can call Julia (assuming it is installed) by prefacing each line with `%julia`. In R, one can use the `JuliaCall` package.  
+
 ## To-do
-- Very soon: The solver I'm using is much slower (orders of magnitude) than the CVX solver in Matlab. In search of faster algorithms.
+- Very soon: The solver I'm using when demand is constrained to be monotonic is much slower (orders of magnitude) than the CVX solver in Matlab. In search of faster algorithms.
 - Soon: Simplify options for `inverse_demand` and `price_elasticity_priceIndex`
 - Soon: Permit alternative model selection approaches  
 - Later: Permit models without price in the index
