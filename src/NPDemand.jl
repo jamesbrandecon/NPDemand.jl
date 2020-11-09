@@ -9,7 +9,6 @@ import DataFrames
 import NLsolve
 import RCall
 
-using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, RCall
 
 include("b.jl")
 include("db.jl")
@@ -24,4 +23,5 @@ include("price_elasticity.jl")
 include("hierNet.jl")
 include("hierNet_boot.jl")
 include("toDataFrame.jl")
+
 end

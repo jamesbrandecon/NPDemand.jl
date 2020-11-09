@@ -20,7 +20,7 @@ df = NPDemand.toDataFrame(s,p,z);
 inv_sigma, designs = NPDemand.inverse_demand(df);
 
 # Calculate price elasticities at realized prices and market shares
-elast2, jacobians = NPDemand.price_elasticity(inv_sigma, df, p, included; deltas = -1 .* p);
+elast2, jacobians = NPDemand.price_elasticity(inv_sigma, df, p; deltas = -1 .* p);
 true_elast = beta.*p.*(1 .- s[:,1]) # equation for own-price elasticities in logit model
 
 # Plot kernel densities of estimated and true own-price elasticities

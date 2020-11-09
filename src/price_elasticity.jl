@@ -1,4 +1,5 @@
-function price_elasticity(inv_sigma, df, p_points, included; whichProducts = [1,1], trueS = true, bO = 2 .*ones(size(included,2),1), iv::Integer = 0, deltas = -1 .* convert(Array{Float64}, df[:,r"p"]), maxes = [])
+function price_elasticity(inv_sigma, df, p_points; included = ones(size(eachcol(df[:, r"s"]),1), size(eachcol(df[:, r"s"]),1)),
+    whichProducts = [1,1], trueS = true, bO = 2 .*ones(size(included,2),1), iv::Integer = 0, deltas = -1 .* convert(Array{Float64}, df[:,r"p"]), maxes = [])
 # --------------------------------------------------------------------
 # Code takes in estimates from inverse_demand and returns implied price
 # elasticity of first good
