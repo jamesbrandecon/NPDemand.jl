@@ -9,6 +9,7 @@ import DataFrames
 import NLsolve
 import RCall
 
+using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, RCall
 
 include("b.jl")
 include("db.jl")
