@@ -1,4 +1,5 @@
-function inverse_demand(s,pt,xt,zt, bO, iv,numVars,constrained,included,marketvars)
+function inverse_demand(df ; included = ones(size(eachcol(df[:, r"s"]),1), size(eachcol(df[:, r"s"]),1)),
+    bO = 2 .*ones(size(included,2),1), iv::Integer = 0, marketvars = nothing, constrained::Bool = false)
 # Function to estimate inverse demand function as in Compiani (2018)
     # bO should be a (J x 1) matrix where each entry is
     # the order of the polynomials for the demand function for one product.
@@ -7,18 +8,24 @@ function inverse_demand(s,pt,xt,zt, bO, iv,numVars,constrained,included,marketva
 # include("dbern.jl")
 # include("b.jl")
 # include("db.jl")
- if size(pt,2) > 4
+
+ if size(included,2) > 4
      bigProblem = 1
  else
      bigProblem = 0
  end
+J = size(included,2);
 
+# Unpack DataFrame df
+s = convert(Array{Float64,2}, df[:, r"s"]);
+pt = convert(Array{Float64,2}, df[:, r"p"]);
+xt = convert(Array{Float64,2}, df[:, r"x"]);
+zt = convert(Array{Float64,2}, df[:, r"z"]);
 
 bernO = bO;
 order = bO;
-IVbernO = bO.+iv;
-J = size(s,2);
 T = size(s,1);
+IVbernO = bO.+iv;
 if size(bO,1) !=J
     if size(bO,2)==J
         bO=bO';
@@ -126,7 +133,7 @@ end
 # --------------------------------------------
 # Estimation
 
-if constrained==0
+if constrained==false
     sig = []
     designs = []
     for xj = 1:J

@@ -1,4 +1,4 @@
-function price_elasticity_priceIndex(inv_sigma, s, p_points, deltas, bO, whichProducts, included, trueS, maxes)
+function price_elasticity(inv_sigma, df, p_points, included; whichProducts = [1,1], trueS = true, bO = 2 .*ones(size(included,2),1), iv::Integer = 0, deltas = -1 .* convert(Array{Float64}, df[:,r"p"]), maxes = [])
 # --------------------------------------------------------------------
 # Code takes in estimates from inverse_demand and returns implied price
 # elasticity of first good
@@ -16,7 +16,7 @@ function price_elasticity_priceIndex(inv_sigma, s, p_points, deltas, bO, whichPr
 # maxes         -- object with maxes.maxs = max(s), maxes.mins = min(s),
 #                   used if s is small enough to cause numerical issues and needs to be rescaled
 
-
+s = convert(Array{Float64,2}, df[:, r"s"]);
 J = size(s,2);
 numBadMarkets = 0;
 if size(bO,1) !=J
@@ -28,6 +28,13 @@ if size(bO,1) !=J
         throw("Error: Matrix of polynomial orders has wrong number of elements")
     end
 end
+
+if trueS == true
+    if size(deltas,1) ==1
+        throw("Error: When evaluating at realized prices, deltas must be the same length as the data")
+    end
+end
+
 bernO = convert.(Integer, bO);
 order = bernO;
 
@@ -43,7 +50,7 @@ end
 
 ## Declare prices and shares to evaluate derivatives
 svec = similar(deltas)
-if trueS == 0
+if trueS == false
     for p_i = 1:size(deltas,1)
         s!(sj) = solve_s_nested_flexible(sj, inv_sigma, deltas[p_i,:]', J, bernO, included, maxes,nothing);
         ans = nlsolve(s!, 1/(2*J) .* ones(J))

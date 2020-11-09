@@ -1,5 +1,19 @@
-function hierNet(s::Matrix, p::Matrix, iv::Matrix, nfolds::Integer, nlam::Integer, strong::Bool)
+function hierNet(df; nfolds::Integer = 5, nlam::Integer = 10, strong::Bool = false)
+# --------------------------------------------------------------------------
+# Options:
+# nfolds - number of folds for cross-validation
+# nlam - number of values of regularization parameter to try
+# strong -  whether strong hierarchy is imposed or not
+# --------------------------------------------------------------------------
+
+# Unpack DataFrame df
+s = convert(Array{Float64,2}, df[:, r"s"]);
+pt = convert(Array{Float64,2}, df[:, r"p"]);
+xt = convert(Array{Float64,2}, df[:, r"x"]);
+zt = convert(Array{Float64,2}, df[:, r"z"]);
+
 J = size(s,2);
+
 @rput s
 @rput p
 @rput iv

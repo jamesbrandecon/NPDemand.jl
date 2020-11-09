@@ -1,4 +1,20 @@
-function hierNet_boot(s_all::Matrix, p_all::Matrix, iv_all::Matrix, nfolds::Integer, nlam::Integer, strong::Bool, nboot::Integer)
+function hierNet_boot(df; nfolds::Integer = 5, nlam::Integer = 10, strong::Bool = false, nboot::Integer = 5)
+# --------------------------------------------------------------------------
+# Options:
+# nfolds - number of folds for cross-validation
+# nlam - number of values of regularization parameter to try
+# strong -  whether strong hierarchy is imposed or not
+# nboot - number of bootstrapped samples on which lasso procedure is run
+# --------------------------------------------------------------------------
+
+# Unpack DataFrame df
+s_all = convert(Array{Float64,2}, df[:, r"s"]);
+p_all = convert(Array{Float64,2}, df[:, r"p"]);
+x_all = convert(Array{Float64,2}, df[:, r"x"]);
+iv_all = convert(Array{Float64,2}, df[:, r"z"]);
+
+J = size(s_all,2);
+
 @rput s_all
 @rput p_all
 @rput iv_all

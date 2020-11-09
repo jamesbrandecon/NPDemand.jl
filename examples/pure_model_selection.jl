@@ -3,7 +3,7 @@
 # Written by James Brand
 # ------------------------------------------------------------------
 using Statistics, NPDemand
-using RCall, DataFrames, PrettyTables
+using RCall, DataFrames
 @rlibrary ggplot2
 
 J=4; # number of products
@@ -13,15 +13,6 @@ sdxi = 0.15; # standard deviation of xi
 
 S = 50; # number of simulations
 G = 10; # size of grid on which to evaluate price elasticities
-esep_own = zeros(S,G);
-esep_cross = zeros(S,G);
-esep_own_dist = zeros(S,T);
-esepTrue = zeros(S,G);
-
-s, pt, zt, xi = NPDemand.simulate_logit(J,T, beta, sdxi);
-
-p_points = range(quantile(pt[:,1],.25),stop = quantile(pt[:,1],.75),length = G);
-p_points = convert.(Float64, p_points)
 
 # ------------------------------------------------------
 # Set options for Model Selection
@@ -35,7 +26,6 @@ nboot = 10;
 # ------------------------------------------------------
 # Simulation
 # ------------------------------------------------------
-
 included_symmetric_pct = zeros(2J,2J)
 included_pct = zeros(2J,2J)
 for si = 1:1:S
@@ -47,12 +37,13 @@ for si = 1:1:S
     s = s ./ 2;
     pt = [pt pt2];
     zt = [zt zt2];
+    df = NPDemand.toDataFrame(s,pt,zt);
 
-    # hierNet() Returns two matrices: one, the "raw" selected model, and another
+    # hierNet_boot() Returns two matrices: one, the "raw" selected model, and another
     #   which imposes symmetry. I.e. if j is a substute for k, then k is
     #   a substitute for j as well (this can drastically increase the # parameters
     #    to estimate when s has many columns)
-    included, included_symmetric = NPDemand.hierNet_boot(s, pt, zt, nfolds, nlam, strong, nboot);
+    included, included_symmetric = NPDemand.hierNet_boot(df; nfolds = nfolds, nlam = nlam, strong = strong, nboot = nboot);
 
     included_pct[:,:] += included./S;
     included_symmetric_pct[:,:] += included_symmetric./S;
