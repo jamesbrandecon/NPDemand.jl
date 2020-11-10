@@ -28,6 +28,6 @@ Rather than run through some short examples here, I've included example files in
 Some researchers may wish to call this package directly from Python code. The easiest way to do this is through a Jupyter notebook. In IPython, after running the command `%load_ext julia.magic`, one can call Julia (assuming it is installed) by prefacing each line with `%julia`. In R, one can use the `JuliaCall` package.  
 
 ## To-do
-- Very soon: The solver I'm using when demand is constrained to be monotonic is much slower (orders of magnitude) than the CVX solver in Matlab. In search of faster algorithms, and for now monotonicity constraints are not the default. 
-- Soon: Permit alternative model selection approaches  
-- Later: Permit models without price in the index
+- Very soon: Permit alternative model selection approaches, e.g. limiting the maximum number of substitutes for each product.
+- Soon: The solver I'm using when demand is constrained to be monotonic is much slower (orders of magnitude) than the CVX solver in Matlab. In search of faster algorithms, and for now monotonicity constraints are not the default. 
+
