@@ -7,8 +7,8 @@ using Statistics, NPDemand
 using RCall, DataFrames
 @rlibrary ggplot2
 
-J=2; # # products
-T =2000;
+J=2; # # of products
+T =2000; # # of markets
 beta = -0.4; # price coefficient
 sdxi = 0.15; # standard deviation of xi
 
@@ -57,7 +57,7 @@ for si = 1:1:S
     deltas = -1*median(p).*ones(G,J);
     deltas[:,1] = -1*p_points;
 
-    elast, Jacobians, share_vec = NPDemand.price_elasticity(inv_sigma, df, p_points, included ;
+    elast, Jacobians, share_vec = NPDemand.price_elasticity(inv_sigma, df, p_points ; included = included,
         deltas = deltas, whichProducts = own, trueS = false)
 
     trueelast = beta.*p_points.*(1 .-  share_vec[:,1])
@@ -95,7 +95,7 @@ ggplot(df, aes(x=:p, y=:e50)) + geom_line() + geom_line(aes(y=:e975), color = "g
 s, p, z  = NPDemand.simulate_logit(J,T, beta, sdxi);
 df = NPDemand.toDataFrame(s,p,z);
 inv_sigma, designs = NPDemand.inverse_demand(df; included = included);
-elast2, Jacobians2 = NPDemand.price_elasticity(inv_sigma, df, p, included; deltas = -1 .* p);
+elast2, Jacobians2 = NPDemand.price_elasticity(inv_sigma, df, p, included = included; deltas = -1 .* p);
 
 df2 = DataFrame(Estimate = elast2, True = beta.*p[:,1].*(1 .- s[:,1]))
 ggplot(df2, aes(x=:True))+

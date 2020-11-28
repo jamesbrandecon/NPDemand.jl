@@ -20,11 +20,11 @@ df = NPDemand.toDataFrame(s,p,z);
 inv_sigma, designs = NPDemand.inverse_demand(df);
 
 # Calculate price elasticities at realized prices and market shares
-elast2, jacobians = NPDemand.price_elasticity(inv_sigma, df, p; deltas = -1 .* p);
+elast, jacobians = NPDemand.price_elasticity(inv_sigma, df, p; deltas = -1 .* p);
 true_elast = beta.*p.*(1 .- s[:,1]) # equation for own-price elasticities in logit model
 
 # Plot kernel densities of estimated and true own-price elasticities
-df2 = DataFrame(Estimate = elast2, True = true_elast[:,1])
+df2 = DataFrame(Estimate = elast, True = true_elast[:,1])
 ggplot(df2, aes(x=:True))+
  geom_density(aes(x=:Estimate), color = "gray", linetype = "dashed") +
  geom_density(aes(x=:True), color = "black") + xlab("Elasticity") +

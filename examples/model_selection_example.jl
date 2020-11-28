@@ -29,7 +29,7 @@ p_points = convert.(Float64, p_points)
 # ------------------------------------------------------
 bernO = 2*ones(2J,1);        # Order of Bernstein Polynomial
 iv=0;                       # Order of IV Polynomial = (bernO + iv)
-trueS = 0;                    # Evaluate at true market shares or not
+trueS = false;                    # Evaluate at true market shares or not
 own = [1,1];                # [derivative of j, with respect to price of k]
 
 nfolds = 5; # number of cross-validation folds
@@ -58,18 +58,20 @@ for si = 1:1:S
     #   which imposes symmetry. I.e. if j is a substute for k, then k is
     #   a substitute for j as well (this can drastically increase the # parameters
     #    to estimate when s has many columns)
-    included, included_symmetric = NPDemand.hierNet_boot(df; nfolds = nfolds, nlam, false, nboot);
+    included, included_symmetric = NPDemand.hierNet_boot(df; nfolds = nfolds, nlam = 10, strong = false, nboot = 1);
 
     # Estimate demand nonparametrically
         # If you want to include an additional covariate in all demand
         # functions, add an additional argument "marketvars" after included. If it is an
         # additional product characteristic, marketvars should be T x J
-    inv_sigma, designs = NPDemand.inverse_demand(df, bernO, iv, 2J, constrained, included_symmetric, nothing);
-
+    inv_sigma, designs = NPDemand.inverse_demand(df; included = included_symmetric);
+    @show size(included_symmetric)
     # Calculate price elasticities
     deltas = -1*median(pt).*ones(G,2J);
     deltas[:,1] = -1*p_points;
-    elast, Jacobians, share_vec = NPDemand.price_elasticity(inv_sigma, s, p_points, deltas, bernO, own, included_symmetric, trueS,[]);
+    elast, Jacobians, share_vec = NPDemand.price_elasticity(inv_sigma, df, p_points; deltas = deltas, whichProducts = own,
+        included = included_symmetric, trueS = trueS);
+
     trueelast = beta.*p_points.*(1 .- 2 .* share_vec[:,1])
 
     elast_own[si,:] = elast;

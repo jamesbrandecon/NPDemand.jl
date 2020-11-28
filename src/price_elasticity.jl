@@ -1,4 +1,4 @@
-function price_elasticity(inv_sigma, df, p_points; included = ones(size(eachcol(df[:, r"s"]),1), size(eachcol(df[:, r"s"]),1)),
+function price_elasticity(inv_sigma, df, p_points; included = ones(size(eachcol(df[:, r"shares"]),1), size(eachcol(df[:, r"shares"]),1)),
     whichProducts = [1,1], trueS = true, bO = 2 .*ones(size(included,2),1), iv::Integer = 0, deltas = -1 .* convert(Array{Float64}, df[:,r"p"]), maxes = [])
 # --------------------------------------------------------------------
 # Code takes in estimates from inverse_demand and returns implied price
@@ -17,7 +17,7 @@ function price_elasticity(inv_sigma, df, p_points; included = ones(size(eachcol(
 # maxes         -- object with maxes.maxs = max(s), maxes.mins = min(s),
 #                   used if s is small enough to cause numerical issues and needs to be rescaled
 
-s = convert(Array{Float64,2}, df[:, r"s"]);
+s = convert(Array{Float64}, df[:, r"shares"]);
 J = size(s,2);
 numBadMarkets = 0;
 if size(bO,1) !=J

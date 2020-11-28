@@ -1,4 +1,4 @@
-function inverse_demand(df ; included = ones(size(eachcol(df[:, r"s"]),1), size(eachcol(df[:, r"s"]),1)),
+function inverse_demand(df ; included = ones(size(eachcol(df[:, r"shares"]),1), size(eachcol(df[:, r"shares"]),1)),
     bO = 2 .*ones(size(included,2),1), iv::Integer = 0, marketvars = nothing, constrained::Bool = false)
 # Function to estimate inverse demand function as in Compiani (2018)
     # bO should be a (J x 1) matrix where each entry is
@@ -17,10 +17,10 @@ function inverse_demand(df ; included = ones(size(eachcol(df[:, r"s"]),1), size(
 J = size(included,2);
 
 # Unpack DataFrame df
-s = convert(Array{Float64,2}, df[:, r"s"]);
-pt = convert(Array{Float64,2}, df[:, r"p"]);
-xt = convert(Array{Float64,2}, df[:, r"x"]);
-zt = convert(Array{Float64,2}, df[:, r"z"]);
+s = convert(Array{Float64}, df[:, r"shares"]);
+pt = convert(Array{Float64}, df[:, r"prices"]);
+xt = convert(Array{Float64}, df[:, r"x"]);
+zt = convert(Array{Float64}, df[:, r"demand_instruments"]);
 
 bernO = bO;
 order = bO;
