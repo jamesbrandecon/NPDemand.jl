@@ -16,9 +16,9 @@ pkg> add https://github.com/jamesbrandecon/NPDemand.jl
 
 ## Usage
 There are three important functions included here so far: `inverse_demand`, `price_elasticity`, and `hierNet`/`hierNet_boot`:
-- `inverse_demand`: Takes as inputs matrices of market shares, prices, instruments and estimates inverse demand functions separately for each good. Each inverse demand function is approximated by a Bernstein polynomial of user-chosen order.   
-- `price_elasticity`: Takes the output of `inverse_demand` as an input, and returns estimates of own- or cross-price elasticities calculated either at a pre-specified vector of prices or at the realized prices in the data. The former requires solving for counterfactual market shares, and is best for getting a sense of the shape of the demand curve. The latter can be used, for example, to calculate markups under traditional models of static pricing in industrial organization.  
-- `hierNet`/`hierNet_boot`: These functions are for model selection. They take as inputs market shares, prices, and instruments, and run constrained lasso regressions (details in draft, coming soon) to select subsets of products which are strong substitutes. `hierNet_boot` runs this procedure multiple times on bootstrapped samples and takes the intersection of selected substitutes across bootstraps. This takes longer but is less likely to include extraneous substitutes.
+- `inverse_demand(df::DataFrame)`: Takes as input a dataframe with columns s1-sJ, p1-pJ, z1-zJ for J products and estimates inverse demand functions separately for each good. Each inverse demand function is approximated by a Bernstein polynomial of user-chosen order. There are a number of options which are demonstrated in the examples. 
+- `price_elasticity(inv_sigma, df , p_points, included)`: Takes the output of `inverse_demand`, and returns estimates of own- or cross-price elasticities, according to the matrix `included` which specifies which products are substitutes for each other, calculated either at a pre-specified vector of prices `p_points` or at the realized prices in the data. The former requires solving for counterfactual market shares, and is best for getting a sense of the shape of the demand curve. The latter can be used, for example, to calculate markups under traditional models of static pricing in industrial organization.  
+- `hierNet`/`hierNet_boot`: These functions are for model selection. They take as an input a dataframe with columns s1-sJ, p1-pJ, z1-zJ for J products and run constrained lasso regressions (details in draft, coming soon) to select subsets of products which are strong substitutes. `hierNet_boot` runs this procedure multiple times on bootstrapped samples and takes the intersection of selected substitutes across bootstraps. This takes longer but is less likely to include extraneous substitutes. See examples for options. 
 
 One helpful additional function is `simulate_logit`, which allows one to easily simulate data from a logit demand system with endogenous prices (and instruments for those prices) to test the `NPDemand` functions.
 
@@ -28,6 +28,6 @@ Rather than run through some short examples here, I've included example files in
 Some researchers may wish to call this package directly from Python code. The easiest way to do this is through a Jupyter notebook. In IPython, after running the command `%load_ext julia.magic`, one can call Julia (assuming it is installed) by prefacing each line with `%julia`. In R, one can use the `JuliaCall` package.  
 
 ## To-do
-- Very soon: The solver I'm using when demand is constrained to be monotonic is much slower (orders of magnitude) than the CVX solver in Matlab. In search of faster algorithms, and for now monotonicity constraints are not the default. 
-- Soon: Permit alternative model selection approaches  
-- Later: Permit models without price in the index
+- Very soon: Permit alternative model selection approaches, e.g. limiting the maximum number of substitutes for each product.
+- Soon: The solver I'm using when demand is constrained to be monotonic is much slower (orders of magnitude) than the CVX solver in Matlab. In search of faster algorithms, and for now monotonicity constraints are not the default. 
+
