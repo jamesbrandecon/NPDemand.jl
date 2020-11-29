@@ -20,17 +20,17 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [compat]
 Compat = "3.15"
-DataFrames = "0.21"
+DataFrames = "0.21, 0.22"
 DecisionTree = "0.10"
 ForwardDiff = "0.10"
 GLPK = "0.13, 0.14"
 NLopt = "0.6"
 NLsolve = "4.4"
 Optim = "0.22, 1.0"
-PrettyTables = "0.9"
+PrettyTables = "0.9, 0.10"
 Primes = "0.5"
 RCall = "0.13"
-julia = "1"
+julia = "1.5"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
