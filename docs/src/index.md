@@ -13,29 +13,29 @@ Each row should represent a distinct market. Columns should be numbered starting
 ### Functions
 #### Main User Functions
 ```@docs
-inverse_demand()
+inverse_demand
 ```
 
 ```@docs
-price_elasticity()
+price_elasticity
 ```
 
 ```@docs
-hierNet()
+hierNet
 ```
 
 ```@docs
-hierNet_boot()
+hierNet_boot
 ```
 
 
 #### Helper Functions
 ```@docs
-bern(t,order)
+bern
 ```
 
 ```@docs
-dbern(t,order)
+dbern
 ```
 
 ```@docs
