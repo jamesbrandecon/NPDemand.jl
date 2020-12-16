@@ -21,7 +21,7 @@ jobs:
   include:
     - stage: "Documentation"
       julia: 1.5
-      os: 
+      os:
         - linux
         - osx
       script:
