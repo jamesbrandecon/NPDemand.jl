@@ -11,6 +11,9 @@ import RCall
 
 using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, RCall
 
+export hierNet, hierNet_boot, inverse_demand, price_elasticity, toDataFrame, simulate_logit
+
+
 include("b.jl")
 include("db.jl")
 
@@ -49,12 +52,12 @@ Simulates logit demand for `J` products in `T` markets, with price preference pa
 include("fullInteraction.jl")
 include("makeConstraint.jl")
 
-include("inverse_demand.jl")
 """
     inverse_demand(df::DataFrame)
 
 Returns estimates of inverse demand functions by regressing prices1-pricesJ on shares1-sharesJ, instrumenting with demand_instruments1-demand_instrumentsJ
 """
+include("inverse_demand.jl")
 
 
 include("price_elasticity.jl")
@@ -78,7 +81,6 @@ include("hierNet_boot.jl")
 
 Similar to hierNet(), but runs the selection procedure for `nboot` (default is 5) times for each product and takes the union of selected substitutes.
 """
-
 
 
 end
