@@ -52,13 +52,12 @@ Simulates logit demand for `J` products in `T` markets, with price preference pa
 include("fullInteraction.jl")
 include("makeConstraint.jl")
 
+include("inverse_demand.jl")
 """
     inverse_demand(df::DataFrame)
 
 Returns estimates of inverse demand functions by regressing prices1-pricesJ on shares1-sharesJ, instrumenting with demand_instruments1-demand_instrumentsJ
 """
-include("inverse_demand.jl")
-
 
 include("price_elasticity.jl")
 """
