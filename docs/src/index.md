@@ -11,9 +11,12 @@ In order to use any of the commands in this package, the data must be in the for
 Each row should represent a distinct market. Columns should be numbered starting from zero, with one column for each product, e.g. `shares0`, `shares1`, etc.
 
 ### Functions
+```@meta
+CurrentModule = NPDemand
+```
 #### Main User Functions
 ```@docs
-inverse_demand
+inverse_demand(df::DataFrame)
 ```
 
 ```@docs
@@ -36,12 +39,4 @@ bern
 
 ```@docs
 dbern
-```
-
-```@docs
-b(t,n,k)
-```
-
-```@docs
-db(t,n,k)
 ```
