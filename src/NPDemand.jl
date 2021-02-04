@@ -11,9 +11,6 @@ import RCall
 
 using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, RCall
 
-export hierNet, hierNet_boot, inverse_demand, price_elasticity, toDataFrame, simulate_logit
-
-
 include("b.jl")
 include("db.jl")
 
@@ -81,5 +78,7 @@ include("hierNet_boot.jl")
 Similar to hierNet(), but runs the selection procedure for `nboot` (default is 5) times for each product and takes the union of selected substitutes.
 """
 
+export hierNet, hierNet_boot, inverse_demand, price_elasticity, toDataFrame, simulate_logit
+export bern, dbern
 
 end
