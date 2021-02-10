@@ -148,7 +148,7 @@ for ii = 1:length(dsids[1,1,:])
     #print("Market $ii \n")
 end
 
-esep = J_sp.*p_points[:,1]./svec2[:,1]; # own-price varying
+esep = J_sp.*p_points[:,whichProducts[2]]./svec2[:,whichProducts[1]]; # own-price varying
 numBadMarkets = 0
 # if trueS==1
 #     print("There were $numBadMarkets bad markets")
