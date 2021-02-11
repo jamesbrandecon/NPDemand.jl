@@ -19,6 +19,7 @@ include("db.jl")
 
 Returns a univariate Bernstein polynomial of order `order` constructed from array/matrix `t`
 """
+
 include("bern.jl")
 
 
@@ -27,6 +28,7 @@ include("bern.jl")
 
 Returns the derivative of a univariate Bernstein polynomial of order `order` constructed from array/matrix `t`
 """
+
 include("dbern.jl")
 
 
@@ -35,6 +37,7 @@ include("dbern.jl")
 
 Returns the derivative of a univariate Bernstein polynomial of order `order` constructed from array/matrix `t`
 """
+
 include("toDataFrame.jl")
 
 
@@ -45,6 +48,7 @@ include("solve_s_nested_flexible.jl")
 
 Simulates logit demand for `J` products in `T` markets, with price preference parameter `beta` and market shocks with standard deviation `v`.
 """
+
 include("simulate_logit.jl")
 
 
@@ -56,6 +60,7 @@ include("makeConstraint.jl")
 
 Returns estimates of inverse demand functions by regressing prices1-pricesJ on shares1-sharesJ, instrumenting with demand_instruments1-demand_instrumentsJ
 """
+
 include("inverse_demand.jl")
 
 """
@@ -63,6 +68,7 @@ include("inverse_demand.jl")
 
 Takes results of `inverse_demand()` as first argument, the data in a `DataFrame` as the second argument, and evaluates price elasticities at prices `p_points`.
 """
+
 include("price_elasticity.jl")
 
 
@@ -72,6 +78,7 @@ include("price_elasticity.jl")
 Selects relevant substitutes for each product. Returns a matrix where the (i,j) element is 1 if j is a strong substitute for i, 0 otherwise. The second output of the function is a similar matrix which imposes symmetry, i.e. that if the (i,j) is 1 then so is the (j,i)
 element.
 """
+
 include("hierNet.jl")
 
 """
@@ -79,6 +86,7 @@ include("hierNet.jl")
 
 Similar to hierNet(), but runs the selection procedure for `nboot` (default is 5) times for each product and takes the union of selected substitutes.
 """
+
 include("hierNet_boot.jl")
 
 
