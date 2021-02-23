@@ -17,6 +17,10 @@ jobs:
   allow_failures:
     - julia: 1.5
 
+branches:
+  only:
+  - master
+
 jobs:
   include:
     - stage: "Documentation"
