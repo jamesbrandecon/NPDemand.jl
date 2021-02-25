@@ -30,20 +30,20 @@ included_symmetric_pct = zeros(2J,2J)
 included_pct = zeros(2J,2J)
 for si = 1:1:S
     # Simulate demand in two groups -- each product only substitutes to J-1 others
-    s, pt, zt = NPDemand.simulate_logit(J,T, beta, sdxi);
-    s2, pt2, zt2  = NPDemand.simulate_logit(J,T, beta, sdxi);
+    s, pt, zt = simulate_logit(J,T, beta, sdxi);
+    s2, pt2, zt2  = simulate_logit(J,T, beta, sdxi);
 
     s = [s s2];
     s = s ./ 2;
     pt = [pt pt2];
     zt = [zt zt2];
-    df = NPDemand.toDataFrame(s,pt,zt);
+    df = toDataFrame(s,pt,zt);
 
     # hierNet_boot() Returns two matrices: one, the "raw" selected model, and another
     #   which imposes symmetry. I.e. if j is a substute for k, then k is
     #   a substitute for j as well (this can drastically increase the # parameters
     #    to estimate when s has many columns)
-    included, included_symmetric = NPDemand.hierNet_boot(df; nfolds = nfolds, nlam = nlam, strong = strong, nboot = nboot);
+    included, included_symmetric = hierNet_boot(df; nfolds = nfolds, nlam = nlam, strong = strong, nboot = nboot);
 
     included_pct[:,:] += included./S;
     included_symmetric_pct[:,:] += included_symmetric./S;
