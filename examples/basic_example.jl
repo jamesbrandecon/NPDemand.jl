@@ -19,7 +19,7 @@ elast_cross = zeros(S,G);
 elast_own_dist = zeros(S,T);
 elastTrue = zeros(S,G);
 
-s, p, z, xi = NPDemand.simulate_logit(J,T, beta, sdxi);
+s, p, z, xi = simulate_logit(J,T, beta, sdxi);
 p_points = range(quantile(p[:,1],.25),stop = quantile(p[:,1],.75),length = G);
 p_points = convert.(Float64, p_points)
 
@@ -45,19 +45,19 @@ cross = [1,2];
 # ------------------------------------------------------
 for si = 1:1:S
     # Returns market shares, prices, instruments, and the market demand shock, respectively
-    s, p, z  = NPDemand.simulate_logit(J,T, beta, sdxi);
-    df = NPDemand.toDataFrame(s,p,z);
+    s, p, z  = simulate_logit(J,T, beta, sdxi);
+    df = toDataFrame(s,p,z);
     # Estimate demand nonparametrically
         # If you want to include an additional covariate in all demand
         # functions, add an additional argument "marketvars" after included. If it is an
         # additional product characteristic, marketvars should be T x J
-    inv_sigma, designs = NPDemand.inverse_demand(df; included = included);
+    inv_sigma, designs = inverse_demand(df; included = included);
 
     # Calculate price elasticities
     deltas = -1*median(p).*ones(G,J);
     deltas[:,1] = -1*p_points;
 
-    elast, Jacobians, share_vec = NPDemand.price_elasticity(inv_sigma, df, p_points ; included = included,
+    elast, Jacobians, share_vec = price_elasticity(inv_sigma, df, p_points ; included = included,
         deltas = deltas, whichProducts = own, trueS = false)
 
     trueelast = beta.*p_points.*(1 .-  share_vec[:,1])
@@ -92,10 +92,10 @@ ggplot(df, aes(x=:p, y=:e50)) + geom_line() + geom_line(aes(y=:e975), color = "g
         # Jacobians2 is particularly helpful here. This is an array, each element of which is the Jacobian
         # of demand with respect to prices. This can be used to calculate markups under many models
         # of competition.
-s, p, z  = NPDemand.simulate_logit(J,T, beta, sdxi);
-df = NPDemand.toDataFrame(s,p,z);
-inv_sigma, designs = NPDemand.inverse_demand(df; included = included);
-elast2, Jacobians2 = NPDemand.price_elasticity(inv_sigma, df, p, included = included; deltas = -1 .* p);
+s, p, z  = simulate_logit(J,T, beta, sdxi);
+df = toDataFrame(s,p,z);
+inv_sigma, designs = inverse_demand(df; included = included);
+elast2, Jacobians2 = price_elasticity(inv_sigma, df, p, included = included; deltas = -1 .* p);
 
 df2 = DataFrame(Estimate = elast2, True = beta.*p[:,1].*(1 .- s[:,1]))
 ggplot(df2, aes(x=:True))+

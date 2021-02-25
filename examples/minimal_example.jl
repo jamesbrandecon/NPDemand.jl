@@ -13,14 +13,14 @@ beta = -0.4; # price coefficient
 sdxi = 0.15; # standard deviation of xi
 
 # Returns market shares, prices, instruments, and the market demand shock, respectively
-s, p, z  = NPDemand.simulate_logit(J,T, beta, sdxi);
-df = NPDemand.toDataFrame(s,p,z);
+s, p, z  = simulate_logit(J, T, beta, sdxi);
+df = toDataFrame(s,p,z);
 
 # Estimate demand nonparametrically
-inv_sigma, designs = NPDemand.inverse_demand(df);
+inv_sigma, designs = inverse_demand(df);
 
 # Calculate price elasticities at realized prices and market shares
-elast, jacobians = NPDemand.price_elasticity(inv_sigma, df, p; deltas = -1 .* p);
+elast, jacobians = price_elasticity(inv_sigma, df, p; deltas = -1 .* p);
 true_elast = beta.*p.*(1 .- s[:,1]) # equation for own-price elasticities in logit model
 
 # Plot kernel densities of estimated and true own-price elasticities
