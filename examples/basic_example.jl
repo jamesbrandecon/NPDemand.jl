@@ -54,11 +54,11 @@ for si = 1:1:S
     inv_sigma, designs = inverse_demand(df; included = included);
 
     # Calculate price elasticities
-    deltas = -1*median(p).*ones(G,J);
-    deltas[:,1] = -1*p_points;
+    prices = -1*median(p).*ones(G,J);
+    prices[:,1] = -1*p_points;
 
-    elast, Jacobians, share_vec = price_elasticity(inv_sigma, df, p_points ; included = included,
-        deltas = deltas, whichProducts = own, trueS = false)
+    elast, Jacobians, share_vec = price_elasticity(inv_sigma, df, prices; included = included,
+        whichProducts = own, trueS = false)
 
     trueelast = beta.*p_points.*(1 .-  share_vec[:,1])
 

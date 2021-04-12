@@ -1,5 +1,5 @@
 function price_elasticity(inv_sigma, df, p_points; included = ones(size(eachcol(df[:, r"shares"]),1), size(eachcol(df[:, r"shares"]),1)),
-    whichProducts = [1,1], trueS = true, bO = 2 .*ones(size(included,2),1), iv::Integer = 0, deltas = -1 .* convert(Array{Float64}, df[:,r"p"]), maxes = [])
+    whichProducts = [1,1], trueS = true, bO = 2 .*ones(size(included,2),1), iv::Integer = 0, maxes = [])
 # --------------------------------------------------------------------
 # Code takes in estimates from inverse_demand and returns implied price
 # elasticity of first good
@@ -17,7 +17,17 @@ function price_elasticity(inv_sigma, df, p_points; included = ones(size(eachcol(
 # maxes         -- object with maxes.maxs = max(s), maxes.mins = min(s),
 #                   used if s is small enough to cause numerical issues and needs to be rescaled
 
-s = convert(Array{Float64}, df[:, r"shares"]);
+if size(p_points,2) != size(df[:,r"prices"],2)
+    error("Third argument must be a matrix of prices with J columns")
+end
+
+if typeof(p_points) ==DataFrame
+    p_points = Matrix(p_points);
+end
+
+deltas = -1 .* p_points; # This will be dependent variable in IV regressions
+
+s = Matrix(df[:, r"shares"]);
 J = size(s,2);
 numBadMarkets = 0;
 if size(bO,1) !=J
@@ -62,7 +72,7 @@ else
 end
 
 # Share Jacobian
-dsids = zeros(J,J,size(deltas,1)) # initialize matrix of \partial s^{-1} /\partial s
+dsids = zeros(J,J,size(deltas,1)) # initialize matrix of ∂s^{-1}/∂s
 for j1 = 1:J
     if j1>1
         if j1<J
@@ -142,14 +152,23 @@ for ii = 1:length(dsids[1,1,:])
     end
     temp = -1*inv(J_s);
     push!(Jmat, temp)
-    ps = p_points[ii,:]./svec2[ii,:]
-    all_own[ii,:] = -1*inv(J_s)*ps;
+
+    # Market vector of prices/shares
+    ps = p_points[ii,:]./svec2[ii,:];
+
+    # All own-price elasticities
+    all_own[ii,:] = -1*Diagonal(inv(J_s))*ps;
+
+    # Save to calculate desired own-price elasticities
     J_sp[ii,1] = temp[whichProducts[1],whichProducts[2]];
-    #print("Market $ii \n")
 end
 
-esep = J_sp.*p_points[:,whichProducts[2]]./svec2[:,whichProducts[1]]; # own-price varying
+#esep = J_sp.*p_points[:,whichProducts[2]]./svec2[:,whichProducts[1]]; # old code, called p_points by mistake
+
+# New code, uses matrix of deltas, which are equal to -1 .* prices
+esep = J_sp.* (p_points[:,whichProducts[2]]./svec2[:,whichProducts[1]]); # own-price varying
 numBadMarkets = 0
+
 # if trueS==1
 #     print("There were $numBadMarkets bad markets")
 # end
