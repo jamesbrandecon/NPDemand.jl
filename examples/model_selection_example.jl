@@ -65,11 +65,11 @@ for si = 1:1:S
         # functions, add an additional argument "marketvars" after included. If it is an
         # additional product characteristic, marketvars should be T x J
     inv_sigma, designs = inverse_demand(df; included = included_symmetric);
-    @show size(included_symmetric)
+
     # Calculate price elasticities
-    deltas = -1*median(pt).*ones(G,2J);
-    deltas[:,1] = -1*p_points;
-    elast, Jacobians, share_vec = price_elasticity(inv_sigma, df, p_points; deltas = deltas, whichProducts = own,
+    prices = -1*median(pt).*ones(G,2J);
+    prices[:,1] = -1*p_points;
+    elast, Jacobians, share_vec = price_elasticity(inv_sigma, df, prices; whichProducts = own,
         included = included_symmetric, trueS = trueS);
 
     trueelast = beta.*p_points.*(1 .- 2 .* share_vec[:,1])
