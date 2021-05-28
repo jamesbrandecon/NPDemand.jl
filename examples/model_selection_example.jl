@@ -7,12 +7,12 @@ using Statistics, NPDemand
 using RCall, DataFrames
 @rlibrary ggplot2
 
-J=4; # number of products
-T =2000;
+J=2; # number of products
+T =5000;
 beta = -0.4; # price coefficient in utility function
 sdxi = 0.15; # standard deviation of xi
 
-S = 20; # number of simulations
+S = 50; # number of simulations
 G = 10; # size of grid on which to evaluate price elasticities
 elast_own = zeros(S,G);
 elast_cross = zeros(S,G);
@@ -67,8 +67,8 @@ for si = 1:1:S
     inv_sigma, designs = inverse_demand(df; included = included_symmetric);
 
     # Calculate price elasticities
-    prices = -1*median(pt).*ones(G,2J);
-    prices[:,1] = -1*p_points;
+    prices = median(pt).*ones(G,2J);
+    prices[:,1] = p_points;
     elast, Jacobians, share_vec = price_elasticity(inv_sigma, df, prices; whichProducts = own,
         included = included_symmetric, trueS = trueS);
 
