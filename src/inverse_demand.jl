@@ -17,10 +17,10 @@ function inverse_demand(df ; included = ones(size(eachcol(df[:, r"shares"]),1), 
 J = size(included,2);
 
 # Unpack DataFrame df
-s = convert(Array{Float64}, df[:, r"shares"]);
-pt = convert(Array{Float64}, df[:, r"prices"]);
-xt = convert(Array{Float64}, df[:, r"x"]);
-zt = convert(Array{Float64}, df[:, r"demand_instruments"]);
+s = Matrix(df[:, r"shares"]);
+pt = Matrix(df[:, r"prices"]);
+xt = Matrix(df[:, r"x"]);
+zt = Matrix(df[:, r"demand_instruments"]);
 
 bernO = bO;
 order = bO;
