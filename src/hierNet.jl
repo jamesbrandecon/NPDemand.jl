@@ -8,10 +8,10 @@ function hierNet(df; nfolds::Integer = 5, nlam::Integer = 10, strong::Bool = fal
 # --------------------------------------------------------------------------
 
 # Unpack DataFrame df
-s = convert(Array{Float64,2}, df[:, r"shares"]);
-p = convert(Array{Float64,2}, df[:, r"prices"]);
-x = convert(Array{Float64,2}, df[:, r"x"]);
-iv = convert(Array{Float64,2}, df[:, r"demand_instruments"]);
+s_all = Matrix(df[:, r"shares"]);
+p_all = Matrix(df[:, r"prices"]);
+x_all = Matrix(df[:, r"x"]);
+iv_all = Matrix(df[:, r"demand_instruments"]);
 
 J = size(s,2);
 
