@@ -25,6 +25,8 @@ J = size(s,2);
 
 if max_nest_size == 0
   R"
+  # Install hierNet only if not already installed
+  if !('hierNet' %in% installed.packages()[,'Package']) install.package('hierNet')
   library(hierNet)
   J <-  ncol(s)
 
@@ -89,6 +91,8 @@ else
   @rput max_nest_size
   @rput step_size
   R"
+  # Install hierNet only if not already installed
+  if !('hierNet' %in% installed.packages()[,'Package']) install.package('hierNet')
   library(hierNet)
   J <-  ncol(s)
 

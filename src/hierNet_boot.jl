@@ -24,6 +24,9 @@ J = size(s_all,2);
 @rput nboot
 
 R"
+# Install hierNet only if not already installed
+if !('hierNet' %in% installed.packages()[,'Package']) install.package('hierNet')
+
 library(hierNet)
 J <-  ncol(s_all)
 
