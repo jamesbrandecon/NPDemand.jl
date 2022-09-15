@@ -58,7 +58,6 @@ if !isempty(maxes)
     mins = maxes[2];
 end
 
-
 ## Declare prices and shares to evaluate derivatives
 svec = similar(deltas)
 if trueS == false

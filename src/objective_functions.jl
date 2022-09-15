@@ -1,6 +1,7 @@
+ultra = true
 function md_obj(β::Vector; X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
-    Aineq = [], Aeq = [], design_width = 1, price_index = 1)
+    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, lambda1=0)
 
     # Initialize objective function
     obj = zero(eltype(β));
@@ -53,7 +54,7 @@ end
 
 function md_grad!(grad::Vector, β::Vector; X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
-    Aineq = [], Aeq = [], design_width = 1, price_index = 1)
+    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, lambda1=0)
 
     grad0 = zeros(eltype(β), size(β));
     ineq_con = zeros(eltype(β), size(Aineq,1));
@@ -103,8 +104,8 @@ function md_grad!(grad::Vector, β::Vector; X = [], B = [], A = [],
     end 
     if Aineq !=[]
         # Gradient of inequality constraint 
-        vecmat!(ineq_con, Aineq, θ)
-        # ineq_con = Aineq * θ;
+        # vecmat!(ineq_con, Aineq, θ)
+        ineq_con = Aineq * θ;
         
         pen1::Matrix = (lambda1 .* (ineq_con .> 0) .* 2 .* (ineq_con))';
         temp_ineq = dropdims(pen1 * Aineq, dims=1)

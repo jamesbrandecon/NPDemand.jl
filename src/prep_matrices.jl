@@ -3,7 +3,6 @@ function prep_matrices(df::DataFrame, exchange, index_vars, bO)
 # Unpack DataFrame df
 s = Matrix(df[:, r"shares"]);
 pt = Matrix(df[:, r"prices"]);
-xt = Matrix(df[:, r"x"]);
 zt = Matrix(df[:, r"demand_instruments"]);
 
 J = size(s,2);
@@ -54,7 +53,7 @@ syms = []
 
 for xj = 1:J
     BERN_xj = zeros(T,1);
-    
+
     perm = collect(1:J);
     perm[1] = xj; perm[xj] = 1;
 

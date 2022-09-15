@@ -12,15 +12,22 @@ end
 exchange = [[1 2 3 4], [5 6]]
 # exchange = [[1 2 3],[4 5 6], [7 8 9 10]]
 index_vars = ["prices", "x"]
+normalization = [];
 constraints = [:monotone, :exchangeability, :diagonal_dominance]
 
 Xvec, Avec, Bvec, syms = prep_matrices(df, exchange, index_vars, bO);
 Aineq, Aeq = make_constraint(constraints, exchange, combo_vec);
 
+mins = dropdims(getindex.(argmin(Aeq, dims=2),2), dims=2);
+order = sortperm(mins, rev=true);
+mins = mins[order];
+maxs = getindex.(argmax(Aeq, dims=2),2);
+maxs = maxs[order]
+
 matrices = prep_inner_matrices(Xvec, Avec, Bvec)
 
 design_width = sum(size.(Xvec,2));
-
+lambda1 = 10000
 # Define objective and gradients
 obj_func(β::Vector) = md_obj(β;X = Xvec, B = Bvec, A = Avec,
 m1=matrices.m1, 
@@ -35,7 +42,7 @@ m9=matrices.m9,
 DWD = matrices.DWD,
 WX = matrices.WX, 
 WB = matrices.WB,
-Aineq = Aineq, Aeq = Aeq, design_width = design_width, price_index = 1);
+Aineq = Aineq, Aeq = Aeq, design_width = design_width, mins = mins, maxs = maxs, normalization = normalization, price_index = 1, lambda1 = lambda1);
 
 grad_func!(grad::Vector, β::Vector) = md_grad!(grad, β; X = Xvec, B = Bvec, A = Avec,
 m1=matrices.m1, 
@@ -50,17 +57,29 @@ m9=matrices.m9,
 DWD = matrices.DWD,
 WX = matrices.WX, 
 WB = matrices.WB,
-Aineq = Aineq, Aeq = Aeq, design_width = design_width, price_index = 1);
+Aineq = Aineq, Aeq = Aeq, design_width = design_width, mins = mins, maxs = maxs, normalization = normalization, price_index = 1, lambda1 = lambda1);
 
 # Estimation 
-β_length = design_width + sum(size.(B,2))
-β_init = -1 .* ones(β_length)
-using Optim
+β_length = design_width + sum(size(B[1],2))
+β_init = -1 .* rand(β_length)
+using Optim, LineSearches
 results =  Optim.optimize(obj_func, grad_func!, β_init,
-    LBFGS(), Optim.Options(show_trace = true, iterations = 10000));
-
+    LBFGS(;linesearch = BackTracking(order=3)), Optim.Options(show_trace = true, iterations = 10000));
+results =  Optim.optimize(obj_func, grad_func!, results.minimizer,
+    LBFGS(;linesearch = BackTracking(order=3)), Optim.Options(show_trace = true, iterations = 10000));
+β = results.minimizer
+θ = β[1:design_width]
+γ = β[length(θ)+1:end]
+γ[price_index] = 1;
+for i ∈ normalization
+    γ[i] =0; 
+end
+for i∈eachindex(mins)
+    θ[mins[i]] = θ[maxs[i]]
+end
 estimates = inner_estimation(obj_func, grad_func!, β_init)
 
+price_elasticity2(vcat(θ, γ), df, bO; X =Xvec, B = Bvec)
 
 return inv_sigma
 end
