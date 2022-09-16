@@ -31,6 +31,7 @@ for j = 0:J-1
             index_j = hcat(index_j, df[!, "$(v)$(j)"]);
         end
     end
+    B[:,1] = -1 .* B[:,1];
     push!(B, index_j)
 end
 

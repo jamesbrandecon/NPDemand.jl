@@ -16,7 +16,7 @@ normalization = [];
 constraints = [:monotone, :exchangeability, :diagonal_dominance]
 
 Xvec, Avec, Bvec, syms = prep_matrices(df, exchange, index_vars, bO);
-Aineq, Aeq = make_constraint(constraints, exchange, combo_vec);
+Aineq, Aeq = make_constraint(constraints, exchange, syms);
 
 mins = dropdims(getindex.(argmin(Aeq, dims=2),2), dims=2);
 order = sortperm(mins, rev=true);
@@ -27,7 +27,7 @@ maxs = maxs[order]
 matrices = prep_inner_matrices(Xvec, Avec, Bvec)
 
 design_width = sum(size.(Xvec,2));
-lambda1 = 10000
+lambda1 = 0
 # Define objective and gradients
 obj_func(β::Vector) = md_obj(β;X = Xvec, B = Bvec, A = Avec,
 m1=matrices.m1, 
@@ -59,18 +59,22 @@ WX = matrices.WX,
 WB = matrices.WB,
 Aineq = Aineq, Aeq = Aeq, design_width = design_width, mins = mins, maxs = maxs, normalization = normalization, price_index = 1, lambda1 = lambda1);
 
+using ForwardDiff
+fdiff = ForwardDiff.gradient(obj_func, β_init)
+G = zeros(length(β_init))
+adiff = grad_func!(G, β_init)
 # Estimation 
 β_length = design_width + sum(size(B[1],2))
 β_init = -1 .* rand(β_length)
 using Optim, LineSearches
 results =  Optim.optimize(obj_func, grad_func!, β_init,
-    LBFGS(;linesearch = BackTracking(order=3)), Optim.Options(show_trace = true, iterations = 10000));
+    LBFGS(), Optim.Options(show_trace = true, iterations = 10000));
 results =  Optim.optimize(obj_func, grad_func!, results.minimizer,
     LBFGS(;linesearch = BackTracking(order=3)), Optim.Options(show_trace = true, iterations = 10000));
 β = results.minimizer
 θ = β[1:design_width]
 γ = β[length(θ)+1:end]
-γ[price_index] = 1;
+γ[price_index] = -1;
 for i ∈ normalization
     γ[i] =0; 
 end

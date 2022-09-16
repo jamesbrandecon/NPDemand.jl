@@ -100,5 +100,8 @@ function make_constraint(constraints, exchange, combo_vec)
         end
     end
 
+    Aineq = Aineq[2:end,:];
+    Aeq = Aeq[2:end,:];
+
     return Aineq, Aeq
 end
