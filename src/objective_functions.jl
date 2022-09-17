@@ -9,7 +9,6 @@ function md_obj(β::Vector; X = [], B = [], A = [],
 
     # Unpack: γ and θ
     θ = β[1:design_width]
-    @show design_width
     γ = β[length(θ)+1:end]
 
     # Normalize own-price coefficient

@@ -73,10 +73,17 @@ for xj = 1:J
    for zj = 1:1:size(ztemp, 2)
        A_xj = [A_xj bern(ztemp[:,zj], IVbernO)]
    end
-   A_xj = A_xj[:, 2:end]
+    A_xj = A_xj[:, 2:end]
 
-    A_xj, sym_combos, combos = make_interactions(A_xj, exchange, bO, xj);
-    full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, bO, xj);
+    A_xj, sym_combos, combos = make_interactions(A_xj, exchange, bO, xj, perm);
+    full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, bO, xj, perm);
+
+    for k ∈ eachindex(index_vars) 
+        v = index_vars[k];
+        if v!= "prices"
+            A_xj = hcat(A_xj, df[!,"$(v)$(xj-1)"]);
+        end
+    end
 
    println("Done with good $xj")
    push!(Xvec, full_interaction)

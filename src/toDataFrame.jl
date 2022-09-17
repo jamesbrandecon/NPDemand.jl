@@ -7,5 +7,8 @@ function toDataFrame(s::Matrix, p::Matrix, z::Matrix, x::Matrix = zeros(size(s))
         df[!, "demand_instruments$j"] =  z[:,j+1];
         df[!, "x$j"] =  x[:,j+1];
     end
+    # for j = 0:J-1
+    #     df[!, "demand_instruments$(j+J-1)"] =  x[:,j+1];
+    # end
     return df;
 end

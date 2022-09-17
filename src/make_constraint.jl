@@ -6,7 +6,7 @@ function make_constraint(constraints, exchange, combo_vec)
     for j = 1:J
         lengths = vcat(lengths, length(combo_vec[j]))
     end
-
+    # NOTE:: PERMUTATIONS WILL MESS UP SYM COMBOS FOR EVERYTHING BUT FIRST ELEMENT OF EXCHANGEABLE GROUP
     # Calculate order of each share in each polynomial
     order_vec = [];
     for j = 1:J
@@ -14,14 +14,17 @@ function make_constraint(constraints, exchange, combo_vec)
         orders = -1 .* ones(size(sym_combos,1), J)
         for i ∈ eachindex(sym_combos)
             inds = getindex.(collect.(findall("_", sym_combos[i])),1) .+1
+            share_ind = getindex.(collect.(findall("_", sym_combos[i])),1) .-1
             for j = 1:length(inds) 
-                orders[i,j] = parse.(Int,sym_combos[i][inds[j]])
+                share = parse.(Int,sym_combos[i][share_ind[j]]);
+                order = parse.(Int,sym_combos[i][inds[j]]);
+                @show share order
+                orders[i,share] = order;
             end
         end
         push!(order_vec, orders)
     end
-    # JMB HAVE TO REMEMBER PERMUTATIONS WILL MESS UP SYM COMBOS FOR EVERYTHING BUT FIRST ELEMENT OF EXCHANGEABLE GROUP
-
+    
     # Initialize constraint matrices 
     Aineq = zeros(1, sum(lengths));
     Aeq = zeros(1, sum(lengths));
@@ -34,22 +37,44 @@ function make_constraint(constraints, exchange, combo_vec)
 
     if :monotone ∈ constraints
         # Monotonicity in own share
-        for inv_j ∈ first_in_exchange
-            if inv_j >1
-                init_ind = sum(lengths[1:inv_j-1])
-            else
-                init_ind = 0;
+        if :exchangeability ∈ constraints
+            for inv_j ∈ first_in_exchange
+                if inv_j >1
+                    init_ind = sum(lengths[1:inv_j-1])
+                else
+                    init_ind = 0;
+                end
+                other_orders = setdiff(collect(1:J), inv_j)
+                orders = order_vec[inv_j];
+                for i ∈ eachindex(orders[:,1])
+                    # findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,j1] .== orders[i,j2]) .& (orders[:,j2] .== orders[i,j1]));
+                    rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,inv_j] .== orders[i,inv_j]+1));
+                    rows = getindex.(rows, 1);
+                    try
+                        rows = rows[1];
+                        Aineq = add_constraint(Aineq, i + init_ind, rows + init_ind);
+                    catch
+                    end
+                end
             end
-            other_orders = setdiff(collect(1:J), inv_j)
-            orders = order_vec[inv_j];
-            for i ∈ eachindex(orders[:,1])
-                # findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,j1] .== orders[i,j2]) .& (orders[:,j2] .== orders[i,j1]));
-                rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,inv_j] .== orders[i,inv_j]+1));
-                rows = getindex.(rows, 1);
-                try
-                    rows = rows[1];
-                    Aineq = add_constraint(Aineq, i + init_ind, rows + init_ind);
-                catch
+        else
+            for inv_j ∈ collect(1:J)
+                if inv_j >1
+                    init_ind = sum(lengths[1:inv_j-1])
+                else
+                    init_ind = 0;
+                end
+                other_orders = setdiff(collect(1:J), inv_j)
+                orders = order_vec[inv_j];
+                for i ∈ eachindex(orders[:,1])
+                    # findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,j1] .== orders[i,j2]) .& (orders[:,j2] .== orders[i,j1]));
+                    rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,inv_j] .== orders[i,inv_j]+1));
+                    rows = getindex.(rows, 1);
+                    try
+                        rows = rows[1];
+                        Aineq = add_constraint(Aineq, i + init_ind, rows + init_ind);
+                    catch
+                    end
                 end
             end
         end
@@ -102,6 +127,11 @@ function make_constraint(constraints, exchange, combo_vec)
 
     Aineq = Aineq[2:end,:];
     Aeq = Aeq[2:end,:];
+    mins = dropdims(getindex.(argmin(Aeq, dims=2),2), dims=2);
+    order = sortperm(mins, rev=true);
+    mins = mins[order];
+    maxs = getindex.(argmax(Aeq, dims=2),2);
+    maxs = maxs[order];
 
-    return Aineq, Aeq
+    return Aineq, Aeq, maxs, mins
 end
