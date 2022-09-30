@@ -31,7 +31,7 @@ for j = 0:J-1
             index_j = hcat(index_j, df[!, "$(v)$(j)"]);
         end
     end
-    B[:,1] = -1 .* B[:,1];
+    index_j[:,1] = -1 .* index_j[:,1];
     push!(B, index_j)
 end
 
@@ -43,27 +43,24 @@ if FEmat !=[]
     end
 end
 
-# B = zeros(T,J)
-# for j = 1:J
-#    B[:,j] = -1*pt[:,j]
-# end
-
 Xvec = []
 Avec = []
 syms = []
 
 for xj = 1:J
+    which_group = findall(xj .∈ exchange)[1];
+    first_product_in_group = exchange[which_group][1];
     BERN_xj = zeros(T,1);
 
     perm = collect(1:J);
-    perm[1] = xj; perm[xj] = 1;
+    perm[first_product_in_group] = xj; perm[xj] = first_product_in_group;
 
     perm_s = copy(s);
-    perm_s[:,1] = s[:,xj]; perm_s[:,xj] = s[:,1];
+    perm_s[:,first_product_in_group] = s[:,xj]; perm_s[:,xj] = s[:,first_product_in_group];
 
    # Market shares
    for j = 1:1:J
-        BERN_xj = [BERN_xj bern(perm_s[:,j],convert(Integer, bO)) ]
+        BERN_xj = [BERN_xj bern(perm_s[:,j], bO) ]
    end
    BERN_xj = BERN_xj[:,2:end]
    # --------------------------------------------
@@ -76,7 +73,7 @@ for xj = 1:J
     A_xj = A_xj[:, 2:end]
 
     A_xj, sym_combos, combos = make_interactions(A_xj, exchange, bO, xj, perm);
-    full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, bO, xj, perm);
+    full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, bO, first_product_in_group, perm);
 
     for k ∈ eachindex(index_vars) 
         v = index_vars[k];
@@ -85,7 +82,7 @@ for xj = 1:J
         end
     end
 
-   println("Done with good $xj")
+   println("Done with choice $(xj-1)")
    push!(Xvec, full_interaction)
    push!(Avec, A_xj)
    push!(syms, sym_combos)

@@ -1,7 +1,7 @@
 ultra = true
 function md_obj(β::Vector; X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
-    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, lambda1=0)
+    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, lambda1=0, elast_mats=[])
 
     # Initialize objective function
     obj = zero(eltype(β));
@@ -49,12 +49,18 @@ function md_obj(β::Vector; X = [], B = [], A = [],
         temp_ineq = sum(lambda1 .* (Atheta[Atheta .>0]).^2 );
         obj +=  temp_ineq[1];
     end
+
+    # Nonlinear constraints
+    if elast_mats != []
+        obj += elast_penalty(θ, exchange, elast_mats, lambda1);
+    end
+
     obj
 end
 
 function md_grad!(grad::Vector, β::Vector; X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
-    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, lambda1=0)
+    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, lambda1=0, elast_mats = [])
 
     grad0 = zeros(eltype(β), size(β));
     ineq_con = zeros(eltype(β), size(Aineq,1));
@@ -126,6 +132,11 @@ function md_grad!(grad::Vector, β::Vector; X = [], B = [], A = [],
         grad0[mins[i]] = 0;
     end
     
+    # Nonlinear constraints
+    if elast_mats != []
+        grad0[1:length(θ)] += ForwardDiff.gradient(elast_penalty(θ, exchange, elast_mats, lambda1));
+    end
+
     try 
         grad .= grad0
     catch
@@ -135,25 +146,25 @@ function md_grad!(grad::Vector, β::Vector; X = [], B = [], A = [],
     grad
 end  
 
-function vecmat!(y, 𝐀, 𝐱)
-    @tturbo for i ∈ eachindex(y)
-        yi = zero(eltype(y))
-        for j ∈ eachindex(𝐱)
-            yi += 𝐀[i,j] * 𝐱[j]
-        end
-        y[i] = yi
-    end
-end
+# function vecmat!(y, 𝐀, 𝐱)
+#     @tturbo for i ∈ eachindex(y)
+#         yi = zero(eltype(y))
+#         for j ∈ eachindex(𝐱)
+#             yi += 𝐀[i,j] * 𝐱[j]
+#         end
+#         y[i] = yi
+#     end
+# end
 
-function wsse_avx(y::Vector{Float64}, X::Matrix, β::Vector{<:Real}, W::Matrix)
-    esum = zero(eltype(β))
-    a = zeros(eltype(β), size(y))
-    vecmat!(a, X, β)
-    @tturbo e = y .- a    
-    @tturbo for i ∈ eachindex(y)
-        for j ∈ eachindex(y)
-            esum += e[i] * e[j] * W[i,j];
-        end
-    end
-    esum::eltype(β)
-end
+# function wsse_avx(y::Vector{Float64}, X::Matrix, β::Vector{<:Real}, W::Matrix)
+#     esum = zero(eltype(β))
+#     a = zeros(eltype(β), size(y))
+#     vecmat!(a, X, β)
+#     @tturbo e = y .- a    
+#     @tturbo for i ∈ eachindex(y)
+#         for j ∈ eachindex(y)
+#             esum += e[i] * e[j] * W[i,j];
+#         end
+#     end
+#     esum::eltype(β)
+# end

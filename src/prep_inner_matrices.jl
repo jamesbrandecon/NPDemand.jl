@@ -20,14 +20,14 @@ function prep_inner_matrices(bigX, bigA, bigB)
     DWD = [];
     for j = 1:J
         A = bigA[1];
-        println("loaded X, A, B")
+        # println("loaded X, A, B")
 
         W = A*pinv(A'A)*A'
         # push!(bigW, W); # JMB run this if using ultra = false
 
         push!(WX, W*bigX[j]);
         push!(WB, W*bigB[j]);
-        println("beginning to prep mini matrices")
+        # println("beginning to prep mini matrices")
 
         mat1, mat2, mat3, mat4, mat5, mat6, mat7, mat8, mat9 = prep2(bigB[j],bigX[j], W)
         
@@ -45,7 +45,7 @@ function prep_inner_matrices(bigX, bigA, bigB)
         push!(DWD, D'*W*D);
 
         GC.gc()
-        println("done with $j")
+        println("Done with choice $(j-1)")
     end
 
     matrices = PreppedMatrices(m1,
