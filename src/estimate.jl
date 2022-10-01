@@ -1,4 +1,9 @@
-function estimate!(problem)
+"""
+    estimate!(problem::NPDProblem)
+
+`estimate!` solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector
+"""
+function estimate!(problem::NPDProblem)
     # Unpack problem 
     matrices = problem.matrices;
     Xvec = problem.Xvec;
@@ -10,6 +15,8 @@ function estimate!(problem)
     maxs = problem.maxs;
     normalization = problem.normalization;
     design_width = problem.design_width;
+    elast_mats = problem.elast_mats; 
+    elast_prices = problem.elast_prices;
     tol = problem.tol;
 
 obj_func(β::Vector, lambda::Int) = md_obj(β;X = Xvec, B = Bvec, A = Avec,
@@ -26,7 +33,7 @@ obj_func(β::Vector, lambda::Int) = md_obj(β;X = Xvec, B = Bvec, A = Avec,
         WX = matrices.WX, 
         WB = matrices.WB,
         Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
-        mins = mins, maxs = maxs, normalization = normalization, price_index = 1, lambda1 = lambda, elast_mats, elast_prices);
+        mins = mins, maxs = maxs, normalization = normalization, price_index = 1, lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices);
 
 grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec, B = Bvec, A = Avec,
         m1=matrices.m1, 
@@ -42,7 +49,7 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
         WX = matrices.WX, 
         WB = matrices.WB,
         Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
-        mins = mins, maxs = maxs, normalization = normalization, price_index = 1, lambda1 = lambda, elast_mats, elast_prices);
+        mins = mins, maxs = maxs, normalization = normalization, price_index = 1, lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices);
 
     # Estimation 
     β_length = design_width + sum(size(Bvec[1],2))
@@ -51,10 +58,10 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
     obj_uncon(x::Vector) = obj_func(x,0);
     grad_uncon!(G::Vector,x::Vector) = grad_func!(G,x,0);
 
-    if isempty(Aineq);
+    if isempty(Aineq) & (:subs_in_group ∉ problem.constraints);
         println("Problem only has equality constraints. Solving...")
         results =  Optim.optimize(obj_uncon, grad_uncon!, β_init,
-        LBFGS(), Optim.Options(show_trace = false, iterations = 10000));
+        LBFGS(), Optim.Options(show_trace = true, iterations = 10000));
     else
         println("Solving problem without inequality constraints....")
         results =  Optim.optimize(obj_uncon, grad_uncon!, β_init,
@@ -64,17 +71,24 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
         iter = 0;
 
         println("Iteratively increasing penalties on inequality constraints....")
-        while (maximum(Aineq * θ) > tol)
+        penalty_violated = true
+        if !isempty(Aineq)
+            penalty_violated = (maximum(Aineq * θ) > tol);
+        end
+        if elast_mats!=[]
+            penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L) >tol);
+        end
+        while penalty_violated
             println("Iteration $(iter)...")
             L *= 10;
             obj(x::Vector) = obj_func(x,L);
             grad!(G::Vector,x::Vector) = grad_func!(G,x,L);
             if iter ==1
                 results =  Optim.optimize(obj, grad!, results.minimizer,
-                    LBFGS(), Optim.Options(show_trace = false, iterations = 10000));
+                    LBFGS(), Optim.Options(show_trace = true, iterations = 10000));
             else
                 results =  Optim.optimize(obj, grad!, results.minimizer,
-                    LBFGS(), Optim.Options(show_trace = false, iterations = 10000));
+                    LBFGS(), Optim.Options(show_trace = true, iterations = 10000));
             end
 
             β = results.minimizer
@@ -87,6 +101,14 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
             for i∈eachindex(mins)
                 θ[mins[i]] = θ[maxs[i]]
             end
+
+            if !isempty(Aineq)
+                penalty_violated = (maximum(Aineq * θ) > tol);
+            end
+            if elast_mats!=[]
+                penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L) > tol);
+            end
+
             iter+=1;
         end
     end

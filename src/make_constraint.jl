@@ -79,27 +79,31 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     end
 
     if :all_substitutes ∈ constraints
-    #     # Monotonicity in own share
-    #     if :exchangeability ∈ constraints
-    #         for inv_j ∈ first_in_exchange
-    #             if inv_j >1
-    #                 init_ind = sum(lengths[1:inv_j-1])
-    #             else
-    #                 init_ind = 0;
-    #             end
-    #             other_orders = setdiff(collect(1:J), inv_j)
-    #             orders = order_vec[inv_j];
-    #             for i ∈ eachindex(orders[:,1])
-    #                 rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,inv_j] .== orders[i,inv_j]+1));
-    #                 rows = getindex.(rows, 1);
-    #                 try
-    #                     rows = rows[1];
-    #                     Aineq = add_constraint(Aineq, i + init_ind, rows + init_ind);
-    #                 catch
-    #                 end
-    #             end
-    #         end
-    #     else
+    #     # Monotonicity in all shares
+        if :exchangeability ∈ constraints
+            for inv_j ∈ first_in_exchange
+                if inv_j >1
+                    init_ind = sum(lengths[1:inv_j-1])
+                else
+                    init_ind = 0;
+                end
+                # Loop over all products in demand function
+                for j_loop = 1:J
+                    other_orders = setdiff(collect(1:J), j_loop)
+                    orders = order_vec[j_loop];
+                    for i ∈ eachindex(orders[:,1])
+                        rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,inv_j] .== orders[i,inv_j]+1));
+                        rows = getindex.(rows, 1);
+                        try
+                            rows = rows[1];
+                            Aineq = add_constraint(Aineq, i + init_ind, rows + init_ind);
+                        catch
+                        end
+                    end
+                end
+            end
+        else
+            print(":all_substitutes only implemented for models under exchangeability")
     #         for inv_j ∈ collect(1:J)
     #             if inv_j >1
     #                 init_ind = sum(lengths[1:inv_j-1])
@@ -119,17 +123,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     #                 end
     #             end
     #         end
-    #     end
-    end
-
-    if :substitutes_within_group ∈ constraints
-       if :all_substitutes ∈ constraints
-            println(":all_substitutes and :substitutes_within_group both in constraint vector, ignoring the latter...")
-       else
-            # Make increasing in all in-group shares
-
-            # Then calculate matrices for derivative of demand constraints
-       end
+        end
     end
 
     # diagonal dominance 

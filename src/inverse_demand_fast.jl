@@ -1,24 +1,9 @@
 using ForwardDiff, Statistics, Plots
 using LinearAlgebra, Statistics, Optim, DataFrames, LineSearches, Combinatorics
 using Primes
-include("simulate_logit.jl")
-include("toDataFrame.jl")
-include("b.jl")
-include("bern.jl")
-include("db.jl")
-include("dbern.jl")
-include("prep_matrices.jl")
-include("objective_functions.jl")
-include("prep_inner_matrices.jl")
-include("make_interactions.jl")
-include("make_constraint.jl")
-include("define_problem.jl")
-include("add_constraint.jl")
-include("inner_elasticity.jl")
-include("price_elasticity2.jl")
-include("estimate.jl")
 
-J = 4; # of products
+
+J = 3; # of products
 T = 5000; # # of markets
 beta = -1; # price coefficient
 sdxi = 0.25; # standard deviation of xi
@@ -42,7 +27,7 @@ npd_problem = define_problem(df;
 show(npd_problem)
 
 estimate!(npd_problem)
-elast_prod1, avg, svec, all_own = price_elasticity2(npd_problem, df; whichProducts=[1,1]);
+elast_prod1, avg, svec, all_own = price_elasticity(npd_problem, df; whichProducts=[1,1]);
 true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
 
 scatter(true_elast_prod1, elast_prod1, alpha = 0.3, ylims = (-4,1), 

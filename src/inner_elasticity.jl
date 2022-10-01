@@ -1,4 +1,4 @@
-function elast_penalty(exchange, elast_mats; elast_prices)
+function elast_penalty(θ, exchange, elast_mats, elast_prices, lambda)
     at = elast_prices;
 
     # Check inputs
@@ -13,27 +13,27 @@ function elast_penalty(exchange, elast_mats; elast_prices)
     J = size(s,2);
     
     # Share Jacobian
-    dsids = zeros(J,J,size(index,1)) # initialize matrix of ∂s^{-1}/∂s
+    dsids = zeros(eltype(θ),J,J,size(elast_mats[1,1],1)) # initialize matrix of ∂s^{-1}/∂s
     for j1 = 1:J
         for j2 = 1:J
             if j1 ==1 
                 init_ind=0;
             else
-                init_ind = sum(size.(X[1:j1-1],2))
+                init_ind = sum(size.(elast_mats[1:j1-1,1],2))
             end
-            θ_j1 = θ[init_ind+1:init_ind+size(X[j1],2)];
-            dsids[j1,j2,:] = tempmat_s[j1,j2] * θ_j1;
+            θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1],2)];
+            dsids[j1,j2,:] = elast_mats[j1,j2] * θ_j1;
         end
     end
     
     Jmat = [];
-    J_sp = zeros(size(svec[:,1]));
-    all_own = zeros(size(svec,1),J);
+    J_sp = zeros(eltype(θ),size(svec[:,1]));
+    all_own = zeros(eltype(θ),size(svec,1),J);
     svec2 = copy(svec);
     jacobian_vec = [];
 
     for ii = 1:length(dsids[1,1,:])
-        J_s = zeros(J,J);
+        J_s = zeros(eltype(θ),J,J);
         for j1 = 1:J
             for j2 = 1:J
                 J_s[j1,j2] = dsids[j1,j2,ii]
@@ -43,15 +43,29 @@ function elast_penalty(exchange, elast_mats; elast_prices)
         push!(Jmat, temp)
     
         # Market vector of prices/shares
-        ps = at[ii,:]./svec2[ii,:];
-        ps_mat = repeat(at[ii,:]', J,1) ./ repeat(svec2[ii,:], 1,J) ;
-        push!(jacobian_vec, temp .* ps_mat);
+        # ps = at[ii,:]./svec2[ii,:];
+        # ps_mat = repeat(at[ii,:]', J,1) ./ repeat(svec2[ii,:], 1,J) ;
+        push!(jacobian_vec, temp ); #.* ps_mat
     end
     
     # Convert jacobian_vec to Penalty
         # Have to calculate sign matrix from exchange
+    conmat = zeros(eltype(θ),J,J);
+    for j1 = 1:J
+        ej = getindex.(findall(j1 .∈ exchange),1)[1];
+        for j2 = 1:J
+            if (j2==j1) | (j2 ∉ exchange[ej])
+                conmat[j1,j2] = -Inf;
+            end                
+        end
+    end
 
-    return 
+    penalty = 0;
+    for i ∈ eachindex(jacobian_vec)
+        penalty += sum((jacobian_vec[i] .< conmat) .* abs.(jacobian_vec[i]).^2 .* lambda);
+    end
+
+    return penalty
 end
 
 function subset_for_elast_const(npd_problem, df::DataFrame; grid_size=2)
@@ -128,5 +142,6 @@ function make_elasticity_mat(npd_problem, df::DataFrame)
         end
     end
     elast_mats = reshape(elast_mats, J,J);
-    return elast_mats
+    elast_prices = Matrix(df[!,r"prices"]);
+    return elast_mats, elast_prices 
 end

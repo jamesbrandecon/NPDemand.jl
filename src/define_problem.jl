@@ -1,4 +1,23 @@
-function define_problem(df::DataFrame; exchange = exchange, index_vars = ["prices"], FE = [], constraints = [], bO = 2, tol = 1e-5)
+"""
+    define_problem(df::DataFrame; exchange = [], index_vars = ["prices"], FE = [], constraints = [], bO = 2, tol = 1e-5)
+
+Constructs a `problem`::NPDProblem using the provided problem characteristics. Inputs: 
+
+- `exchange`::Vector{Matrix{Int64}}: A vector of groups of products which are exchangeable. E.g., with 4 goods, if the first
+and second are exchangeable and so are the third and fourth, set `exchange` = [[1 2], [3 4]].
+- `index_vars`: String array listing column names in `df` which represent variables that enter the inverted index.
+- `FE`: String array listing column names in `df` which should be included as fixed effects.
+- `tol`: Tolerance specifying tightness of constraints
+    - Note: All fixed effects are estimated as parameters by the minimizer, so be careful adding fixed effects for variables that take 
+    many values.
+- `constraints`: A list of symbols of accepted constraints. Currently supported constraints are: 
+    - :monotone  
+    - :all_substitutes 
+    - :diagonal\\_dominance\\_group 
+    - :diagonal\\_dominance\\_all 
+    - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
+"""
+function define_problem(df::DataFrame; exchange::Vector{Matrix{Int64}} = [], index_vars = ["prices"], FE = [], constraints = [], bO = 2, tol = 1e-5)
     if index_vars[1]!="prices"
         error("Variable index_vars must be a Vector, and `prices` must be the first element")
     end
@@ -56,7 +75,7 @@ function define_problem(df::DataFrame; exchange = exchange, index_vars = ["price
     if :subs_in_group ∈ constraints
         println("Preparing inputs for nonlinear constraints....")
         subset = subset_for_elast_const(problem, df; grid_size=2);
-        elast_mats, elast_prices = make_elasticity_mat(problem, df::DataFrame);
+        elast_mats, elast_prices = make_elasticity_mat(problem, subset);
         problem.elast_mats = elast_mats;
         problem.elast_prices = elast_prices;
     end

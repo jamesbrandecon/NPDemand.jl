@@ -1,7 +1,7 @@
 ultra = true
 function md_obj(β::Vector; X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
-    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, lambda1=0, elast_mats=[])
+    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, lambda1=0, elast_mats=[], elast_prices = [])
 
     # Initialize objective function
     obj = zero(eltype(β));
@@ -51,8 +51,8 @@ function md_obj(β::Vector; X = [], B = [], A = [],
     end
 
     # Nonlinear constraints
-    if elast_mats != []
-        obj += elast_penalty(θ, exchange, elast_mats, lambda1);
+    if (elast_mats != []) & (lambda1!=0)
+        obj += elast_penalty(θ, exchange, elast_mats, elast_prices, lambda1);
     end
 
     obj
@@ -60,7 +60,7 @@ end
 
 function md_grad!(grad::Vector, β::Vector; X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
-    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, lambda1=0, elast_mats = [])
+    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, lambda1=0, elast_mats=[], elast_prices = [])
 
     grad0 = zeros(eltype(β), size(β));
     ineq_con = zeros(eltype(β), size(Aineq,1));
@@ -133,8 +133,8 @@ function md_grad!(grad::Vector, β::Vector; X = [], B = [], A = [],
     end
     
     # Nonlinear constraints
-    if elast_mats != []
-        grad0[1:length(θ)] += ForwardDiff.gradient(elast_penalty(θ, exchange, elast_mats, lambda1));
+    if (elast_mats != []) & (lambda1!=0)
+        grad0[1:length(θ)] += ForwardDiff.gradient(x -> elast_penalty(x, exchange, elast_mats, elast_prices, lambda1), θ);
     end
 
     try 

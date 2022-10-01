@@ -1,3 +1,8 @@
+"""
+    simulate_logit(J,T, beta, v)
+
+Simulates logit demand for `J` products in `T` markets, with price preference parameter `beta` and market shocks with standard deviation `v`.
+"""
 function simulate_logit(J,T, beta, v)
 # --------------------------------------------------%
 # Simulate logit with outside option
