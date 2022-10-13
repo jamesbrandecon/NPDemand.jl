@@ -18,7 +18,7 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
     - :diagonal\\_dominance\\_all 
     - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
 """
-function define_problem(df::DataFrame; exchange::Vector{Matrix{Int64}} = [], index_vars = ["prices"], FE = [], 
+function define_problem(df::DataFrame; exchange::Vector{Array{Int64,T}} where T = [], index_vars = ["prices"], FE = [], 
     constraints = [], bO = 2, obj_tol = 1e-5, constraint_tol = 1e-5, normalization=[])
     if index_vars[1]!="prices"
         error("Variable index_vars must be a Vector, and `prices` must be the first element")
@@ -77,6 +77,7 @@ function define_problem(df::DataFrame; exchange::Vector{Matrix{Int64}} = [], ind
                         Aeq,
                         mins,
                         maxs, 
+                        FE,
                         normalization,
                         exchange,
                         design_width,
@@ -110,7 +111,8 @@ mutable struct NPDProblem
     Aineq 
     Aeq 
     mins 
-    maxs 
+    maxs
+    FE 
     normalization
     exchange 
     design_width 
@@ -160,11 +162,14 @@ function Base.show(io::IO, problem::NPDProblem)
     bO = problem.bO;
     index_vars = problem.index_vars;
     exchange = problem.exchange;
-
+    FE = problem.FE;
+    
     println(io, "NPD Problem:")
     println(io, "- Number of choices: $(J)")
     println(io, "- Exchangeable groups of choices: $exchange")
     println(io, "- Constraints: $constraints")
+    println(io, "- Fixed Effects: $FE")
     println(io, "- Index Variables: $index_vars")
     println(io, "- Bernstein polynomials of order: $bO")
+
 end

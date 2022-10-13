@@ -22,13 +22,13 @@ There are three important functions included here so far: `define_problem`, `est
     - `obj_tol`: Tolerance specifying the value of `g_abstol` within `Optim.Options` during optimization.
     - `constraint_tol`: Tolerance specifying tightness of constraints
     - `constraints`: A list of symbols of accepted constraints. Currently supported constraints are: 
-        - :monotone  
-        - :all_substitutes 
-        - :diagonal_dominance_group 
-        - :diagonal_dominance_all 
-        - :subs_in_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
+        - :monotone: Demand is increasing in the index. 
+        - :all_substitutes: All products are substitutes.
+        - :diagonal_dominance_group: Diagonal dominance (see Compiani, 2022) within exchangeable groups. 
+        - :diagonal_dominance_all: Diagonal dominance across all products.
+        - :subs_in_group: All products within exchangeable groupings are substitutes.(**Note**: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
 - `estimate!(problem::NPDProblem; max_iterations=10000)`: solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector. `max_iterations` is passed into Optim.Options for every optimization step.  
-- `update_constraints(problem::NPDProblem, new_constraints::Vector{Symbol})`: 
+- `update_constraints(problem::NPDProblem, new_constraints::Vector{Symbol})`: Replaces the constraints in `problem` with `new_constraints`. Because of the way `:exchangeability` is enforced, this function cannot be used to change the structure of exchangeable groupings. 
 - `price_elasticity(problem::NPDProblem, df::DataFrame; at::Matrix, whichProducts = [1,1])`: Takes the solved `problem` as first argument, a `DataFrame` as the second argument, and evaluates price elasticities in-sample at prices `at`. Currently does not calculate out-of-sample price elasticities, though this will be added in the future. Returns four results, in order: 
     - (1) a vector of elasticities of demand for product `whichProducts[1]` with respect to `whichProducts[2]`
     - (2) the average of the price elasticity matrix across all markets
