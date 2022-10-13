@@ -18,6 +18,8 @@ function prep_inner_matrices(bigX, bigA, bigB)
     WB = [];
     W = []; X = []; B = [];
     DWD = [];
+    J = length(bigX);
+
     for j = 1:J
         A = bigA[1];
         # println("loaded X, A, B")

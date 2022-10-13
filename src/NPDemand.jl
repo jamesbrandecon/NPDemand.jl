@@ -33,7 +33,7 @@ include("estimate.jl")
 
 include("solve_s_nested_flexible.jl")
 
-export estimate!, show, price_elasticity, toDataFrame, simulate_logit
+export estimate!,define_problem, show, price_elasticity, toDataFrame, simulate_logit, update_constraints!
 export bern, dbern
 
 end

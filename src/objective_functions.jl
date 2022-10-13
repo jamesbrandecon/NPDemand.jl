@@ -1,7 +1,10 @@
 ultra = true
 function md_obj(β::Vector; X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
-    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, lambda1=0, elast_mats=[], elast_prices = [])
+    Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], 
+    price_index = 1, lambda1=0, elast_mats=[], elast_prices = [])
+
+    J = length(X);
 
     # Initialize objective function
     obj = zero(eltype(β));
@@ -68,6 +71,8 @@ function md_grad!(grad::Vector, β::Vector; X = [], B = [], A = [],
     y = zeros(eltype(β), size(X[1],1));
     e = zeros(eltype(β), size(y));
 
+    J = length(X);
+    
     # Unpack: γ and θ
     θ = β[1:design_width]
     γ = β[length(θ)+1:end]

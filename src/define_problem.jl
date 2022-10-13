@@ -7,7 +7,8 @@ Constructs a `problem`::NPDProblem using the provided problem characteristics. I
 and second are exchangeable and so are the third and fourth, set `exchange` = [[1 2], [3 4]].
 - `index_vars`: String array listing column names in `df` which represent variables that enter the inverted index.
 - `FE`: String array listing column names in `df` which should be included as fixed effects.
-- `tol`: Tolerance specifying tightness of constraints
+- `constraint_tol`: Tolerance specifying tightness of constraints
+- `obj_tol`: Tolerance specifying g_abstol in Optim.Options()
     - Note: All fixed effects are estimated as parameters by the minimizer, so be careful adding fixed effects for variables that take 
     many values.
 - `constraints`: A list of symbols of accepted constraints. Currently supported constraints are: 
@@ -17,27 +18,40 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
     - :diagonal\\_dominance\\_all 
     - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
 """
-function define_problem(df::DataFrame; exchange::Vector{Matrix{Int64}} = [], index_vars = ["prices"], FE = [], constraints = [], bO = 2, tol = 1e-5)
+function define_problem(df::DataFrame; exchange::Vector{Matrix{Int64}} = [], index_vars = ["prices"], FE = [], 
+    constraints = [], bO = 2, obj_tol = 1e-5, constraint_tol = 1e-5, normalization=[])
     if index_vars[1]!="prices"
         error("Variable index_vars must be a Vector, and `prices` must be the first element")
     end
 
     # Reshape FEs into matrix of dummy variables
+    FEmat = [];
     if FE!=[]
+        FEvec = [];
+        FEmat = [];
         println("Reshaping fixed-effects into dummy variables....")
-        for f = 1:length(FE)
-            unique_vals = unique(df[!,f]);
-            for fi ∈ unique_vals
-                if (f==1) & (fi==unique_vals[1])
-                    FEmat = (df[!,f] .== fi)
-                else
-                    FEmat = hcat(FEmat, (df[!,f] .== fi))
+        for f ∈ FE
+            if f != "product"
+                unique_vals = unique(df[!,f]);
+                unique_vals = unique_vals[1:end-1]; # Drop one category per FE dimension
+                for fi ∈ unique_vals
+                    if (f==FE[1]) & (fi==unique_vals[1])
+                        FEmat = reshape((df[!,f] .== fi), size(df,1),1)
+                    else
+                        FEmat = hcat(FEmat, reshape((df[!,f] .== fi), size(df,1),1))
+                    end
                 end
             end
         end
     end
+
+    product_FEs = false;
+    if "product" ∈ FE
+        product_FEs = true;
+    end
+
     println("Making Bernstein polynomials....")
-    Xvec, Avec, Bvec, syms = prep_matrices(df, exchange, index_vars, bO);
+    Xvec, Avec, Bvec, syms = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO);
     
     if constraints !=[]
         println("Making linear constraint matrices....")
@@ -66,7 +80,8 @@ function define_problem(df::DataFrame; exchange::Vector{Matrix{Int64}} = [], ind
                         normalization,
                         exchange,
                         design_width,
-                        tol,
+                        obj_tol,
+                        constraint_tol,
                         bO,
                         [],
                         elast_mats,
@@ -84,7 +99,7 @@ function define_problem(df::DataFrame; exchange::Vector{Matrix{Int64}} = [], ind
 end
 
 mutable struct NPDProblem
-    data
+    data 
     matrices 
     Xvec 
     Bvec 
@@ -99,7 +114,8 @@ mutable struct NPDProblem
     normalization
     exchange 
     design_width 
-    tol 
+    obj_tol
+    constraint_tol 
     bO
     results
     elast_mats
@@ -107,32 +123,35 @@ mutable struct NPDProblem
 end
 
 import Base.+
-function +(problem::NPDProblem, new_constraint::Symbol)
-    println("Redefining problem with new constraint...")
-    if new_constraint != :exchangeability
-        new_problem = define_problem(problem.data; 
-                    exchange = problem.exchange, 
-                    index_vars = problem.index_vars, 
-                    constraints = hcat(problem.constraints, new_constraint), 
-                    bO = problem.bO, tol = problem.tol);
-    else
-        error("If adding :exchangeability, must provide vector of groupings")
-    end
-    return new_problem    
-end
+"""
+    update_constraints!(problem::NPDProblem, new_constraints::Vector{Symbol})
 
-function +(problem::NPDProblem, new_constraint::Symbol, exchange = [])
-    println("Redefining problem with new constraint...")
-    if new_constraint ==:exchangeability
-        new_problem = define_problem(problem.data; 
-                    exchange = exchange, 
-                    index_vars = problem.index_vars, 
-                    constraints = hcat(problem.constraints, new_constraint), 
-                    bO = problem.bO, tol = problem.tol);
+Re-calculates constraint matrices under `new_constraints`, ignoring previous constraints used to define the problem.
+"""
+function update_constraints!(problem::NPDProblem, new_constraints::Vector{Symbol})
+    case1  = ((:exchangeability ∈ new_constraints) & (:exchangeability ∉ problem.constraints));
+    case2 = ((:exchangeability ∉ new_constraints) & (:exchangeability ∈ problem.constraints));
+    if case1 | case2
+        error("Constraint :exchangeability should be included in updated problem (only) if in original problem.")
     else
-        error("If new constraint is not :exchangeability, do not provide vector of exchangeable groups")
+        println("Updating linear constraint matrices....")
+        Aineq, Aeq, maxs, mins = make_constraint(problem.data, new_constraints, 
+                                                        problem.exchange, problem.syms);
+
+        problem.Aineq = Aineq;
+        # problem.Aeq = Aeq; # don't update equality matrix because exchangeability unchanged
+        problem.maxs = maxs;
+        problem.mins = mins;
+
+        if :subs_in_group ∈ new_constraints
+            println("Preparing inputs for nonlinear constraints....")
+            subset = subset_for_elast_const(problem, problem.data; grid_size=2);
+            elast_mats, elast_prices = make_elasticity_mat(problem, subset);
+            problem.elast_mats = elast_mats;
+            problem.elast_prices = elast_prices;
+        end
+        problem.constraints = new_constraints;
     end
-    return new_problem    
 end
 
 function Base.show(io::IO, problem::NPDProblem)

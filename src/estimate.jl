@@ -3,7 +3,7 @@
 
 `estimate!` solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector
 """
-function estimate!(problem::NPDProblem)
+function estimate!(problem::NPDProblem; max_iterations = 10000)
     # Unpack problem 
     matrices = problem.matrices;
     Xvec = problem.Xvec;
@@ -17,7 +17,8 @@ function estimate!(problem::NPDProblem)
     design_width = problem.design_width;
     elast_mats = problem.elast_mats; 
     elast_prices = problem.elast_prices;
-    tol = problem.tol;
+    constraint_tol = problem.constraint_tol;
+    obj_tol = problem.obj_tol;
 
 obj_func(β::Vector, lambda::Int) = md_obj(β;X = Xvec, B = Bvec, A = Avec,
         m1=matrices.m1, 
@@ -33,7 +34,8 @@ obj_func(β::Vector, lambda::Int) = md_obj(β;X = Xvec, B = Bvec, A = Avec,
         WX = matrices.WX, 
         WB = matrices.WB,
         Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
-        mins = mins, maxs = maxs, normalization = normalization, price_index = 1, lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices);
+        mins = mins, maxs = maxs, normalization = normalization, price_index = 1, 
+        lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices);
 
 grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec, B = Bvec, A = Avec,
         m1=matrices.m1, 
@@ -49,7 +51,8 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
         WX = matrices.WX, 
         WB = matrices.WB,
         Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
-        mins = mins, maxs = maxs, normalization = normalization, price_index = 1, lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices);
+        mins = mins, maxs = maxs, normalization = normalization, price_index = 1, 
+        lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices);
 
     # Estimation 
     β_length = design_width + sum(size(Bvec[1],2))
@@ -61,11 +64,11 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
     if isempty(Aineq) & (:subs_in_group ∉ problem.constraints);
         println("Problem only has equality constraints. Solving...")
         results =  Optim.optimize(obj_uncon, grad_uncon!, β_init,
-        LBFGS(), Optim.Options(show_trace = true, iterations = 10000));
+        LBFGS(), Optim.Options(show_trace = false, iterations = max_iterations));
     else
         println("Solving problem without inequality constraints....")
         results =  Optim.optimize(obj_uncon, grad_uncon!, β_init,
-        LBFGS(), Optim.Options(show_trace = false, iterations = 10000));
+        LBFGS(), Optim.Options(show_trace = false, iterations = max_iterations));
         L = 1;
         θ = results.minimizer[1:design_width];
         iter = 0;
@@ -73,10 +76,10 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
         println("Iteratively increasing penalties on inequality constraints....")
         penalty_violated = true
         if !isempty(Aineq)
-            penalty_violated = (maximum(Aineq * θ) > tol);
+            penalty_violated = (maximum(Aineq * θ) > constraint_tol);
         end
         if elast_mats!=[]
-            penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L) >tol);
+            penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L) >constraint_tol);
         end
         while penalty_violated
             println("Iteration $(iter)...")
@@ -85,10 +88,10 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
             grad!(G::Vector,x::Vector) = grad_func!(G,x,L);
             if iter ==1
                 results =  Optim.optimize(obj, grad!, results.minimizer,
-                    LBFGS(), Optim.Options(show_trace = true, iterations = 10000));
+                    LBFGS(), Optim.Options(show_trace = false, iterations = max_iterations, g_abstol = obj_tol));
             else
                 results =  Optim.optimize(obj, grad!, results.minimizer,
-                    LBFGS(), Optim.Options(show_trace = true, iterations = 10000));
+                    LBFGS(), Optim.Options(show_trace = false, iterations = max_iterations, g_abstol = obj_tol));
             end
 
             β = results.minimizer
@@ -103,10 +106,10 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
             end
 
             if !isempty(Aineq)
-                penalty_violated = (maximum(Aineq * θ) > tol);
+                penalty_violated = (maximum(Aineq * θ) > constraint_tol);
             end
             if elast_mats!=[]
-                penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L) > tol);
+                penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L) > constraint_tol);
             end
 
             iter+=1;

@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.com/jamesbrandecon/NPDemand.jl.svg?branch=master)](https://travis-ci.com/jamesbrandecon/NPDemand.jl)
 
-This package has been significantly re-designed. I have removed the functionality for variable/model selection, but have significantly increased the performance of the model and improved the simplicity of use. 
+This package has been significantly re-designed. I have removed the functionality for variable/model selection, but have significantly increased the performance of the package and improved the simplicity of use. 
 
 Please let me know if you have any suggestions for the package.
 
@@ -12,23 +12,23 @@ The package is not registered. To install, use
 pkg> add https://github.com/jamesbrandecon/NPDemand.jl
 ```
 
-## Usage
-There are three important functions included here so far: `define_problem`, `estimate!`, and `price_elasticity`:
-- `define_problem(df::DataFrame; exchange = [], index_vars = ["prices"], FE = [], constraints = [], bO = 2, tol = 1e-5)`: Constructs a `problem::NPDProblem` using the provided problem characteristics. Inputs: 
+## Main Functions
+There are three important functions included here so far: `define_problem`, `estimate!`, and `price_elasticity`:  
+- `define_problem(df::DataFrame; exchange = [], index_vars = ["prices"], FE = [], constraints = [], bO = 2, obj_tol = 1e-5, constraint_tol = 1e-5)`: Constructs a `problem::NPDProblem` using the provided problem characteristics. Inputs: 
     - `exchange`::Vector{Matrix{Int64}}: A vector of groups of products which are exchangeable. E.g., with 4 goods, if the first
     and second are exchangeable and so are the third and fourth, set `exchange` = [[1 2], [3 4]].
     - `index_vars`: String array listing column names in `df` which represent variables that enter the inverted index.
     - `FE`: String array listing column names in `df` which should be included as fixed effects.
-    - `tol`: Tolerance specifying tightness of constraints
-        - Note: All fixed effects are estimated as parameters by the minimizer, so be careful adding fixed effects for variables that take 
-        many values.
+    - `obj_tol`: Tolerance specifying the value of `g_abstol` within `Optim.Options` during optimization.
+    - `constraint_tol`: Tolerance specifying tightness of constraints
     - `constraints`: A list of symbols of accepted constraints. Currently supported constraints are: 
         - :monotone  
         - :all_substitutes 
-        - :diagonal\\_dominance\\_group 
-        - :diagonal\\_dominance\\_all 
-        - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
-- `estimate!(problem::NPDProblem)`: `estimate!` solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector.
+        - :diagonal_dominance_group 
+        - :diagonal_dominance_all 
+        - :subs_in_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
+- `estimate!(problem::NPDProblem; max_iterations=10000)`: solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector. `max_iterations` is passed into Optim.Options for every optimization step.  
+- `update_constraints(problem::NPDProblem, new_constraints::Vector{Symbol})`: 
 - `price_elasticity(problem::NPDProblem, df::DataFrame; at::Matrix, whichProducts = [1,1])`: Takes the solved `problem` as first argument, a `DataFrame` as the second argument, and evaluates price elasticities in-sample at prices `at`. Currently does not calculate out-of-sample price elasticities, though this will be added in the future. Returns four results, in order: 
     - (1) a vector of elasticities of demand for product `whichProducts[1]` with respect to `whichProducts[2]`
     - (2) the average of the price elasticity matrix across all markets
@@ -41,39 +41,44 @@ Two helpful additional functions are `simulate_logit` and `toDataFrame`, which a
 ## Example of constructing a problem and estimating price elasticities
 As described above, begin with a DataFrame which takes the following form (with three products in this example):
 ```jl
-julia> first(df, 5)
-5×12 DataFrame
- Row │ shares0    prices0  demand_instruments0  x0         shares1    prices1   demand_instruments1  x1         shares2   prices2    demand_instruments2  x2       
-     │ Float64    Float64  Float64              Float64    Float64    Float64   Float64              Float64    Float64   Float64    Float64              Float64  
-─────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-   1 │ 0.182075   1.02347             0.414823  0.183303   0.0828074  1.63728              0.832006  0.206252   0.358987  0.0313327            0.0682992  0.214006
-   2 │ 0.316593   1.23523             0.439179  0.88636    0.178557   1.89351              0.835049  0.980622   0.130365  1.70814              0.69188    0.452745
-   3 │ 0.270514   1.11647             0.414269  0.465882   0.126923   1.94381              0.87404   0.496037   0.137069  1.98788              0.908658   0.672715
-   4 │ 0.115936   1.27626             0.725582  0.620084   0.225512   0.566409             0.168862  0.123414   0.344237  0.698677             0.106712   0.450302
-   5 │ 0.0588137  2.38134             0.90554   0.0705893  0.176393   0.393806             0.31332   0.0280815  0.405084  0.429503             0.297496   0.907807
+julia> df
+2000×16 DataFrame
+  Row │ shares0    prices0   x0        share_iv0  price_iv0  shares1   prices1    x1        share_iv1  price_iv1  shares2    prices2   x2 ⋯
+      │ Float64    Float64   Float64   Float64    Float64    Float64   Float64    Float64   Float64    Float64    Float64    Float64   Fl ⋯
+──────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    1 │ 0.328229   0.66807   0.416167   0.416167  0.0717971  0.14538    1.89975   0.903872   0.903872  0.7109     0.236292   0.458123  0. ⋯
+    2 │ 0.0994119  1.50148   0.367425   0.367425  0.899897   0.25597    1.48679   0.8222     0.8222    0.636302   0.208002   0.834816  0.
+    3 │ 0.131559   1.60465   0.323835   0.323835  0.596641   0.320453   1.35984   0.84993    0.84993   0.429504   0.175882   0.87676   0.
+  ⋮   │     ⋮         ⋮         ⋮          ⋮          ⋮         ⋮          ⋮         ⋮          ⋮          ⋮          ⋮         ⋮         ⋱
+ 1998 │ 0.252616   0.315564  0.456881   0.456881  0.319923   0.33775    0.65299   0.493729   0.493729  0.212751   0.0719814  1.96853   0.
+ 1999 │ 0.193392   1.51716   0.928404   0.928404  0.664692   0.428216  -0.120323  0.501273   0.501273  0.0640289  0.0655636  1.52594   0. ⋯
+ 2000 │ 0.373363   0.476147  0.850132   0.850132  0.398496   0.177178   1.27511   0.374716   0.374716  0.533122   0.0835981  1.69474   0.
+                                                                                                            4 columns and 1994 rows omitted
 ```
 Then, we can define a `problem`. In this package, a `problem` is constructed by combining data (in `df`) and constraints. A problem can be constructed simply using `define_problem`:
 ```jl
 bO = 2; 
 exchange = [[1 2 3]] # All products are exchangeable
-index_vars = ["prices", "x"]
-normalization = [];
-tol = 1e-5
+index_vars = ["prices", "x"] # endogenous prices and exogenous x enter the index
 
-constraints = [:exchangeability, :subs_in_group]; # Impose exchangeability and 
+constraints = [:exchangeability, :monotone]; # Impose exchangeability and that demand for each product is increasing in the index (decreasing in price)
 npd_problem = define_problem(df; 
                             exchange = exchange, 
                             index_vars = index_vars, 
                             constraints = constraints,
-                            bO = bO,
-                            tol = tol);
+                            bO = bO);
 show(npd_problem)
 ```
-Note that, for now, I do not include the raw data `df` in the `problem`. I may change this at some point, but for now this reduces the size of a problem and makes is easier to save and re-load problems later. We can then estimate the problem and calculate in-sample price elasticities with two lines. 
+We can then estimate the problem and calculate in-sample price elasticities with two lines. 
 ```jl
 estimate!(problem)
-elasticities, average_elast_mat, shares, all_own_elasts = price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whichProducts = [1,1]);
+elasticities, average_elast_mat, shares, all_own_elasts = price_elasticity(npd_problem, df; whichProducts = [1,1]);
 ```
 
+## Fixed Effects
+Fixed effects are estimated as parameters, not absorbed from the data. So, be careful including fixed effects with too many values, as this may both slow down the optimization and require more memory.
+
+To include fixed effects (categorical variables), use the option `FE` to provide a vector of strings, where each element of the vector is a name of a column in the provided data `df`. Note however that at present, variables that are included as fixed effect must be constant across products within a market. The only exception to this rule is `"product"` which is a keyword which will produce product fixed-effects. There need not be a column named `product` in the data, and in fact the code will ignore it if it's there. 
+
 ## To-do
-- Optional LoopVectorization.jl speed-ups
+- Optional LoopVectorization.jl (or similar) speed-ups

@@ -1,9 +1,10 @@
-function prep_matrices(df::DataFrame, exchange, index_vars, bO)
+function prep_matrices(df::DataFrame, exchange, index_vars, FEmat, product_FEs, bO)
 
 # Unpack DataFrame df
 s = Matrix(df[:, r"shares"]);
 pt = Matrix(df[:, r"prices"]);
-zt = Matrix(df[:, r"demand_instruments"]);
+# zt = Matrix(df[:, r"demand_instruments"]);
+zt = Matrix(df[:, r"share_iv"]);
 
 J = size(s,2);
 
@@ -32,15 +33,23 @@ for j = 0:J-1
         end
     end
     index_j[:,1] = -1 .* index_j[:,1];
-    push!(B, index_j)
-end
-
-FEmat = []
-if FEmat !=[]
-    for j = 0:J-1
-        B[j] = hcat(B[j], FEmat); # assumes we're already normalizing
-        push!(B, index_j)
+    
+    # Append vector of FE dummies
+    if FEmat!=[]
+        index_j = hcat(index_j, FEmat);
     end
+    # Append product IDs if specified by user -- treated differently here 
+    # because all other FEs must be constant across products
+    if product_FEs == true 
+        prodFE = zeros(size(index_j,1),J-1);
+        if j < J-1 # dropping last product's FE for location normalization
+            prodFE[:,j+1] .= 1;
+        end
+        index_j = hcat(index_j, prodFE);
+    end
+
+    # Append to larger array of index variables
+    push!(B, index_j)
 end
 
 Xvec = []
@@ -63,6 +72,7 @@ for xj = 1:J
         BERN_xj = [BERN_xj bern(perm_s[:,j], bO) ]
    end
    BERN_xj = BERN_xj[:,2:end]
+   
    # --------------------------------------------
    # Instruments
    A_xj = zeros(T,1)
@@ -81,6 +91,8 @@ for xj = 1:J
             A_xj = hcat(A_xj, df[!,"$(v)$(xj-1)"]);
         end
     end
+
+    A_xj = hcat(A_xj, df[!,"price_iv$(xj-1)"])
 
    println("Done with choice $(xj-1)")
    push!(Xvec, full_interaction)
