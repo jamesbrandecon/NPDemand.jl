@@ -43,7 +43,7 @@ npd_problem2 = deepcopy(npd_problem)
 update_constraints!(npd_problem2, [:exchangeability])
 
 estimate!(npd_problem2)
-elast_prod1, avg, shares, all_own = price_elasticity2(npd_problem2, df; whichProducts=[1,1]);
+elast_prod1, avg, shares, all_own = price_elasticity(npd_problem2, df; whichProducts=[1,1]);
 true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
 
 scatter(true_elast_prod1, elast_prod1, alpha = 0.3, ylims = (-4,1), 
