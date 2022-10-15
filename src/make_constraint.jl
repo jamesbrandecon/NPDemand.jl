@@ -1,6 +1,10 @@
 function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     J = length(combo_vec)
-    
+    try 
+        @assert J<20
+    catch
+        error("J>20 not yet supported - will break constraint ")
+    end
     # Find lengths of individual θ_j'ss
     lengths = []
     for j = 1:J
@@ -15,9 +19,14 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
         for i ∈ eachindex(sym_combos)
             inds = getindex.(collect.(findall("_", sym_combos[i])),1) .+1
             share_ind = getindex.(collect.(findall("_", sym_combos[i])),1) .-1
-            for j = 1:length(inds) 
-                share = parse.(Int,sym_combos[i][share_ind[j]]);
-                order = parse.(Int,sym_combos[i][inds[j]]);
+            for j2 = 1:J #1:length(inds) 
+                share = parse.(Int,sym_combos[i][share_ind[j2]]);
+                # if previous digit isn't "e", add 10
+                prev_digit = sym_combos[i][share_ind[j2]-1];
+                if prev_digit != 's' # if not s, then it will be a number
+                    share = share+10 
+                end
+                order = parse.(Int,sym_combos[i][inds[j2]]);
                 orders[i,share] = order;
             end
         end

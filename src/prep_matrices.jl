@@ -7,7 +7,11 @@ pt = Matrix(df[:, r"prices"]);
 zt = Matrix(df[:, r"share_iv"]);
 
 J = size(s,2);
-
+try 
+    @assert J<20
+catch
+    error("J>20 not yet supported - will break polynomial and constraint construction")
+end
 bernO = bO;
 order = bO;
 T = size(df,1);

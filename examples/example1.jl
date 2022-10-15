@@ -3,7 +3,7 @@ using NPDemand
 
 # Simulate data
 J = 4; # of products
-T = 500; # # of markets
+T = 5000; # # of markets
 beta = -1; # price coefficient
 sdxi = 0.25; # standard deviation of xi
 s, p, z, x, xi  = simulate_logit(J, T, beta, sdxi);
@@ -17,7 +17,7 @@ normalization = [];
 constraint_tol = 1e-5;
 obj_tol = 1e-5;
 
-constraints = [:exchangeability, :monotone, :diagonal_dominance_all, :all_substitutes];
+constraints = [:exchangeability, :monotone, :all_substitutes];
 npd_problem = define_problem(df; 
                             exchange = exchange, 
                             index_vars = index_vars, 
@@ -37,8 +37,7 @@ scatter(true_elast_prod1, elast_prod1, alpha = 0.3, ylims = (-4,1),
             legend = false, xlabel = "Truth", ylabel = "Estimate")
 plot!(true_elast_prod1, true_elast_prod1, linewidth = 2, linecolor = :black)
 
-
-# Make copy of problem and drop monotonicity constraint
+# Make copy of problem and drop all but exchangeability constraints
 npd_problem2 = deepcopy(npd_problem)
 update_constraints!(npd_problem2, [:exchangeability])
 

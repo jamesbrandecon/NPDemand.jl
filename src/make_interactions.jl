@@ -61,21 +61,6 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
     sym_vec = temp;
     
 
-    # Drop combinations that are combining two columns from the same polynomial
-    # bad_combo = []
-    # for j = 1:J
-    #     for i ∈ eachindex(combos) #(i,v) ∈ enumerate(combos)
-    #         v = combos[i];
-    #         temp_i = string.(sym_vec[v])
-    #         numj = sum(contains.(temp_i, "shares$j"))
-    #         if (numj > 1)
-    #             push!(bad_combo, v)
-    #         end
-    #     end
-    # end 
-    # combos = setdiff(combos, bad_combo)
-    # combos = combos[getindex.(size.(combos),1) .==J]
-
     # Apply remaining combos to symbolic vector
     sym_combos = []
     for i ∈ eachindex(combos)
@@ -111,118 +96,8 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
     #     end
     # end
 
-    # For each element of sym_combos
-    #     learn order of all shares
-    #     find element with same order of shares but with exchanged shares flipped
-    #     mark anything later than current element as a duplicate
-    # end
-    # then drop duplicates
-    # if J>2
-        # if exchange_vec!=[]
-        # # # orders = reduce(hcat, orders)';
-            # duplicates = zeros(size(combos,1))
-            # for exchange ∈ exchange_vec
-            #     for j1 ∈ exchange, j2 ∈ exchange
-            #         if (j1!=j2) & !(max(j1 ==this_j, j2 == this_j))
-            #             for i ∈ eachindex(sym_combos)
-            #                 other_orders = setdiff(1:J, [j1, j2])
-            #                 if (orders[i,j1] !=-1) & (orders[i,j2] !=-1)
-            #                     rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
-            #                             (orders[:,j1] .== orders[i,j2]) .& (orders[:,j2] .== orders[i,j1]));
-            #                     rows = getindex.(rows, 1);
-            #                     rows = rows[rows .> i];
-            #                     duplicates[rows] .=1
-            #                 end
-            #             end
-            #         end
-            #     end
-            # end
-
-        # skip_indices = zeros(size(orders,1));
-        # if exchange_vec!=[]
-            # duplicates = zeros(size(combos,1))
-            # group_not_this_j = setdiff(exchange, this_j);
-            # O = getindex.(orders, group_not_this_j');
-            # O = [O[i,:] for i ∈ 1:size(O,1)]
-            # for i ∈ eachindex(combos)
-            #     if skip_indices[i] == 0
-            #         for exchange ∈ exchange_vec
-            #             if this_j ∈ exchange
-            #                 P = permutations(orders[i,group_not_this_j]);
-            #                 rows = [findall([O[i]] ∈ P) for i ∈ size(O,1)]
-            #             end
-            #             try
-            #                 rows = getindex.(rows, 1);
-            #                 rows = rows[rows .> i];
-            #                 duplicates[rows] .= 1
-            #                 skip_indices[rows] .= 1;
-            #             catch
-            #             end
-            #         end
-            #     end
-            # end
-        # end
-
         # inds = []
-        # for exchange ∈ exchange_vec
-        #     # if (length(exchange) > 2) | ((this_j ∉ exchange) & length(exchange)>1)
-        #         in_group_not_j = setdiff(exchange, this_j);
-        #         perms_of_exchange = collect(permutations(in_group_not_j,2));
-        #         for ei ∈ eachindex(perms_of_exchange)
-        #             temp_perm = collect(1:J)
-        #             temp_perm[perms_of_exchange[ei][1]] = perms_of_exchange[ei][2];
-        #             temp_perm[perms_of_exchange[ei][2]] = perms_of_exchange[ei][1];
-        #             perms_of_exchange[ei] = temp_perm;
-        #         end
-        #         perms_of_exchange = unique(perms_of_exchange);
-        #         order_copy = copy(orders);
-        #         for i ∈ eachindex(combos)
-        #             temp = [];
-        #             for ei ∈ eachindex(perms_of_exchange)
-        #                 permuted_orders = order_copy[:, perms_of_exchange[ei]];
-        #                 inner_temp = getindex.(findall(minimum(permuted_orders .== order_copy[i,:]', dims=2)),1)
-        #                 inner_temp = inner_temp[inner_temp .> i]
-        #                 temp = union(temp, inner_temp);
-        #             end
-        #             @show i
-        #             push!(inds, [i,temp])
-        #         end
-        #     # end
-        # end
-        
-        # JMB use this
-        # inds = []
-        # for exchange ∈ exchange_vec
-        #     # if (length(exchange) > 2) | ((this_j ∉ exchange) & length(exchange)>1)
-        #         ex = setdiff(exchange, this_j)
-        #         not_in_group = setdiff(1:J, ex)' # "not in group" means own-shares and cross-shares that are not in ex group
-        #         orders_not_in_group = getindex.(orders, not_in_group)
-        #         orders_in_group = getindex.(orders, ex')
-        #         prod_order_in_group = prod(orders_in_group, dims=2)
-        #         own_order = getindex.(orders, this_j)
-        #         order_vec = reduce(hcat, orders)';
-                
-        #         @assert this_j ∉ ex
-                
-        #         for i ∈ eachindex(combos)
-        #             # Redundant columns will have identical orders for this_j and outside of exchangeable grouping but will have some permutation
-        #             # of orders outside of this exchangeable grouping
-        #             num_non_matching_in_group = sum(order_vec[:,ex] .!= order_vec[i,ex]', dims=2);
-        #             num_matching_not_in_group = sum(order_vec[:,setdiff(not_in_group, this_j)] .== order_vec[i,setdiff(not_in_group, this_j)'], dims=2);
-
-        #             temp = getindex.(findall((own_order .== own_order[i]) .&
-        #                     (num_non_matching_in_group .== 2) .&
-        #                     (num_matching_not_in_group .== length(setdiff(not_in_group, this_j))) .&
-        #                     (prod_order_in_group .== prod_order_in_group[i])),1)
-                    
-        #             temp = temp[temp .> i]
-        #             push!(inds, [i,temp])
-        #             @show i
-        #         end
-        #     # end
-        # end
-
-        inds = []
+        inds = Array{Array}(undef, maximum(size(combos)))
         for exchange ∈ exchange_vec
                 ex = setdiff(exchange, this_j)
                 not_in_group = setdiff(1:J, ex)' # "not in group" means own-shares and cross-shares that are not in ex group
@@ -233,19 +108,29 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
                 order_vec = reduce(hcat, orders)';
                 
                 @assert this_j ∉ ex
-                for i ∈ eachindex(combos)
-                    num_non_matching_in_group = sum(order_vec[:,ex] .!= order_vec[i,ex]', dims=2);
-                    num_matching_not_in_group = sum(order_vec[:,setdiff(not_in_group, this_j)] .== order_vec[i,setdiff(not_in_group, this_j)'], dims=2);
-                    temp = getindex.(findall((own_order .== own_order[i]) .&
+                if exchange == exchange_vec[1]
+                Threads.@threads for i ∈ eachindex(combos)
+                    # num_non_matching_in_group = sum(order_vec[:,ex] .!= order_vec[i,ex]', dims=2);
+                    # num_matching_not_in_group = sum(order_vec[:,setdiff(not_in_group, this_j)] .== order_vec[i,setdiff(not_in_group, this_j)'], dims=2);
+                        temp = getindex.(findall((own_order .== own_order[i]) .&
                             (prod_order_in_group .== prod_order_in_group[i])),1)
                     
-                    temp = temp[temp .> i]
-                    if exchange == exchange_vec[1]
-                        push!(inds, [i,temp])
-                    else
-                        inds[i][2] = intersect(inds[i][2], temp)
+                        temp = temp[temp .> i]
+                        # push!(inds, [i,temp])
+                        inds[i] = [i,temp]
                     end
+                else
+                    Threads.@threads for i ∈ eachindex(combos)
+                        # num_non_matching_in_group = sum(order_vec[:,ex] .!= order_vec[i,ex]', dims=2);
+                        # num_matching_not_in_group = sum(order_vec[:,setdiff(not_in_group, this_j)] .== order_vec[i,setdiff(not_in_group, this_j)'], dims=2);
+                            temp = getindex.(findall((own_order .== own_order[i]) .&
+                                (prod_order_in_group .== prod_order_in_group[i])),1)
+                        
+                            temp = temp[temp .> i]
+                            inds[i][2] = union(inds[i][2], temp)
+                        end
                 end
+                
         end
         duplicates = zeros(length(combos));
         full_interaction = [];
