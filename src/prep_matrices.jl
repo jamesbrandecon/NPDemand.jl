@@ -23,6 +23,9 @@ if maximum(zt)>1 #|| mininum(zt)<0
    throw("Error: Instruments are not normalized to be between 0 and 1 \n")
 end
 
+find_prices = findall(index_vars .== "prices");
+price_ind = find_prices[1];
+
 # --------------------------------------------
 # Prep for design matrix and constraints
 B = [] 
@@ -36,7 +39,8 @@ for j = 0:J-1
             index_j = hcat(index_j, df[!, "$(v)$(j)"]);
         end
     end
-    index_j[:,1] = -1 .* index_j[:,1];
+    
+    index_j[:,price_ind] = -1 .* index_j[:,price_ind];
     
     # Append vector of FE dummies
     if FEmat!=[]

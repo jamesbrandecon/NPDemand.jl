@@ -20,7 +20,10 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
 """
 function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["prices"], FE = [], 
     constraints = [], bO = 2, obj_tol = 1e-5, constraint_tol = 1e-5, normalization=[])
-    if index_vars[1]!="prices"
+    
+    find_prices = findall(index_vars .== "prices")[1];
+
+    if (find_prices !=1 ) | !(typeof(index_vars)<:Vector) #index_vars[1] !="prices"
         error("Variable index_vars must be a Vector, and `prices` must be the first element")
     end
 

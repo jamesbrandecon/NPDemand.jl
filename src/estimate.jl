@@ -20,6 +20,9 @@ function estimate!(problem::NPDProblem; max_iterations = 10000)
     constraint_tol = problem.constraint_tol;
     obj_tol = problem.obj_tol;
 
+    find_prices = findall(problem.index_vars .== "prices");
+    price_index = find_prices[1];
+
 obj_func(β::Vector, lambda::Int) = md_obj(β;X = Xvec, B = Bvec, A = Avec,
         m1=matrices.m1, 
         m2=matrices.m2, 
@@ -34,7 +37,7 @@ obj_func(β::Vector, lambda::Int) = md_obj(β;X = Xvec, B = Bvec, A = Avec,
         WX = matrices.WX, 
         WB = matrices.WB,
         Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
-        mins = mins, maxs = maxs, normalization = normalization, price_index = 1, 
+        mins = mins, maxs = maxs, normalization = normalization, price_index = price_index, 
         lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices);
 
 grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec, B = Bvec, A = Avec,
@@ -51,7 +54,7 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
         WX = matrices.WX, 
         WB = matrices.WB,
         Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
-        mins = mins, maxs = maxs, normalization = normalization, price_index = 1, 
+        mins = mins, maxs = maxs, normalization = normalization, price_index = price_index, 
         lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices);
 
     # Estimation 

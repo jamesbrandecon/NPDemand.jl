@@ -28,7 +28,7 @@ npd_problem = define_problem(df;
 show(npd_problem)
 
 # Estimate problem and plot comparison of estimated and true own-price elasticities
-estimate!(npd_problem, max_iterations = 20000)
+estimate!(npd_problem, max_iterations = 5000)
 elast_prod1, avg, shares, all_own = price_elasticity(npd_problem, df; whichProducts=[1,1]);
 true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
 
