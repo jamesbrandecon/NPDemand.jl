@@ -85,10 +85,8 @@ for xj = 1:J
        A_xj = [A_xj bern(ztemp[:,zj], IVbernO)]
    end
     A_xj = A_xj[:, 2:end]
-
     A_xj, sym_combos, combos = make_interactions(A_xj, exchange, bO, xj, perm);
     full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, bO, first_product_in_group, perm);
-
     for k ∈ eachindex(index_vars) 
         v = index_vars[k];
         if v!= "prices"

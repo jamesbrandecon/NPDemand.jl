@@ -18,7 +18,7 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
     - :diagonal\\_dominance\\_all 
     - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
 """
-function define_problem(df::DataFrame; exchange::Vector{Array{Int64,T}} where T = [], index_vars = ["prices"], FE = [], 
+function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["prices"], FE = [], 
     constraints = [], bO = 2, obj_tol = 1e-5, constraint_tol = 1e-5, normalization=[])
     if index_vars[1]!="prices"
         error("Variable index_vars must be a Vector, and `prices` must be the first element")
@@ -53,6 +53,7 @@ function define_problem(df::DataFrame; exchange::Vector{Array{Int64,T}} where T 
     println("Making Bernstein polynomials....")
     Xvec, Avec, Bvec, syms = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO);
     
+    # @show size(syms)
     if constraints !=[]
         println("Making linear constraint matrices....")
         Aineq, Aeq, maxs, mins = make_constraint(df, constraints, exchange, syms);

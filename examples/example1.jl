@@ -11,9 +11,8 @@ df = toDataFrame(s,p,z,x);
 
 # Specify estimation/model parameters
 bO = 2; 
-exchange = [[1 2 3 4]]
+exchange = [[1 2], [3], [4]]
 index_vars = ["prices", "x"]
-normalization = [];
 constraint_tol = 1e-5;
 obj_tol = 1e-5;
 
@@ -29,7 +28,7 @@ npd_problem = define_problem(df;
 show(npd_problem)
 
 # Estimate problem and plot comparison of estimated and true own-price elasticities
-estimate!(npd_problem, max_iterations = 10000)
+estimate!(npd_problem, max_iterations = 20000)
 elast_prod1, avg, shares, all_own = price_elasticity(npd_problem, df; whichProducts=[1,1]);
 true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
 

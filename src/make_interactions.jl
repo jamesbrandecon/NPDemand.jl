@@ -95,7 +95,6 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
     #         end
     #     end
     # end
-
         # inds = []
         inds = Array{Array}(undef, maximum(size(combos)))
         for exchange ∈ exchange_vec
@@ -108,28 +107,28 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
                 order_vec = reduce(hcat, orders)';
                 
                 @assert this_j ∉ ex
+                # l = Threads.SpinLock()
                 if exchange == exchange_vec[1]
-                Threads.@threads for i ∈ eachindex(combos)
-                    # num_non_matching_in_group = sum(order_vec[:,ex] .!= order_vec[i,ex]', dims=2);
-                    # num_matching_not_in_group = sum(order_vec[:,setdiff(not_in_group, this_j)] .== order_vec[i,setdiff(not_in_group, this_j)'], dims=2);
-                        temp = getindex.(findall((own_order .== own_order[i]) .&
+                    Threads.@threads for i ∈ eachindex(combos)
+                        combotemp = getindex.(findall((own_order .== own_order[i]) .&
                             (prod_order_in_group .== prod_order_in_group[i])),1)
-                    
-                        temp = temp[temp .> i]
-                        # push!(inds, [i,temp])
-                        inds[i] = [i,temp]
+                        
+                        combotemp = combotemp[combotemp .> i]
+                        inds[i] = [i,combotemp]
                     end
                 else
-                    Threads.@threads for i ∈ eachindex(combos)
-                        # num_non_matching_in_group = sum(order_vec[:,ex] .!= order_vec[i,ex]', dims=2);
-                        # num_matching_not_in_group = sum(order_vec[:,setdiff(not_in_group, this_j)] .== order_vec[i,setdiff(not_in_group, this_j)'], dims=2);
-                            temp = getindex.(findall((own_order .== own_order[i]) .&
+                    indstemp = deepcopy(inds);
+                        Threads.@threads for i ∈ collect(eachindex(combos))
+                            combotemp = getindex.(findall((own_order .== own_order[i]) .&
                                 (prod_order_in_group .== prod_order_in_group[i])),1)
-                        
-                            temp = temp[temp .> i]
-                            inds[i][2] = union(inds[i][2], temp)
+                            
+                            combotemp = combotemp[combotemp .> i]
+                            inds[i][2] = intersect(inds[i][2], combotemp)
+                            
                         end
+                        # inds = indstemp;
                 end
+                
                 
         end
         duplicates = zeros(length(combos));
@@ -168,7 +167,9 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
             end
         end
 
+        # @show size(sym_combos)
         sym_combos = sym_combos[duplicates .==0]
+        
         combos = combos[duplicates .==0]
         return full_interaction, sym_combos, combos
 end

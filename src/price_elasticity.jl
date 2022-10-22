@@ -36,7 +36,7 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
     bernO = convert.(Integer, bO);
     order = bernO;
     trueS=true;
-
+    
     design_width = sum(size.(X,2));
     # θ = β[1:design_width]
     # γ = β[length(θ)+1:end]

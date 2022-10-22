@@ -35,6 +35,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     
     # Initialize constraint matrices 
     Aineq = zeros(1, sum(lengths));
+    
     Aeq = zeros(1, sum(lengths));
 
     # Find first product in each group of exchangeable products 
@@ -208,6 +209,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             end
         end
     end
+    # @show size(Aineq)
 
     Aineq = Aineq[2:end,:];
     Aeq = Aeq[2:end,:];
