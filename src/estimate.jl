@@ -19,11 +19,12 @@ function estimate!(problem::NPDProblem; max_iterations = 10000)
     elast_prices = problem.elast_prices;
     constraint_tol = problem.constraint_tol;
     obj_tol = problem.obj_tol;
+    exchange = problem.exchange;
 
     find_prices = findall(problem.index_vars .== "prices");
     price_index = find_prices[1];
 
-obj_func(β::Vector, lambda::Int) = md_obj(β;X = Xvec, B = Bvec, A = Avec,
+obj_func(β::Vector, lambda::Int) = md_obj(β;exchange =exchange,X = Xvec, B = Bvec, A = Avec,
         m1=matrices.m1, 
         m2=matrices.m2, 
         m3=matrices.m3, 
@@ -40,7 +41,7 @@ obj_func(β::Vector, lambda::Int) = md_obj(β;X = Xvec, B = Bvec, A = Avec,
         mins = mins, maxs = maxs, normalization = normalization, price_index = price_index, 
         lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices);
 
-grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec, B = Bvec, A = Avec,
+grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange =exchange, X = Xvec, B = Bvec, A = Avec,
         m1=matrices.m1, 
         m2=matrices.m2, 
         m3=matrices.m3, 
@@ -59,7 +60,12 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
 
     # Estimation 
     β_length = design_width + sum(size(Bvec[1],2))
-    β_init = -1 .* rand(β_length)
+    if problem.results == []
+        β_init = -1 .* rand(β_length)
+    else
+        println("Problem already has result vector -- Assuming warm start")
+        β_init = problem.results.minimizer;
+    end
 
     obj_uncon(x::Vector) = obj_func(x,0);
     grad_uncon!(G::Vector,x::Vector) = grad_func!(G,x,0);
@@ -89,7 +95,7 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; X = Xvec,
             L *= 10;
             obj(x::Vector) = obj_func(x,L);
             grad!(G::Vector,x::Vector) = grad_func!(G,x,L);
-            if iter ==1
+            if iter ==0
                 results =  Optim.optimize(obj, grad!, results.minimizer,
                     LBFGS(), Optim.Options(show_trace = false, iterations = max_iterations, g_abstol = obj_tol));
             else

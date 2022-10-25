@@ -2,18 +2,16 @@ function elast_penalty(θ, exchange, elast_mats, elast_prices, lambda)
     at = elast_prices;
 
     # Check inputs
-    if (at!=[]) & (size(at,2) != size(df[:,r"prices"],2))
-        error("Argument `at` must be a matrix of prices with J columns if provided")
-    end
     if typeof(at) ==DataFrame
         at = Matrix(at);
     end
 
     svec = elast_mats;
-    J = size(s,2);
+    J = maximum(maximum.(exchange));
     
     # Share Jacobian
     dsids = zeros(eltype(θ),J,J,size(elast_mats[1,1],1)) # initialize matrix of ∂s^{-1}/∂s
+
     for j1 = 1:J
         for j2 = 1:J
             if j1 ==1 
@@ -39,6 +37,7 @@ function elast_penalty(θ, exchange, elast_mats, elast_prices, lambda)
                 J_s[j1,j2] = dsids[j1,j2,ii]
             end
         end
+        
         temp = -1*inv(J_s);
         push!(Jmat, temp)
     
@@ -142,6 +141,14 @@ function make_elasticity_mat(npd_problem, df::DataFrame)
         end
     end
     elast_mats = reshape(elast_mats, J,J);
+    # Make a transpose to fix issue in other functions
+    temp_elast_mats = deepcopy(elast_mats);
+    for j1 = 1:J
+        for j2 = 1:J
+            temp_elast_mats[j1,j2] = elast_mats[j2,j1];
+        end
+    end
+    elast_mats = temp_elast_mats;
     elast_prices = Matrix(df[!,r"prices"]);
     return elast_mats, elast_prices 
 end

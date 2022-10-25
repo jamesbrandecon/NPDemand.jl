@@ -16,19 +16,19 @@ index_vars = ["prices", "x"]
 constraint_tol = 1e-5;
 obj_tol = 1e-5;
 
-constraints = [:exchangeability, :monotone, :all_substitutes];
+constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
 npd_problem = define_problem(df; 
                             exchange = exchange, 
                             index_vars = index_vars, 
                             constraints = constraints,
                             bO = bO,
-                            FE = ["dummyFE","product"],
+                            FE = ["dummyFE", "product"],
                             constraint_tol = constraint_tol,
                             obj_tol = obj_tol);
 show(npd_problem)
 
 # Estimate problem and plot comparison of estimated and true own-price elasticities
-estimate!(npd_problem, max_iterations = 5000)
+estimate!(npd_problem, max_iterations = 2000)
 elast_prod1, avg, shares, all_own = price_elasticity(npd_problem, df; whichProducts=[1,1]);
 true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
 

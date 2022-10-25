@@ -12,6 +12,7 @@ import LineSearches
 import Primes
 
 using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, LineSearches, Combinatorics, Primes
+using ForwardDiff
 
 include("simulate_logit.jl")
 include("toDataFrame.jl")
