@@ -6,11 +6,13 @@ Constructs a `problem`::NPDProblem using the provided problem characteristics. I
 - `exchange`::Vector{Matrix{Int64}}: A vector of groups of products which are exchangeable. E.g., with 4 goods, if the first
 and second are exchangeable and so are the third and fourth, set `exchange` = [[1 2], [3 4]].
 - `index_vars`: String array listing column names in `df` which represent variables that enter the inverted index.
+    - "prices" must be the first element of `index_vars`
 - `FE`: String array listing column names in `df` which should be included as fixed effects.
+    - Note: All fixed effects are estimated as parameters by the minimizer, so be careful adding fixed effects for variables that take many values.
+- `bO`: Order of the univariate Bernstein polynomials in market shares. Default is 2.
 - `constraint_tol`: Tolerance specifying tightness of constraints
-- `obj_tol`: Tolerance specifying g_abstol in Optim.Options()
-    - Note: All fixed effects are estimated as parameters by the minimizer, so be careful adding fixed effects for variables that take 
-    many values.
+- `obj_xtol`: Tolerance specifying x_tol in Optim.Options()
+- `obj_ftol`: Tolerance specifying f_tol in Optim.Options()
 - `constraints`: A list of symbols of accepted constraints. Currently supported constraints are: 
     - :monotone  
     - :all_substitutes 
@@ -19,12 +21,24 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
     - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
 """
 function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["prices"], FE = [], 
-    constraints = [], bO = 2, obj_tol = 1e-5, constraint_tol = 1e-5, normalization=[])
+    constraints = [], bO = 2, obj_xtol = 1e-5, obj_ftol = 1e-5, constraint_tol = 1e-5, normalization=[])
     
     find_prices = findall(index_vars .== "prices")[1];
 
     if (find_prices !=1 ) | !(typeof(index_vars)<:Vector) #index_vars[1] !="prices"
         error("Variable index_vars must be a Vector, and `prices` must be the first element")
+    end
+
+    # Confirm that shares are numbered as expected: 
+    J = size(df[!,r"shares"],2);
+    missingshares = 0;
+    for i = 0:(J-1)
+        if string("shares", string(i)) ∉ names(df)
+            missingshares +=1;
+        end
+        if missingshares > 0
+            error("$J Products detected: shares should be numbered 0 to $J-1")
+        end
     end
 
     # Reshape FEs into matrix of dummy variables
@@ -85,7 +99,8 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
                         normalization,
                         exchange,
                         design_width,
-                        obj_tol,
+                        obj_xtol,
+                        obj_ftol,
                         constraint_tol,
                         bO,
                         [],
@@ -120,7 +135,8 @@ mutable struct NPDProblem
     normalization
     exchange 
     design_width 
-    obj_tol
+    obj_xtol
+    obj_ftol
     constraint_tol 
     bO
     results
@@ -167,6 +183,8 @@ function Base.show(io::IO, problem::NPDProblem)
     index_vars = problem.index_vars;
     exchange = problem.exchange;
     FE = problem.FE;
+    obj_xtol = problem.obj_xtol;
+    obj_ftol = problem.obj_ftol;
     
     println(io, "NPD Problem:")
     println(io, "- Number of choices: $(J)")
@@ -175,5 +193,6 @@ function Base.show(io::IO, problem::NPDProblem)
     println(io, "- Fixed Effects: $FE")
     println(io, "- Index Variables: $index_vars")
     println(io, "- Bernstein polynomials of order: $bO")
+    println(io, "- (x_tol, f_tol): ($obj_xtol, $obj_ftol)")
 
 end
