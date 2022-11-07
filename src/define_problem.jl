@@ -25,19 +25,34 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     
     find_prices = findall(index_vars .== "prices")[1];
 
+    # Checking structure of index
     if (find_prices !=1 ) | !(typeof(index_vars)<:Vector) #index_vars[1] !="prices"
         error("Variable index_vars must be a Vector, and `prices` must be the first element")
+    end
+
+    # Checking constraints
+    if (:diagonal_dominance_all ∈ constraints) | (:diagonal_dominance_group ∈ constraints)
+        if :monotone ∉ constraints 
+            error("Diagonal dominance only implemented in conjunction with monotonicity-- add :monotone to constraints")
+        end
     end
 
     # Confirm that shares are numbered as expected: 
     J = size(df[!,r"shares"],2);
     missingshares = 0;
+    missingprices = 0;
     for i = 0:(J-1)
         if string("shares", string(i)) ∉ names(df)
             missingshares +=1;
         end
         if missingshares > 0
             error("$J Products detected: shares should be numbered 0 to $J-1")
+        end
+        if string("prices", string(i)) ∉ names(df)
+            missingprices +=1;
+        end
+        if missingprices > 0
+            error("$J Products detected: prices should be numbered 0 to $J-1")
         end
     end
 

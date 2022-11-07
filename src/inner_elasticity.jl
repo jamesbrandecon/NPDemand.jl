@@ -29,6 +29,8 @@ function elast_penalty(θ, exchange, elast_mats, elast_prices, lambda)
     all_own = zeros(eltype(θ),size(svec,1),J);
     svec2 = copy(svec);
     jacobian_vec = [];
+    
+    failed_inverse = false;
 
     for ii = 1:length(dsids[1,1,:])
         J_s = zeros(eltype(θ),J,J);
@@ -38,7 +40,13 @@ function elast_penalty(θ, exchange, elast_mats, elast_prices, lambda)
             end
         end
         
-        temp = -1*inv(J_s);
+        temp = [];
+        try
+            temp = -1*inv(J_s);
+        catch
+            temp = J_s;
+            failed_inverse = true;
+        end
         push!(Jmat, temp)
     
         # Market vector of prices/shares
@@ -60,10 +68,13 @@ function elast_penalty(θ, exchange, elast_mats, elast_prices, lambda)
     end
 
     penalty = 0;
-    for i ∈ eachindex(jacobian_vec)
-        penalty += sum((jacobian_vec[i] .< conmat) .* abs.(jacobian_vec[i]).^2 .* lambda);
+    if failed_inverse 
+        penalty += 1e10;
+    else
+        for i ∈ eachindex(jacobian_vec)
+            penalty += sum((jacobian_vec[i] .< conmat) .* abs.(jacobian_vec[i]).^2 .* lambda);
+        end
     end
-
     return penalty
 end
 
