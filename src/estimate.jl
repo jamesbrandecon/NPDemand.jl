@@ -78,7 +78,7 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
     else
         println("Solving problem without inequality constraints....")
         results =  Optim.optimize(obj_uncon, grad_uncon!, β_init,
-        LBFGS(), Optim.Options(show_trace = false, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
+        LBFGS(), Optim.Options(show_trace = true, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
         L = 1;
         θ = results.minimizer[1:design_width];
         iter = 0;
@@ -98,7 +98,7 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
             grad!(G::Vector,x::Vector) = grad_func!(G,x,L);
             if iter ==0
                 results =  Optim.optimize(obj, grad!, results.minimizer,
-                    LBFGS(), Optim.Options(show_trace = false, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
+                    LBFGS(), Optim.Options(show_trace = true, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
             else
                 results =  Optim.optimize(obj, grad!, results.minimizer,
                     LBFGS(), Optim.Options(show_trace = false, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
