@@ -118,7 +118,7 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
                     end
                 else
                     indstemp = deepcopy(inds);
-                        Threads.@threads for i ∈ collect(eachindex(combos))
+                    Threads.@threads for i ∈ collect(eachindex(combos))
                             combotemp = getindex.(findall((own_order .== own_order[i]) .&
                                 (prod_order_in_group .== prod_order_in_group[i])),1)
                             
@@ -128,8 +128,6 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
                         end
                         # inds = indstemp;
                 end
-                
-                
         end
         duplicates = zeros(length(combos));
         full_interaction = [];

@@ -3,7 +3,7 @@
 
 `estimate!` solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector
 """
-function estimate!(problem::NPDProblem; max_iterations = 10000)
+function estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = false)
     # Unpack problem 
     matrices = problem.matrices;
     Xvec = problem.Xvec;
@@ -62,7 +62,8 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
     # Estimation 
     β_length = design_width + sum(size(Bvec[1],2))
     if problem.results == []
-        β_init = -1 .* rand(β_length)
+        # Random.seed!(12345)
+        β_init = -0.5 .* ones(β_length)
     else
         println("Problem already has result vector -- Assuming warm start")
         β_init = problem.results.minimizer;
@@ -74,11 +75,11 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
     if isempty(Aineq) & (:subs_in_group ∉ problem.constraints);
         println("Problem only has equality constraints. Solving...")
         results =  Optim.optimize(obj_uncon, grad_uncon!, β_init,
-        LBFGS(), Optim.Options(show_trace = false, iterations = max_iterations));
+        LBFGS(), Optim.Options(show_trace = show_trace, iterations = max_iterations));
     else
         println("Solving problem without inequality constraints....")
         results =  Optim.optimize(obj_uncon, grad_uncon!, β_init,
-        LBFGS(), Optim.Options(show_trace = true, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
+        LBFGS(), Optim.Options(show_trace = show_trace, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
         L = 1;
         θ = results.minimizer[1:design_width];
         iter = 0;
@@ -98,10 +99,10 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
             grad!(G::Vector,x::Vector) = grad_func!(G,x,L);
             if iter ==0
                 results =  Optim.optimize(obj, grad!, results.minimizer,
-                    LBFGS(), Optim.Options(show_trace = true, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
+                    LBFGS(), Optim.Options(show_trace = show_trace, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
             else
                 results =  Optim.optimize(obj, grad!, results.minimizer,
-                    LBFGS(), Optim.Options(show_trace = false, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
+                    LBFGS(), Optim.Options(show_trace = show_trace, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
             end
 
             β = results.minimizer

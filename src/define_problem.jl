@@ -35,6 +35,9 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
         if :monotone ∉ constraints 
             error("Diagonal dominance only implemented in conjunction with monotonicity-- add :monotone to constraints")
         end
+        if (exchange != []) & (:exchangeability ∉ constraints)
+            error("Vector exchange is nonempty but :exchangeability is listed in constraints")
+        end
     end
 
     # Confirm that shares are numbered as expected: 
@@ -53,6 +56,12 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
         end
         if missingprices > 0
             error("$J Products detected: prices should be numbered 0 to $J-1")
+        end
+    end
+
+    if exchange ==[] 
+        for j = 1:J 
+            push!(exchange, [j])
         end
     end
 
