@@ -1,79 +1,67 @@
-function elast_penalty(θ, exchange, elast_mats, elast_prices, lambda)
+function elast_penalty(θ_packed, exchange, elast_mats::Matrix{Any}, elast_prices::Matrix{Float64}, lambda::Real, conmat; 
+    J = maximum(maximum.(exchange)), dsids = zeros(eltype(θ_packed),J,J,size(elast_mats[1,1],1)),
+    J_sp = zeros(eltype(θ_packed),size(elast_mats[:,1])))
+    
     at = elast_prices;
+    
+    θ = unpack(θ_packed, exchange, size.(elast_mats, 2), grad=false);
 
     # Check inputs
     if typeof(at) ==DataFrame
         at = Matrix(at);
     end
 
-    svec = elast_mats;
-    J = maximum(maximum.(exchange));
-    
-    # Share Jacobian
-    dsids = zeros(eltype(θ),J,J,size(elast_mats[1,1],1)) # initialize matrix of ∂s^{-1}/∂s
+    # svec = elast_mats;
+    # J = maximum(maximum.(exchange));
 
-    for j1 = 1:J
+    Threads.@threads for j1 = 1:J
         for j2 = 1:J
             if j1 ==1 
                 init_ind=0;
             else
-                init_ind = sum(size.(elast_mats[1:j1-1,1],2))
+                @views init_ind = sum(size.(elast_mats[1:j1-1,1],2))
             end
-            θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1],2)];
-            dsids[j1,j2,:] = elast_mats[j1,j2] * θ_j1;
+            @views θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1],2)];
+            @views dsids[j1,j2,:] = elast_mats[j1,j2] * θ_j1;
         end
     end
     
     Jmat = [];
-    J_sp = zeros(eltype(θ),size(svec[:,1]));
-    all_own = zeros(eltype(θ),size(svec,1),J);
-    svec2 = copy(svec);
+    # svec2 = copy(svec);
     jacobian_vec = [];
-    
     failed_inverse = false;
 
-    for ii = 1:length(dsids[1,1,:])
+    penalty = 0;
+
+    temp = zeros(eltype(θ), J,J);
+    Threads.@threads for ii = 1:length(dsids[1,1,:])
         J_s = zeros(eltype(θ),J,J);
         for j1 = 1:J
             for j2 = 1:J
-                J_s[j1,j2] = dsids[j1,j2,ii]
+                @views J_s[j1,j2] = dsids[j1,j2,ii]
             end
         end
         
-        temp = [];
         try
             temp = -1*inv(J_s);
         catch
-            temp = J_s;
+            # temp = J_s;
             failed_inverse = true;
+            break
         end
-        push!(Jmat, temp)
+        # push!(Jmat, temp)
     
         # Market vector of prices/shares
-        # ps = at[ii,:]./svec2[ii,:];
-        # ps_mat = repeat(at[ii,:]', J,1) ./ repeat(svec2[ii,:], 1,J) ;
-        push!(jacobian_vec, temp ); #.* ps_mat
+        # push!(jacobian_vec, temp ); 
+        penalty += sum((temp .< conmat) .* abs.(temp).^2 .* lambda);
     end
     
-    # Convert jacobian_vec to Penalty
-        # Have to calculate sign matrix from exchange
-    conmat = zeros(eltype(θ),J,J);
-    for j1 = 1:J
-        ej = getindex.(findall(j1 .∈ exchange),1)[1];
-        for j2 = 1:J
-            if (j2==j1) | (j2 ∉ exchange[ej])
-                conmat[j1,j2] = -Inf;
-            end                
-        end
-    end
-
-    penalty = 0;
     if failed_inverse 
         penalty += 1e10;
-    else
-        for i ∈ eachindex(jacobian_vec)
-            penalty += sum((jacobian_vec[i] .< conmat) .* abs.(jacobian_vec[i]).^2 .* lambda);
-        end
+    # else
+        # for i ∈ eachindex(jacobian_vec)
+        #     penalty += sum((jacobian_vec[i] .< conmat) .* abs.(jacobian_vec[i]).^2 .* lambda);
+        # end
     end
     return penalty
 end

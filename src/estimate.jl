@@ -3,7 +3,7 @@
 
 `estimate!` solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector
 """
-function estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = false)
+function estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = false, chunk_size = [])
     # Unpack problem 
     matrices = problem.matrices;
     Xvec = problem.Xvec;
@@ -57,7 +57,7 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
         WB = matrices.WB,
         Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
         mins = mins, maxs = maxs, normalization = normalization, price_index = price_index, 
-        lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices);
+        lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices, chunk_size = chunk_size);
 
     # Estimation 
     β_length = design_width + sum(size(Bvec[1],2))
@@ -90,7 +90,17 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
             penalty_violated = (maximum(Aineq * θ) > constraint_tol);
         end
         if elast_mats!=[]
-            penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L) >constraint_tol);
+            J = length(Xvec);
+            conmat = zeros(eltype(θ),J,J);
+            for j1 = 1:J
+                ej = getindex.(findall(j1 .∈ exchange),1)[1];
+                for j2 = 1:J
+                    if (j2==j1) | (j2 ∉ exchange[ej])
+                        conmat[j1,j2] = -Inf;
+                    end                
+                end
+            end
+            penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L, conmat) >constraint_tol);
         end
         while penalty_violated
             println("Iteration $(iter)...")
@@ -120,7 +130,16 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
                 penalty_violated = (maximum(Aineq * θ) > constraint_tol);
             end
             if elast_mats!=[]
-                penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L) > constraint_tol);
+                conmat = zeros(eltype(θ),J,J);
+                for j1 = 1:J
+                    ej = getindex.(findall(j1 .∈ exchange),1)[1];
+                    for j2 = 1:J
+                        if (j2==j1) | (j2 ∉ exchange[ej])
+                            conmat[j1,j2] = -Inf;
+                        end                
+                    end
+                end
+                penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L, conmat) > constraint_tol);
             end
 
             iter+=1;

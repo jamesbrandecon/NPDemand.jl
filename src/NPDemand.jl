@@ -10,9 +10,11 @@ import NLsolve
 import Combinatorics
 import LineSearches
 import Primes
+import Strided
 
 using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, LineSearches, Combinatorics, Primes
-using ForwardDiff
+using ForwardDiff, Strided
+using ForwardDiff: GradientConfig, Chunk
 
 include("simulate_logit.jl")
 include("toDataFrame.jl")
