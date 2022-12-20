@@ -25,8 +25,13 @@ function elast_penalty(θ_packed, exchange, elast_mats::Matrix{Any}, elast_price
             else
                 @views init_ind = sum(size.(elast_mats[1:j1-1,1],2))
             end
-            @views θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[1,j1],2)];
-            @views dsids[j1,j2,:] = elast_mats[j1,j2] * θ_j1;
+            @views θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1,1],2)];
+            try
+                @views dsids[j1,j2,:] = elast_mats[j1,j2] * θ_j1; 
+            catch
+                @show size(θ_j1) size(elast_mats[j1,j2])
+                @show j1 j2
+            end
         end
     end
     
