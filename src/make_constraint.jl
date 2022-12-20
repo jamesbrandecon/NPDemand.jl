@@ -168,11 +168,8 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
         for e ∈ eachindex(exchange)
             inv_j = first_in_exchange[e]
             others = setdiff(1:J, inv_j)
-            @show inv_j
-            @show others
             if inv_j >1
                 init_ind = sum(lengths[1:inv_j-1])
-                @show init_ind
             else
                 init_ind = 0;
             end

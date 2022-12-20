@@ -65,7 +65,7 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
         Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
         mins = mins, maxs = maxs, normalization = normalization, price_index = price_index, 
         lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices, 
-        chunk_size = chunk_size, cfg = cfg);
+        chunk_size = [], cfg = cfg);
 
     # Estimation 
     β_length = design_width + sum(size(Bvec[1],2))
