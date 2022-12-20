@@ -15,7 +15,7 @@ pkg> add https://github.com/jamesbrandecon/NPDemand.jl
 ## Main Functions
 There are three important functions included here so far: `define_problem`, `estimate!`, and `price_elasticity`:  
 - `define_problem(df::DataFrame; exchange = [], index_vars = ["prices"], FE = [], constraints = [], bO = 2, obj_tol = 1e-5, constraint_tol = 1e-5)`: Constructs a `problem::NPDProblem` using the provided problem characteristics. Inputs: 
-    - `exchange`::Vector{Matrix{Int64}}: A vector of groups of products which are exchangeable. E.g., with 4 goods, if the first
+    - `exchange`::Vector: A vector of groups of products which are exchangeable. E.g., with 4 goods, if the first
     and second are exchangeable and so are the third and fourth, set `exchange` = [[1 2], [3 4]].
     - `index_vars`: String array listing column names in `df` which represent variables that enter the inverted index.
     - `FE`: String array listing column names in `df` which should be included as fixed effects.
@@ -27,7 +27,7 @@ There are three important functions included here so far: `define_problem`, `est
         - :diagonal_dominance_group: Diagonal dominance (see Compiani, 2022) within exchangeable groups. 
         - :diagonal_dominance_all: Diagonal dominance across all products.
         - :subs_in_group: All products within exchangeable groupings are substitutes.(**Note**: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
-- `estimate!(problem::NPDProblem; max_iterations=10000)`: solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector. `max_iterations` is passed into Optim.Options for every optimization step.  
+- `estimate!(problem::NPDProblem; max_iterations=10000, show_trace = false)`: solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector. `max_iterations` is passed into Optim.Options for every optimization step.  
 - `update_constraints(problem::NPDProblem, new_constraints::Vector{Symbol})`: Replaces the constraints in `problem` with `new_constraints`. Because of the way `:exchangeability` is enforced, this function cannot be used to change the structure of exchangeable groupings. 
 - `price_elasticity(problem::NPDProblem, df::DataFrame; at::Matrix, whichProducts = [1,1])`: Takes the solved `problem` as first argument, a `DataFrame` as the second argument, and evaluates price elasticities in-sample at prices `at`. Currently does not calculate out-of-sample price elasticities, though this will be added in the future. Returns four results, in order: 
     - (1) a vector of elasticities of demand for product `whichProducts[1]` with respect to `whichProducts[2]`
@@ -57,7 +57,7 @@ julia> df
 ```
 Then, we can define a `problem`. In this package, a `problem` is constructed by combining data (in `df`) and constraints. A problem can be constructed simply using `define_problem`:
 ```jl
-bO = 2; 
+bO = 2; # Order of each dimension of Berntstein polynomial
 exchange = [[1 2 3]] # All products are exchangeable
 index_vars = ["prices", "x"] # endogenous prices and exogenous x enter the index
 
@@ -80,5 +80,3 @@ Fixed effects are estimated as parameters, not absorbed from the data. So, be ca
 
 To include fixed effects (categorical variables), use the option `FE` to provide a vector of strings, where each element of the vector is a name of a column in the provided data `df`. Note however that at present, variables that are included as fixed effect must be constant across products within a market. The only exception to this rule is `"product"` which is a keyword which will produce product fixed-effects. There need not be a column named `product` in the data, and in fact the code will ignore it if it's there. 
 
-## To-do
-- Optional LoopVectorization.jl (or similar) speed-ups

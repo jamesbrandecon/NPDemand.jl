@@ -14,7 +14,7 @@ function simulate_logit(J,T, beta, v)
 
 zt = 0.9 .* rand(T,J) .+ 0.05;
 xit = randn(T,J).*v;
-pt = 2 .*(zt .+ rand(T,J)*0.1).+xit;
+pt = 2 .*(zt .+ rand(T,J).*0.1).+xit;
 xt = rand(T,J);
 
 denominator = 1;

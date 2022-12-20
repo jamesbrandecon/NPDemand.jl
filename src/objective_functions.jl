@@ -65,7 +65,7 @@ function md_obj(β::Vector; exchange = [], X = [], B = [], A = [],
                 end                
             end
         end
-        obj += elast_penalty(θ, exchange, elast_mats, elast_prices, lambda1, conmat);
+        obj += elast_penalty(θ, exchange, elast_mats, elast_prices, lambda1, conmat; during_obj=true);
     end
 
     obj
@@ -74,7 +74,7 @@ end
 function md_grad!(grad::Vector, β::Vector; exchange = [], X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
     Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, 
-    lambda1=0, elast_mats=[], elast_prices = [], chunk_size = [])
+    lambda1=0, elast_mats=[], elast_prices = [], chunk_size = [], cfg = [])
 
     grad0 = zeros(eltype(β), size(β));
     ineq_con = zeros(eltype(β), size(Aineq,1));
@@ -135,20 +135,6 @@ function md_grad!(grad::Vector, β::Vector; exchange = [], X = [], B = [], A = [
         grad0[1:length(θ)] += temp_ineq; # check matrix sizes, maybe need a '
     end 
 
-    # Enforce normalization in gradient too
-    grad0[length(θ)+1] = 0; 
-    for i ∈ normalization
-        grad0[length(θ)+i] = 0;
-        grad0[length(θ)+i] = 0;
-    end
-    
-    for i∈eachindex(mins)
-        grad0[maxs[i]] += grad0[mins[i]];
-    end
-    for i∈eachindex(mins)
-        grad0[mins[i]] = 0;
-    end
-
     # Nonlinear constraints
     if (elast_mats != []) & (lambda1!=0)
         # Convert jacobian_vec to Penalty
@@ -164,17 +150,33 @@ function md_grad!(grad::Vector, β::Vector; exchange = [], X = [], B = [], A = [
         end
         g(x) = elast_penalty(x, exchange, elast_mats, elast_prices, lambda1, conmat);
         θ_packed =  pack_parameters(θ, exchange, size.(X,2))
-        if chunk_size ==[]
-            cfg = GradientConfig(g, θ_packed);
-        else
-            cfg = GradientConfig(g, θ_packed, Chunk{chunk_size}());
-        end
+        # if chunk_size ==[]
+        #     # cfg = GradientConfig(g, θ_packed);
+        #     cfg = GradientConfig(nothing, θ_packed);
+        # else
+        #     # cfg = GradientConfig(g, θ_packed, Chunk{chunk_size}());
+        #     cfg = GradientConfig(nothing, θ_packed, Chunk{chunk_size}());
+        # end
         # @show g(θ_packed)
         # print(reshape(unpack(θ_packed, exchange, size.(X,2), grad=true), 140, 5))
         packed_grad = ForwardDiff.gradient(g, θ_packed, cfg);
         
         grad0[1:length(θ)] += unpack(packed_grad, exchange, size.(X,2), grad=true);
         # grad0[1:length(θ)] += ForwardDiff.gradient(g, θ, cfg);
+    end
+
+    # Enforce normalization in gradient too
+    grad0[length(θ)+1] = 0; 
+    for i ∈ normalization
+        grad0[length(θ)+i] = 0;
+        grad0[length(θ)+i] = 0;
+    end
+    
+    for i∈eachindex(mins)
+        grad0[maxs[i]] += grad0[mins[i]];
+    end
+    for i∈eachindex(mins)
+        grad0[mins[i]] = 0;
     end
 
     try 
@@ -203,9 +205,9 @@ function unpack(θ_packed, exchange, lengths; grad=true)
     for i ∈ eachindex(exchange)
         params_per_prod_in_group = lengths[exchange[i][1]];
         add_θ = repeat(θ_packed[index:(index + params_per_prod_in_group -1)], length(exchange[i]));
-        if grad==true
-            add_θ[params_per_prod_in_group+1:end] .=0;
-        end
+        # if grad==true
+        #     add_θ[params_per_prod_in_group+1:end] .=0;
+        # end
         θ = vcat(θ, add_θ);
         index += params_per_prod_in_group;
     end

@@ -61,6 +61,7 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
     end
     
     # Share Jacobian
+    tempmats = []
     dsids = zeros(J,J,size(index,1)) # initialize matrix of ∂s^{-1}/∂s
     for j1 = 1:J
         which_group = findall(j1 .∈ exchange)[1];
@@ -78,7 +79,7 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
             init_ind = sum(size.(X[1:j1-1],2))
         end
         θ_j1 = θ[init_ind+1:init_ind+size(X[j1],2)];
-        
+        # @show θ_j1
         for j2 = 1:J 
             tempmat_s = zeros(size(index,1),1)
             for j_loop = 1:1:J
@@ -92,6 +93,7 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
             tempmat_s = tempmat_s[:,2:end]
             tempmat_s, a, b = make_interactions(tempmat_s, exchange, bernO, first_product_in_group, perm);
             dsids[j1,j2,:] = tempmat_s * θ_j1;
+            push!(tempmats, tempmat_s)
         end
     end
     Jmat = [];
@@ -129,6 +131,6 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
     #     print("There were $numBadMarkets bad markets")
     # end
     # return esep, Jmat, svec, all_own
-    return esep, avg_elast_mat, svec, all_own
+    return esep, avg_elast_mat, svec, all_own, tempmats
 end
     

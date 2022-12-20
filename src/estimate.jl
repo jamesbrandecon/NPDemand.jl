@@ -1,9 +1,15 @@
 """
-    estimate!(problem::NPDProblem)
+    estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = false, chunk_size = Int[])
 
-`estimate!` solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector
+`estimate!` solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector.
+To enforce constraints, we iteratively minimize the sum of the objective function and a penalty term capturing violations of the constraint. 
+For each outer iteration, we increase the size of the penalty term by an order of magnitude.  
+
+Options: 
+- `max_iterations`: controls the number of inner iterations for each outer iteration (i.e., for each value of the penalty term, the number of iterations used by Optim)
+- `show_trace`: if `true`, Optim will print the trace for each outer iteration. 
 """
-function estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = false, chunk_size = [])
+function estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = false)
     # Unpack problem 
     matrices = problem.matrices;
     Xvec = problem.Xvec;
@@ -11,7 +17,7 @@ function estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = fal
     Avec = problem.Avec;
     Aineq = problem.Aineq; 
     Aeq = problem.Aeq;
-    mins = problem.mins;
+    mins = problem.mins;  
     maxs = problem.maxs;
     normalization = problem.normalization;
     design_width = problem.design_width;
@@ -21,6 +27,7 @@ function estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = fal
     obj_xtol = problem.obj_xtol;
     obj_ftol = problem.obj_ftol;
     exchange = problem.exchange;
+    cfg = problem.cfg;
 
     find_prices = findall(problem.index_vars .== "prices");
     price_index = find_prices[1];
@@ -57,7 +64,8 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
         WB = matrices.WB,
         Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
         mins = mins, maxs = maxs, normalization = normalization, price_index = price_index, 
-        lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices, chunk_size = chunk_size);
+        lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices, 
+        chunk_size = chunk_size, cfg = cfg);
 
     # Estimation 
     β_length = design_width + sum(size(Bvec[1],2))

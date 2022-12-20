@@ -5,6 +5,7 @@ s = Matrix(df[:, r"shares"]);
 pt = Matrix(df[:, r"prices"]);
 # zt = Matrix(df[:, r"demand_instruments"]);
 zt = Matrix(df[:, r"share_iv"]);
+zt = (zt .- minimum(zt, dims=1)) ./ (maximum(zt, dims=1) .- minimum(zt, dims=1));
 
 J = size(s,2);
 try 

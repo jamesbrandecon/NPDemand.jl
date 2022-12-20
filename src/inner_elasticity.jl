@@ -1,10 +1,14 @@
 function elast_penalty(θ_packed, exchange, elast_mats::Matrix{Any}, elast_prices::Matrix{Float64}, lambda::Real, conmat; 
     J = maximum(maximum.(exchange)), dsids = zeros(eltype(θ_packed),J,J,size(elast_mats[1,1],1)),
-    J_sp = zeros(eltype(θ_packed),size(elast_mats[:,1])))
+    J_sp = zeros(eltype(θ_packed),size(elast_mats[:,1])), during_obj = false)
     
     at = elast_prices;
     
-    θ = unpack(θ_packed, exchange, size.(elast_mats, 2), grad=false);
+    if during_obj == false
+        θ = unpack(θ_packed, exchange, size.(elast_mats, 2), grad=false);
+    else
+        θ = θ_packed;
+    end
 
     # Check inputs
     if typeof(at) ==DataFrame
@@ -17,11 +21,11 @@ function elast_penalty(θ_packed, exchange, elast_mats::Matrix{Any}, elast_price
     Threads.@threads for j1 = 1:J
         for j2 = 1:J
             if j1 ==1 
-                init_ind=0;
+                init_ind = 0;
             else
                 @views init_ind = sum(size.(elast_mats[1:j1-1,1],2))
             end
-            @views θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1],2)];
+            @views θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[1,j1],2)];
             @views dsids[j1,j2,:] = elast_mats[j1,j2] * θ_j1;
         end
     end
@@ -53,6 +57,7 @@ function elast_penalty(θ_packed, exchange, elast_mats::Matrix{Any}, elast_price
     
         # Market vector of prices/shares
         # push!(jacobian_vec, temp ); 
+         
         penalty += sum((temp .< conmat) .* abs.(temp).^2 .* lambda);
     end
     
@@ -66,7 +71,7 @@ function elast_penalty(θ_packed, exchange, elast_mats::Matrix{Any}, elast_price
     return penalty
 end
 
-function subset_for_elast_const(npd_problem, df::DataFrame; grid_size=2)
+function subset_for_elast_const(npd_problem, df::DataFrame; grid_size=10)
     s = Matrix(df[:, r"shares"]);
     J = size(s,2);
 
@@ -75,18 +80,17 @@ function subset_for_elast_const(npd_problem, df::DataFrame; grid_size=2)
 
     temp = [];
     for j = 1:J
-        push!(temp, collect(range(min_s[j], max_s[j], length = grid_size)))
+        push!(temp, collect(range(min_s[j], max_s[j], length = 2)))
+        # push!(temp, collect(range((max_s[j] + min_s[j])/2 - 0.05, (max_s[j] + min_s[j])/2 + 0.05, length=2)))
     end
     temp = collect.(Iterators.product(temp...));
     temp = reshape(temp, length(temp));
-    
     use_row = zeros(size(s,1));
     for i ∈ eachindex(temp)
         distances = sum((s .- temp[i]').^2, dims=2);
         ind = getindex.(findall(distances .== minimum(distances)),1)[1];
         use_row[ind] = 1;
     end
-    
     subset = df[(use_row .==1),:];
     return subset
 end
@@ -140,7 +144,8 @@ function make_elasticity_mat(npd_problem, df::DataFrame)
         end
     end
     elast_mats = reshape(elast_mats, J,J);
-    # Make a transpose to fix issue in other functions
+    # Make a transpose to fix issue in other functions -- 
+        # reshape above makes transpose of desired matrix
     temp_elast_mats = deepcopy(elast_mats);
     for j1 = 1:J
         for j2 = 1:J

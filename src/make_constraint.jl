@@ -113,7 +113,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
                 end
             end
         else
-            print(":all_substitutes only implemented for models under exchangeability")
+            print(":all_substitutes currently only implemented for models with some level of exchangeability")
     #         for inv_j ∈ collect(1:J)
     #             if inv_j >1
     #                 init_ind = sum(lengths[1:inv_j-1])
@@ -168,8 +168,11 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
         for e ∈ eachindex(exchange)
             inv_j = first_in_exchange[e]
             others = setdiff(1:J, inv_j)
+            @show inv_j
+            @show others
             if inv_j >1
                 init_ind = sum(lengths[1:inv_j-1])
+                @show init_ind
             else
                 init_ind = 0;
             end
@@ -177,8 +180,9 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             for i = 1:lengths[inv_j]
                 for j ∈ setdiff(collect(1:J), inv_j)
                     other_orders = setdiff(collect(1:J), [inv_j, j])
-                    if J >2
-                        rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,inv_j] .== orders[i,inv_j]+1) .& (orders[:,j] .== orders[i,j]-1));
+                    if J > 2
+                        rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
+                        (orders[:,inv_j] .== orders[i,inv_j]+1) .& (orders[:,j] .== orders[i,j]-1));
                     else
                         rows = findall((orders[:,inv_j] .== orders[i,inv_j]+1) .& (orders[:,j] .== orders[i,j]-1));
                     end
