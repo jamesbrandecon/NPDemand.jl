@@ -112,7 +112,7 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
         end
         while penalty_violated
             println("Iteration $(iter)...")
-            L *= 10;
+            L *= 5;
             obj(x::Vector) = obj_func(x,L);
             grad!(G::Vector,x::Vector) = grad_func!(G,x,L);
             if iter ==0

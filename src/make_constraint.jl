@@ -56,7 +56,8 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
                 other_orders = setdiff(collect(1:J), inv_j)
                 orders = order_vec[inv_j];
                 for i ∈ eachindex(orders[:,1])
-                    rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,inv_j] .== orders[i,inv_j]+1));
+                    rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
+                        (orders[:,inv_j] .== orders[i,inv_j]+1));
                     rows = getindex.(rows, 1);
                     try
                         rows = rows[1];

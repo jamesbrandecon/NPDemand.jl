@@ -85,8 +85,8 @@ function subset_for_elast_const(npd_problem, df::DataFrame; grid_size=10)
 
     temp = [];
     for j = 1:J
-        push!(temp, collect(range(min_s[j], max_s[j], length = 2)))
-        # push!(temp, collect(range((max_s[j] + min_s[j])/2 - 0.05, (max_s[j] + min_s[j])/2 + 0.05, length=2)))
+        # push!(temp, collect(range(min_s[j], max_s[j], length = 2)))
+        push!(temp, collect(range((max_s[j] + min_s[j])/2 - 0.05, (max_s[j] + min_s[j])/2 + 0.05, length=2)))
     end
     temp = collect.(Iterators.product(temp...));
     temp = reshape(temp, length(temp));
