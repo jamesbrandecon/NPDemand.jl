@@ -21,9 +21,9 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
     - :diagonal\\_dominance\\_all 
     - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
 """
-function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["prices"], FE = [], 
+function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["prices"], price_iv = [], FE = [], 
     constraints = [], bO = 2, obj_xtol = 1e-5, obj_ftol = 1e-5, 
-    constraint_tol = 1e-5, normalization=[], chunk_size = [])
+    constraint_tol = 1e-5, normalization=[], chunk_size = [], grid_size = [])
     
     find_prices = findall(index_vars .== "prices")[1];
 
@@ -46,6 +46,15 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     E2 = (exchange!=[])
     if (E1!=E2)
         error("Keyword `exchange` should be specified (only) if :exchangeability is in `constraints` vector")
+    end
+
+    if (price_iv !=[]) & !(typeof(price_iv) <: Vector)
+        error("Keyword `price_iv` should be a Vector of Symbols or Strings indicating column names in `df`")
+    end
+
+    # Nonlinear constraint grid size check: 
+    if ((grid_size == []) & (:subs_in_group ∈ constraints)) | ((grid_size != []) & (:subs_in_group ∉ constraints))
+        error("Specify grid_size if and only if :subs_in_group is in `constraints`")
     end
 
     # Confirm that shares are numbered as expected: 
@@ -100,7 +109,7 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     end
 
     println("Making Bernstein polynomials....")
-    Xvec, Avec, Bvec, syms = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO);
+    Xvec, Avec, Bvec, syms = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; price_iv = price_iv);
     
     # @show size(syms)
     if constraints !=[]
@@ -142,7 +151,7 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
 
     if :subs_in_group ∈ constraints
         println("Preparing inputs for nonlinear constraints....")
-        subset = subset_for_elast_const(problem, df; grid_size=2);
+        subset = subset_for_elast_const(problem, df; grid_size = grid_size);
         elast_mats, elast_prices = make_elasticity_mat(problem, subset);
         problem.elast_mats = elast_mats;
         problem.elast_prices = elast_prices;

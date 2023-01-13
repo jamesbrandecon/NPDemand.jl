@@ -1,4 +1,5 @@
-function prep_matrices(df::DataFrame, exchange, index_vars, FEmat, product_FEs, bO)
+function prep_matrices(df::DataFrame, exchange, index_vars, 
+    FEmat, product_FEs, bO; price_iv = [])
 
 # Unpack DataFrame df
 s = Matrix(df[:, r"shares"]);
@@ -99,7 +100,13 @@ for xj = 1:J
         end
     end
 
-    A_xj = hcat(A_xj, df[!,"price_iv$(xj-1)"])
+    if price_iv == []
+        A_xj = hcat(A_xj, df[!,"price_iv$(xj-1)"])
+    else
+        for p_ivs ∈ price_iv
+            A_xj = hcat(A_xj, df[!,"$(p_ivs)$(xj-1)"]);
+        end
+    end
 
    println("Done with choice $(xj-1)")
    push!(Xvec, full_interaction)

@@ -96,11 +96,12 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
             push!(tempmats, tempmat_s)
         end
     end
-    Jmat = [];
+    Jmat = []; # vector of derivatives of inverse shares
     J_sp = zeros(size(svec[:,1]));
     all_own = zeros(size(svec,1),J);
     svec2 = svec;
     avg_elast_mat = zeros(J,J);
+    all_elast_mat = [];
 
     for ii = 1:length(dsids[1,1,:])
         J_s = zeros(J,J);
@@ -114,9 +115,10 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
     
         # Market vector of prices/shares
         ps = at[ii,:]./svec2[ii,:];
-        ps_mat = repeat(at[ii,:]', J,1) ./ repeat(svec2[ii,:], 1,J) ;
-        avg_elast_mat += (temp .* ps_mat) ./ size(at,1);
-    
+        ps_mat = repeat(at[ii,:]', J,1) ./ repeat(svec2[ii,:], 1,J);
+        avg_elast_mat += (temp .* ps_mat) ./ size(at,1); # take average over 
+        push!(all_elast_mat, temp .* ps_mat)
+
         # All own-price elasticities
         all_own[ii,:] = -1*Diagonal(inv(J_s))*ps;
     
@@ -131,6 +133,6 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
     #     print("There were $numBadMarkets bad markets")
     # end
     # return esep, Jmat, svec, all_own
-    return esep, avg_elast_mat, svec, all_own, tempmats
+    return esep, avg_elast_mat, svec, all_own, all_elast_mat, Jmat
 end
     

@@ -114,26 +114,28 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
                 end
             end
         else
-            print(":all_substitutes currently only implemented for models with some level of exchangeability")
-    #         for inv_j ∈ collect(1:J)
-    #             if inv_j >1
-    #                 init_ind = sum(lengths[1:inv_j-1])
-    #             else
-    #                 init_ind = 0;
-    #             end
-    #             other_orders = setdiff(collect(1:J), inv_j)
-    #             orders = order_vec[inv_j];
-    #             for i ∈ eachindex(orders[:,1])
-    #                 # findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,j1] .== orders[i,j2]) .& (orders[:,j2] .== orders[i,j1]));
-    #                 rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,inv_j] .== orders[i,inv_j]+1));
-    #                 rows = getindex.(rows, 1);
-    #                 try
-    #                     rows = rows[1];
-    #                     Aineq = add_constraint(Aineq, i + init_ind, rows + init_ind);
-    #                 catch
-    #                 end
-    #             end
-    #         end
+            # print(":all_substitutes currently only implemented for models with some level of exchangeability")
+            for inv_j ∈ collect(1:J)
+                if inv_j >1
+                    init_ind = sum(lengths[1:inv_j-1])
+                else
+                    init_ind = 0;
+                end
+                # Loop over all products in demand function
+                for j_loop = 1:J
+                    other_orders = setdiff(collect(1:J), j_loop)
+                    orders = order_vec[j_loop];
+                    for i ∈ eachindex(orders[:,1])
+                        rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,inv_j] .== orders[i,inv_j]+1));
+                        rows = getindex.(rows, 1);
+                        try
+                            rows = rows[1];
+                            Aineq = add_constraint(Aineq, i + init_ind, rows + init_ind);
+                        catch
+                        end
+                    end
+                end
+            end
         end
     end
 
