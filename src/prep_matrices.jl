@@ -30,7 +30,8 @@ price_ind = find_prices[1];
 
 # --------------------------------------------
 # Prep for design matrix and constraints
-B = [] 
+B = []; 
+prod_FE_counter = 1;
 for j = 0:J-1
     index_j = []
     for k ∈ eachindex(index_vars) 
@@ -51,9 +52,15 @@ for j = 0:J-1
     # Append product IDs if specified by user -- treated differently here 
     # because all other FEs must be constant across products
     if product_FEs == true 
-        prodFE = zeros(size(index_j,1),J-1);
-        if j < J-1 # dropping last product's FE for location normalization
-            prodFE[:,j+1] .= 1;
+        num_FEs = J - length(exchange);
+        prodFE = zeros(size(index_j,1),num_FEs);
+
+        which_group = findall(j+1 .∈ exchange)[1];
+        first_product_in_group = exchange[which_group][1];
+
+        if j+1 !=first_product_in_group # dropping last product's FE for location normalization
+            prodFE[:,prod_FE_counter] .= 1;
+            prod_FE_counter +=1;
         end
         index_j = hcat(index_j, prodFE);
     end
@@ -66,6 +73,7 @@ Xvec = []
 Avec = []
 syms = []
 
+prod_FE_counter = 1;
 for xj = 1:J
     which_group = findall(xj .∈ exchange)[1];
     first_product_in_group = exchange[which_group][1];
@@ -93,6 +101,8 @@ for xj = 1:J
     A_xj = A_xj[:, 2:end]
     A_xj, sym_combos, combos = make_interactions(A_xj, exchange, bO, xj, perm);
     full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, bO, first_product_in_group, perm);
+    
+    # Add index vars as IV
     for k ∈ eachindex(index_vars) 
         v = index_vars[k];
         if v!= "prices"
@@ -100,12 +110,31 @@ for xj = 1:J
         end
     end
 
+    # add IVs for price
     if price_iv == []
         A_xj = hcat(A_xj, df[!,"price_iv$(xj-1)"])
     else
         for p_ivs ∈ price_iv
             A_xj = hcat(A_xj, df[!,"$(p_ivs)$(xj-1)"]);
         end
+    end
+    
+    # Add FEs/dummies as IVs
+    if FEmat !=[]
+        A_xj = hcat(A_xj, FEmat);
+    end
+    if product_FEs == true 
+        num_FEs = J - length(exchange);
+        prodFE = zeros(size(A_xj,1),num_FEs);
+
+        which_group = findall(xj .∈ exchange)[1];
+        first_product_in_group = exchange[which_group][1];
+
+        if xj !=first_product_in_group # dropping last product's FE for location normalization
+            prodFE[:,prod_FE_counter] .= 1;
+            prod_FE_counter +=1;
+        end
+        A_xj = hcat(A_xj, prodFE);
     end
 
    println("Done with choice $(xj-1)")

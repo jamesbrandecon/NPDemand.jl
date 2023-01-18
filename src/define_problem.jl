@@ -77,6 +77,10 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     end
 
     if exchange ==[] 
+        if "product" ∈ FE
+            error("Product FEs are redundant/not identified if no products are exchangeable")
+        end
+
         for j = 1:J 
             push!(exchange, [j])
         end
@@ -107,6 +111,7 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     if "product" ∈ FE
         product_FEs = true;
     end
+    
 
     println("Making Bernstein polynomials....")
     Xvec, Avec, Bvec, syms = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; price_iv = price_iv);
