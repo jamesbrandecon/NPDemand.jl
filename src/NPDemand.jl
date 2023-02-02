@@ -15,6 +15,7 @@ import Strided
 using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, LineSearches, Combinatorics, Primes
 using ForwardDiff, Strided
 using ForwardDiff: GradientConfig, Chunk
+using StaticArrays, FiniteDiff, ReverseDiff
 
 include("simulate_logit.jl")
 include("toDataFrame.jl")

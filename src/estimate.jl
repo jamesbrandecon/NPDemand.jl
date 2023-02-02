@@ -32,7 +32,21 @@ function estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = fal
     find_prices = findall(problem.index_vars .== "prices");
     price_index = find_prices[1];
 
-obj_func(β::Vector, lambda::Int) = md_obj(β;exchange =exchange,X = Xvec, B = Bvec, A = Avec,
+    # Constraint matrix for nonlinear constraints 
+    J = length(Xvec);
+    conmat = zeros(Float64,J,J);
+    for j1 = 1:J
+        ej = getindex.(findall(j1 .∈ exchange),1)[1];
+        for j2 = 1:J
+            if (j2==j1) | (j2 ∉ exchange[ej])
+                conmat[j1,j2] = -Inf;
+            end                
+        end
+    end
+    # @show conmat 
+    # error("end")
+
+obj_func(β::SizedArray, lambda::Real) = md_obj(β;exchange =exchange,X = Xvec, B = Bvec, A = Avec,
         m1=matrices.m1, 
         m2=matrices.m2, 
         m3=matrices.m3, 
@@ -47,9 +61,9 @@ obj_func(β::Vector, lambda::Int) = md_obj(β;exchange =exchange,X = Xvec, B = B
         WB = matrices.WB,
         Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
         mins = mins, maxs = maxs, normalization = normalization, price_index = price_index, 
-        lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices);
+        lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices, conmat = conmat);
 
-grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange =exchange, X = Xvec, B = Bvec, A = Avec,
+grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X = Xvec, B = Bvec, A = Avec,
         m1=matrices.m1, 
         m2=matrices.m2, 
         m3=matrices.m3, 
@@ -65,7 +79,10 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
         Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
         mins = mins, maxs = maxs, normalization = normalization, price_index = price_index, 
         lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices, 
-        chunk_size = [], cfg = cfg);
+        chunk_size = [], cfg = cfg, g = g, conmat = conmat);
+
+    # Minimizer method 
+    method = LBFGS();
 
     # Estimation 
     β_length = design_width + sum(size(Bvec[1],2))
@@ -77,50 +94,95 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
         β_init = problem.results.minimizer;
     end
 
-    obj_uncon(x::Vector) = obj_func(x,0);
-    grad_uncon!(G::Vector,x::Vector) = grad_func!(G,x,0);
+    obj_uncon(x::SizedVector) = obj_func(x,0);
+    grad_uncon!(G::SizedVector,x::SizedVector) = grad_func!(G,x,0, x -> 0);
 
     if isempty(Aineq) & (:subs_in_group ∉ problem.constraints);
         println("Problem only has equality constraints. Solving...")
-        results =  Optim.optimize(obj_uncon, grad_uncon!, β_init,
-        LBFGS(), Optim.Options(show_trace = show_trace, iterations = max_iterations));
+        # c = @MArray zeros(length(β_init))
+        c = SizedVector{length(β_init)}(β_init);
+        c .= β_init;
+
+        results =  Optim.optimize(obj_uncon, grad_uncon!, c,
+        method, Optim.Options(show_trace = show_trace, iterations = max_iterations));
     else
         println("Solving problem without inequality constraints....")
-        results =  Optim.optimize(obj_uncon, grad_uncon!, β_init,
-        LBFGS(), Optim.Options(show_trace = show_trace, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
-        L = 1;
+        # c = @SizedVector zeros(length(β_init))
+        c = SizedVector{length(β_init)}(β_init);
+        c .= β_init;
+        
+        # @time obj_uncon(c)
+        # @time grad_uncon!(c,c)
+
+        results =  Optim.optimize(obj_uncon, grad_uncon!, c,
+        method, Optim.Options(show_trace = show_trace, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
+        L = 0.1;
         θ = results.minimizer[1:design_width];
         iter = 0;
 
-        println("Iteratively increasing penalties on inequality constraints....")
         penalty_violated = true
+        
         if !isempty(Aineq)
             penalty_violated = (maximum(Aineq * θ) > constraint_tol);
         end
         if elast_mats!=[]
             J = length(Xvec);
-            conmat = zeros(eltype(θ),J,J);
-            for j1 = 1:J
-                ej = getindex.(findall(j1 .∈ exchange),1)[1];
-                for j2 = 1:J
-                    if (j2==j1) | (j2 ∉ exchange[ej])
-                        conmat[j1,j2] = -Inf;
-                    end                
-                end
-            end
-            penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L, conmat) >constraint_tol);
+            # c = @MArray zeros(length(θ))
+            # c = SizedVector{length(θ)}(θ);
+            c = results.minimizer[1:design_width];
+            penalty_violated = (penalty_violated) & (elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat) >constraint_tol);
         end
+
+        if penalty_violated 
+            println("Iteratively increasing penalties on inequality constraints....")
+        end
+
         while penalty_violated
             println("Iteration $(iter)...")
-            L *= 5;
-            obj(x::Vector) = obj_func(x,L);
-            grad!(G::Vector,x::Vector) = grad_func!(G,x,L);
+            L *= 100;
+
+            # Pre-allocating 
+            # dsids = @MArray zeros(ForwardDiff.Dual{Float64}, J, J, size(elast_mats[1,1],1));
+            # temp = @MArray zeros(ForwardDiff.Dual{Float64}, J,J);
+            # J_s = @MArray zeros(ForwardDiff.Dual{Float64},J,J)
+
+            g_d(x) = elast_penaltyrev(x, exchange, elast_mats, 
+                                        elast_prices, L, conmat);
+            g(x) = ForwardDiff.gradient(g_d, x);
+
+            obj(x::SizedVector) = obj_func(x,L);
+            grad!(G::SizedVector,x::SizedVector) = grad_func!(G,x,L, g);
+
+            # @show g_d(results.minimizer)
+            # @show g(results.minimizer)
+            # error("end")
+
             if iter ==0
-                results =  Optim.optimize(obj, grad!, results.minimizer,
-                    LBFGS(), Optim.Options(show_trace = show_trace, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
+                R = results.minimizer;
+                # c = @SizedVector zeros(length(R))
+                c = SizedVector{length(R)}(R);
+                c .= R;
+
+                # @show typeof(c)
+                # print("1")
+                # @time obj(c)
+                # print("2")
+                # @time grad!(deepcopy(c),c)
+                # print("3")
+                # @time g(c)
+                # error("end")
+
+                results =  Optim.optimize(obj, grad!, c,
+                method, Optim.Options(show_trace = show_trace, iterations = max_iterations, 
+                    x_tol = obj_xtol, f_tol = obj_ftol));
             else
-                results =  Optim.optimize(obj, grad!, results.minimizer,
-                    LBFGS(), Optim.Options(show_trace = show_trace, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
+                R = results.minimizer; 
+                # c = @MArray zeros(length(R))
+                # c = SizedVector{length(R)}(R);
+                c = R;
+                results =  Optim.optimize(obj, grad!, c,
+                method, Optim.Options(show_trace = show_trace, iterations = max_iterations, 
+                    x_tol = obj_xtol, f_tol = obj_ftol));
             end
 
             β = results.minimizer
@@ -138,16 +200,10 @@ grad_func!(grad::Vector, β::Vector, lambda::Int) = md_grad!(grad, β; exchange 
                 penalty_violated = (maximum(Aineq * θ) > constraint_tol);
             end
             if elast_mats!=[]
-                conmat = zeros(eltype(θ),J,J);
-                for j1 = 1:J
-                    ej = getindex.(findall(j1 .∈ exchange),1)[1];
-                    for j2 = 1:J
-                        if (j2==j1) | (j2 ∉ exchange[ej])
-                            conmat[j1,j2] = -Inf;
-                        end                
-                    end
-                end
-                penalty_violated = (penalty_violated) & (elast_penalty(θ, exchange, elast_mats, elast_prices, L, conmat) > constraint_tol);
+                # c = @MArray zeros(length(θ))
+                # c = SizedVector{length(θ)}(θ);
+                c = θ;
+                penalty_violated = (penalty_violated) & (elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat) > constraint_tol);
             end
 
             iter+=1;

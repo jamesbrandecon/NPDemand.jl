@@ -126,8 +126,8 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     matrices = prep_inner_matrices(Xvec, Avec, Bvec);
 
     design_width = sum(size.(Xvec,2));
-    elast_mats = [];
-    elast_prices = [];
+    elast_mats = Matrix[];
+    elast_prices = Matrix[];
 
     problem = NPDProblem(df,
                         matrices, 

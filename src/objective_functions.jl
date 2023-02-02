@@ -1,8 +1,8 @@
 ultra = true
-function md_obj(β::Vector; exchange = [], X = [], B = [], A = [],
+function md_obj(β::AbstractVector; exchange = [], X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
     Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], 
-    price_index = 1, lambda1=0, elast_mats=[], elast_prices = [])
+    price_index = 1, lambda1=0.0, elast_mats=[], elast_prices = [], conmat = [])
 
     J = length(X);
 
@@ -36,12 +36,12 @@ function md_obj(β::Vector; exchange = [], X = [], B = [], A = [],
     for j = 1:J
         design_width_j = size(X[j],2);
         j_ind = (theta_count + 1):(theta_count + design_width_j);
-        θ_j = θ[j_ind]
+        @views θ_j = θ[j_ind]
         if ultra == false 
             vecmat!(y, B[j],γ)
             obj += wsse_avx(y, X[j], θ_j, W[j]);
         else
-            γtemp = γ[2:end];
+            @views γtemp = γ[2:end];
             @views temp = m1[j] .+ Array(m2[j]*γtemp) .- Array(m3[j]*θ_j) .+ γtemp'*m4[j] .+ γtemp'* m5[j] * γtemp .- γtemp'*m6[j]*θ_j .- θ_j'*m7[j] .- Array(θ_j'*m8[j])*γtemp .+ θ_j'*m9[j]*θ_j;
             obj += temp[1];
         end
@@ -56,31 +56,34 @@ function md_obj(β::Vector; exchange = [], X = [], B = [], A = [],
 
     # Nonlinear constraints
     if (elast_mats != []) & (lambda1!=0)
-        conmat = zeros(eltype(θ),J,J);
-        Threads.@threads for j1 = 1:J
-            ej = getindex.(findall(j1 .∈ exchange),1)[1];
-            for j2 = 1:J
-                if (j2==j1) | (j2 ∉ exchange[ej])
-                    conmat[j1,j2] = -Inf;
-                end                
-            end
-        end
-        obj += elast_penalty(θ, exchange, elast_mats, elast_prices, lambda1, conmat; during_obj=true);
+        # conmat = zeros(eltype(θ),J,J);
+        # Threads.@threads for j1 = 1:J
+        #     ej = getindex.(findall(j1 .∈ exchange),1)[1];
+        #     for j2 = 1:J
+        #         if (j2==j1) | (j2 ∉ exchange[ej])
+        #             conmat[j1,j2] = -Inf;
+        #         end                
+        #     end
+        # end
+        # c = @MArray zeros(length(θ))
+        # c = SizedVector{length(θ)}(θ);
+        c = θ;
+        obj += elast_penaltyrev(c, exchange, elast_mats, elast_prices, lambda1, conmat; during_obj=true);
     end
 
     obj
 end
 
-function md_grad!(grad::Vector, β::Vector; exchange = [], X = [], B = [], A = [],
+function md_grad!(grad::AbstractVector, β::AbstractVector; exchange::Array = [], X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
     Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, 
-    lambda1=0, elast_mats=[], elast_prices = [], chunk_size = [], cfg = [])
+    lambda1 = 0.0, g = x -> x , elast_mats =[], elast_prices = [], chunk_size = [], cfg = [],
+    ineq_con = zeros(eltype(β), size(Aineq,1)),
+    eq_con = zeros(eltype(β), size(Aeq,1)), conmat = [], grad0 = zeros(eltype(β), size(grad)))
 
-    grad0 = zeros(eltype(β), size(β));
-    ineq_con = zeros(eltype(β), size(Aineq,1));
-    eq_con = zeros(eltype(β), size(Aeq,1))
     # y = zeros(eltype(β), size(X[1],1));
     # e = zeros(eltype(β), size(y));
+    # 
 
     J = length(X);
     
@@ -105,12 +108,12 @@ function md_grad!(grad::Vector, β::Vector; exchange = [], X = [], B = [], A = [
     end
 
     # Gradient of unconstrained function
-    grad_temp = zeros(length(grad0[length(θ)+1:end]));
+    # grad_temp = zeros(length(grad0[length(θ)+1:end]));
     # y = copy(e)
     # e = zeros(eltype(β), size(X[1],1));
 
-    theta_count = 0;
-    temp = zeros(1);
+    theta_count = 0; # had to be int
+    temp = zero(eltype(θ));
     for j = 1:J    
         design_width_j = size(X[j],2);
         # j_ind = ((j-1)*design_width_j + 1):(j*design_width_j);
@@ -139,17 +142,10 @@ function md_grad!(grad::Vector, β::Vector; exchange = [], X = [], B = [], A = [
     if (elast_mats != []) & (lambda1!=0)
         # Convert jacobian_vec to Penalty
         # Have to calculate sign matrix from exchange
-        conmat = zeros(eltype(θ),J,J);
-        for j1 = 1:J
-            ej = getindex.(findall(j1 .∈ exchange),1)[1];
-            for j2 = 1:J
-                if (j2==j1) | (j2 ∉ exchange[ej])
-                    conmat[j1,j2] = -Inf;
-                end                
-            end
-        end
-        g(x) = elast_penalty(x, exchange, elast_mats, elast_prices, lambda1, conmat);
-        θ_packed =  pack_parameters(θ, exchange, size.(X,2))
+        # g(x) = elast_penaltyrev(x, exchange, elast_mats, elast_prices, lambda1, conmat);
+
+        # g(x::Vector) = sum(x .^2)
+        # θ_packed =  pack_parameters(θ, exchange, size.(X,2))
         # if chunk_size ==[]
         #     # cfg = GradientConfig(g, θ_packed);
         #     cfg = GradientConfig(nothing, θ_packed);
@@ -159,24 +155,32 @@ function md_grad!(grad::Vector, β::Vector; exchange = [], X = [], B = [], A = [
         # end
         # @show g(θ_packed)
         # print(reshape(unpack(θ_packed, exchange, size.(X,2), grad=true), 140, 5))
-        packed_grad = ForwardDiff.gradient(g, θ_packed, cfg);
+        # c = @MVector ones(length(θ_packed))
+        # c = SizedVector{length(θ_packed)}(θ_packed);
+        # c = θ_packed;
+        # c  = @MArray [i for i in pack_parameters(θ, exchange, size.(X,2))]
+        # packed_grad = ForwardDiff.gradient(g,
+            # c, GradientConfig(g, c, Chunk{1}())); 
+        # packed_grad = FiniteDiff.finite_difference_gradient(g, c);
+        # packed_grad = ForwardDiff.gradient(g, c, GradientConfig(g, c, Chunk{1}())); #MArray{Tuple(length(θ_packed))}(θ_packed)
         
-        grad0[1:length(θ)] += unpack(packed_grad, exchange, size.(X,2), grad=true);
-        # grad0[1:length(θ)] += ForwardDiff.gradient(g, θ, cfg);
+        # grad0[1:length(θ)] += unpack(packed_grad, exchange, size.(X,2), grad=true);
+        # grad0[1:length(θ)] += ForwardDiff.gradient(g, θ);
+        grad0[1:length(θ)] += g(θ);
     end
 
     # Enforce normalization in gradient too
-    grad0[length(θ)+1] = 0; 
+    grad0[length(θ)+1] = zero(eltype(θ)); 
     for i ∈ normalization
-        grad0[length(θ)+i] = 0;
-        grad0[length(θ)+i] = 0;
+        grad0[length(θ)+i] = zero(eltype(θ));
+        grad0[length(θ)+i] = zero(eltype(θ));
     end
     
     for i∈eachindex(mins)
         grad0[maxs[i]] += grad0[mins[i]];
     end
     for i∈eachindex(mins)
-        grad0[mins[i]] = 0;
+        grad0[mins[i]] = zero(eltype(θ));
     end
 
     try 
@@ -184,11 +188,11 @@ function md_grad!(grad::Vector, β::Vector; exchange = [], X = [], B = [], A = [
     catch
         grad .= dropdims(grad0, dims=1);
     end
-    
+    # @show typeof(θ)
     grad
 end  
 
-function pack_parameters(θ, exchange, lengths)
+function pack_parameters(θ, exchange::Array, lengths)
     θ_packed = eltype(θ)[];
     index = 1;
     for i ∈ eachindex(exchange)
@@ -199,7 +203,7 @@ function pack_parameters(θ, exchange, lengths)
     return θ_packed
 end
 
-function unpack(θ_packed, exchange, lengths; grad=true)
+function unpack(θ_packed, exchange::Array, lengths; grad=true)
     θ = eltype(θ_packed)[];
     index = 1;
     for i ∈ eachindex(exchange)

@@ -1,7 +1,9 @@
-function elast_penalty(θ_packed, exchange, elast_mats::Matrix{Any}, elast_prices::Matrix{Float64}, lambda::Real, conmat; 
-    J = maximum(maximum.(exchange)), dsids = zeros(eltype(θ_packed),J,J,size(elast_mats[1,1],1)),
+function elast_penalty(θ_packed::AbstractArray, exchange::Array, elast_mats::Matrix{Any}, elast_prices::Matrix{Float64}, 
+    lambda::Real, conmat::Matrix{Float64}; 
+    J = maximum(maximum.(exchange)),
     J_sp = zeros(eltype(θ_packed),size(elast_mats[:,1])), during_obj = false)
     
+    dsids = zeros(eltype(θ_packed),J,J,size(elast_mats[1,1],1))
     at = elast_prices;
     
     if during_obj == false
@@ -40,11 +42,10 @@ function elast_penalty(θ_packed, exchange, elast_mats::Matrix{Any}, elast_price
     jacobian_vec = [];
     failed_inverse = false;
 
-    penalty = 0;
-
+    penalty = zero(eltype(θ));
     temp = zeros(eltype(θ), J,J);
+    J_s = zeros(eltype(θ),J,J);
     Threads.@threads for ii = 1:length(dsids[1,1,:])
-        J_s = zeros(eltype(θ),J,J);
         for j1 = 1:J
             for j2 = 1:J
                 @views J_s[j1,j2] = dsids[j1,j2,ii]
@@ -54,20 +55,13 @@ function elast_penalty(θ_packed, exchange, elast_mats::Matrix{Any}, elast_price
         try
             temp = -1*inv(J_s);
         catch
-            # temp = J_s;
             failed_inverse = true;
             break
-        end
-        # push!(Jmat, temp)
-    
-        # Market vector of prices/shares
-        # push!(jacobian_vec, temp ); 
-         
-        penalty += sum((temp .< conmat) .* abs.(temp).^2 .* lambda);
+        end         
+        penalty += sum((temp .< conmat) .* abs.(temp).^2 .* lambda) + abs(log(cond(J_s))) * (cond(J_s) < 1e-3);
     end
-    
     if failed_inverse 
-        penalty += 1e10;
+        # penalty += 1e10;
     # else
         # for i ∈ eachindex(jacobian_vec)
         #     penalty += sum((jacobian_vec[i] .< conmat) .* abs.(jacobian_vec[i]).^2 .* lambda);
@@ -80,8 +74,14 @@ function subset_for_elast_const(npd_problem, df::DataFrame; grid_size=10)
     s = Matrix(df[:, r"shares"]);
     J = size(s,2);
 
-    max_s = maximum(s, dims=1);
-    min_s = minimum(s, dims=1);
+    # max_s = maximum(s, dims=1);
+    # min_s = minimum(s, dims=1);
+    max_s = quantile(s[:,1], 0.9);
+    min_s = quantile(s[:,1], 0.1);
+    for j = 2:J
+        max_s = vcat(max_s, quantile(s[:,1], 0.9));
+        min_s = vcat(min_s, quantile(s[:,1], 0.1));
+    end
 
     temp = [];
     for j = 1:J
@@ -164,4 +164,71 @@ function make_elasticity_mat(npd_problem, df::DataFrame)
     elast_mats = temp_elast_mats;
     elast_prices = Matrix(df[!,r"prices"]);
     return elast_mats, elast_prices 
+end
+
+
+function elast_penaltyrev(θ::AbstractArray, exchange::Array, elast_mats::Matrix{Any}, elast_prices::Matrix{Float64}, 
+    lambda::Real, conmat::Matrix{Float64}; 
+    J = maximum(maximum.(exchange)),
+    during_obj = false)
+
+    at = elast_prices;
+
+    dsids = zeros(eltype(θ),J,J,size(elast_mats[1,1],1));
+    temp = zeros(eltype(θ), J,J);
+    J_s = zeros(eltype(θ),J,J);
+
+    for j1 = 1:J
+        for j2 = 1:J
+            if j1 ==1 
+                init_ind = 0;
+            else
+                @views init_ind = sum(size.(elast_mats[1:j1-1,1],2))
+            end
+            
+            @views θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1,1],2)];
+            
+            try
+                dsids[j1,j2,:] .= elast_mats[j1,j2] * θ_j1; 
+            catch
+                # @show size(θ_j1) size(elast_mats[j1,j2])
+                # @show j1 j2
+                error("Error in inner_elasticity functions")
+            end
+        end
+    end
+    
+    Jmat = eltype(θ)[];
+    jacobian_vec = eltype(θ)[];
+    failed_inverse = false;
+
+    penalty = zero(eltype(θ));
+
+    for ii = 1:length(dsids[1,1,:])
+        for j1 = 1:J
+            for j2 = 1:J
+                J_s[j1,j2] = dsids[j1,j2,ii]
+            end
+        end
+        
+        # @show det(J_s)
+
+        try
+            temp = -1*inv(J_s);
+        catch
+            failed_inverse = true;
+            break
+        end
+        
+        DET = det(J_s)^2;
+        penalty += sum((temp .< conmat) .* abs.(temp).^2 .* lambda)+ lambda * ((DET + 1e-12) / DET - 1); 
+    end
+    
+    if failed_inverse 
+        penalty += 1e10;
+    else
+        # @show det(J_s)
+    end
+    
+    return penalty
 end
