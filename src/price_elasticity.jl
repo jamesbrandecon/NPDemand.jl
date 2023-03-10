@@ -1,10 +1,19 @@
 """
-    price_elasticity(problem::NPDProblem, df::DataFrame; at::Matrix, whichProducts = [1,1])
+    price_elasticity!(problem::NPDProblem, df::DataFrame; at::Matrix, whichProducts = [1,1])
 
 Takes the solved `problem` as first argument, a `DataFrame` as the second argument, and evaluates price elasticities in-sample at prices `at`. 
-Currently does not calculate out-of-sample price elasticities, though this will be added in the future. 
+Currently does not calculate out-of-sample price elasticities. This will be added to compute_demand_function!. 
+
+Results of this function are stored as a `DataFrame` in problem.all_elasticities. Results can be summarized by hand or with summary functions: 
+- `mean_elasticity(problem::NPDProblem)`
+- `median_elasticity(problem::NPDProblem)`
+- quantile_elasticiy(problem::NPDProblem, q ∈ [0,1])
 """
-function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whichProducts = [1,1])
+function price_elasticities!(npd_problem; whichProducts = [1,1])
+
+    df = npd_problem.data;
+    at = df[!,r"prices"];
+
     # Unpack results
     β = npd_problem.results.minimizer
     θ = β[1:npd_problem.design_width]
@@ -35,7 +44,6 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
     J = size(s,2);
     bernO = convert.(Integer, bO);
     order = bernO;
-    trueS=true;
     
     design_width = sum(size.(X,2));
     # θ = β[1:design_width]
@@ -48,17 +56,8 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
         index[:,j] = B[j]*γ;
     end
 
-    # Declare prices and shares to evaluate derivatives
-    svec = similar(index)
-    if trueS == false
-        for p_i = 1:size(index,1)
-            s!(sj) = solve_s_nested_flexible(sj, inv_sigma, index[p_i,:]', J, bernO, included, maxes, nothing);
-            ans = nlsolve(s!, 1/(2*J) .* ones(J))
-            svec[p_i,:] =  ans.zero;
-        end
-    else
-        svec = s;
-    end
+    # Shares to evaluate derivatives -- bad form, holdover from old code
+    svec = s;
     
     # Share Jacobian
     tempmats = []
@@ -115,7 +114,11 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
     
         # Market vector of prices/shares
         ps = at[ii,:]./svec2[ii,:];
-        ps_mat = repeat(at[ii,:]', J,1) ./ repeat(svec2[ii,:], 1,J);
+        # ps_mat = repeat(at[ii,:]', J,1) ./ repeat(svec2[ii,:], 1,J);
+        ps_mat = zeros(J,J)
+        for j1=1:J, j2 = 1:J 
+            ps_mat[j1,j2] = at[ii,j1]/svec2[ii,j2];
+        end
         avg_elast_mat += (temp .* ps_mat) ./ size(at,1); # take average over 
         push!(all_elast_mat, temp .* ps_mat)
 
@@ -129,10 +132,47 @@ function price_elasticity(npd_problem, df::DataFrame; at = df[!,r"prices"], whic
     # New code, uses matrix of index, which are equal to -1 .* prices
     esep = J_sp.* (at[:,whichProducts[2]]./svec2[:,whichProducts[1]]); # own-price varying
     
-    # if trueS==1
-    #     print("There were $numBadMarkets bad markets")
-    # end
     # return esep, Jmat, svec, all_own
-    return esep, avg_elast_mat, svec, all_own, all_elast_mat, Jmat
+    # return esep, avg_elast_mat, svec, all_own, all_elast_mat, Jmat
+    npd_problem.all_elasticities = all_elast_mat; #DataFrame(product1 = prod1, product2 = prod2, elasticity = elas_ijj, market_ids = market);
 end
     
+
+function summarize_elasticities(problem::NPDProblem, stat::String; q = [])
+    @assert stat ∈ ["mean", "median", "quantile"]
+
+    J = length(problem.Xvec);
+    output = zeros(J,J);
+    for j1 ∈ 1:size(problem.all_elasticities[1],1)
+        for j2 ∈ 1:size(problem.all_elasticities[1],1)
+            if stat=="median"
+                output[j1,j2] = median(getindex.(problem.all_elasticities, j1, j2));
+            elseif stat=="mean"
+                output[j1,j2] = mean(getindex.(problem.all_elasticities, j1, j2));
+            elseif stat =="quantile" 
+                if q==[]
+                    println("Quantile q not specified -- assuming median")
+                    q = 0.5;
+                end
+                output[j1,j2] = quantile(getindex.(problem.all_elasticities, j1, j2), q);
+            end
+        end
+    end
+    return output
+end
+
+function own_elasticities(problem::NPDProblem)
+    try
+        @assert problem.all_elasticities !=[]
+    catch
+        error("No price elasticities calculated yet -- run price_elasticity!(problem)")
+    end
+    J = length(problem.Xvec);
+    N = size(problem.Xvec[1],1);
+    output = zeros(N,J);
+    for j1 ∈ 1:J
+        output[:,j1] = getindex.(problem.all_elasticities, j1, j1);
+    end
+
+    return output
+end

@@ -1,17 +1,5 @@
 module NPDemand
 
-import LinearAlgebra
-import Statistics
-import Optim
-import Compat
-import NLopt
-import DataFrames
-import NLsolve
-import Combinatorics
-import LineSearches
-import Primes
-import Strided
-
 using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, LineSearches, Combinatorics, Primes
 using ForwardDiff, Strided
 using ForwardDiff: GradientConfig, Chunk
@@ -33,11 +21,12 @@ include("add_constraint.jl")
 include("inner_elasticity.jl")
 include("price_elasticity.jl")
 include("estimate.jl")
+include("compute_demand_function.jl")
 
 
-include("solve_s_nested_flexible.jl")
+# include("solve_s_nested_flexible.jl")
 
-export estimate!,define_problem, show, price_elasticity, toDataFrame, simulate_logit, update_constraints!
-export bern, dbern
+export estimate!,define_problem, show, price_elasticities!, toDataFrame, simulate_logit, update_constraints!
+export bern, dbern, compute_demand_function!, summarize_elasticities, own_elasticities
 
 end

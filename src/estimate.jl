@@ -116,19 +116,30 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
 
         results =  Optim.optimize(obj_uncon, grad_uncon!, c,
         method, Optim.Options(show_trace = show_trace, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
+        
         L = 0.1;
         θ = results.minimizer[1:design_width];
+        
         iter = 0;
-
         penalty_violated = true
         
+        β = results.minimizer
+        θ = β[1:design_width]
+        γ = β[length(θ)+1:end]
+        γ[1] = 1;
+        for i ∈ normalization
+            γ[i] =0; 
+        end
+        for i∈eachindex(mins)
+            θ[mins[i]] = θ[maxs[i]]
+        end
+
         if !isempty(Aineq)
             penalty_violated = (maximum(Aineq * θ) > constraint_tol);
         end
+
         if elast_mats!=[]
             J = length(Xvec);
-            # c = @MArray zeros(length(θ))
-            # c = SizedVector{length(θ)}(θ);
             c = results.minimizer[1:design_width];
             penalty_violated = (penalty_violated) & (elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat) >constraint_tol);
         end
@@ -153,24 +164,10 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
             obj(x::SizedVector) = obj_func(x,L);
             grad!(G::SizedVector,x::SizedVector) = grad_func!(G,x,L, g);
 
-            # @show g_d(results.minimizer)
-            # @show g(results.minimizer)
-            # error("end")
-
             if iter ==0
                 R = results.minimizer;
-                # c = @SizedVector zeros(length(R))
                 c = SizedVector{length(R)}(R);
                 c .= R;
-
-                # @show typeof(c)
-                # print("1")
-                # @time obj(c)
-                # print("2")
-                # @time grad!(deepcopy(c),c)
-                # print("3")
-                # @time g(c)
-                # error("end")
 
                 results =  Optim.optimize(obj, grad!, c,
                 method, Optim.Options(show_trace = show_trace, iterations = max_iterations, 
@@ -203,7 +200,7 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
                 # c = @MArray zeros(length(θ))
                 # c = SizedVector{length(θ)}(θ);
                 c = θ;
-                penalty_violated = (penalty_violated) & (elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat) > constraint_tol);
+                penalty_violated = (penalty_violated) | (elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat) > constraint_tol);
             end
 
             iter+=1;
@@ -211,5 +208,6 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
     end
 
     problem.results = results;
+    # problem.deltas = deltas;
     return 
 end

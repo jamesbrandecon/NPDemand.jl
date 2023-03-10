@@ -114,7 +114,7 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     
 
     println("Making Bernstein polynomials....")
-    Xvec, Avec, Bvec, syms = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; price_iv = price_iv);
+    Xvec, Avec, Bvec, syms, combos = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; price_iv = price_iv);
     
     # @show size(syms)
     if constraints !=[]
@@ -137,6 +137,7 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
                         index_vars,
                         constraints,
                         syms,
+                        combos,
                         Aineq, 
                         Aeq,
                         mins,
@@ -152,6 +153,7 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
                         [],
                         elast_mats,
                         elast_prices,
+                        [],
                         [])
 
     if :subs_in_group ∈ constraints
@@ -180,7 +182,8 @@ mutable struct NPDProblem
     Avec
     index_vars
     constraints 
-    syms
+    syms 
+    combos
     Aineq 
     Aeq 
     mins 
@@ -197,6 +200,7 @@ mutable struct NPDProblem
     elast_mats
     elast_prices
     cfg
+    all_elasticities
 end
 
 import Base.+
