@@ -6,10 +6,13 @@ To enforce constraints, we iteratively minimize the sum of the objective functio
 For each outer iteration, we increase the size of the penalty term by an order of magnitude.  
 
 Options: 
-- `max_iterations`: controls the number of inner iterations for each outer iteration (i.e., for each value of the penalty term, the number of iterations used by Optim)
+- `max_inner_iterations`: controls the number of inner iterations for each call to the optimizer via Optim.jl
+- `max_outer_iterations`: controls the number of total calls to Optim, i.e., the number of times the penalty enforcing the constraints will increase before exiting
 - `show_trace`: if `true`, Optim will print the trace for each outer iteration. 
+- `verbose`: if `false`, will not print outer iteration updates within optimization
 """
-function estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = false)
+function estimate!(problem::NPDProblem; max_inner_iterations = 10000, 
+    max_outer_iterations = 100, show_trace = false, verbose = true)
     # Unpack problem 
     matrices = problem.matrices;
     Xvec = problem.Xvec;
@@ -90,7 +93,7 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
         # Random.seed!(12345)
         β_init = -0.5 .* ones(β_length)
     else
-        println("Problem already has result vector -- Assuming warm start")
+        verbose && println("Problem already has result vector -- Assuming warm start")
         β_init = problem.results.minimizer;
     end
 
@@ -98,15 +101,15 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
     grad_uncon!(G::SizedVector,x::SizedVector) = grad_func!(G,x,0, x -> 0);
 
     if isempty(Aineq) & (:subs_in_group ∉ problem.constraints);
-        println("Problem only has equality constraints. Solving...")
+        verbose && println("Problem only has equality constraints. Solving...")
         # c = @MArray zeros(length(β_init))
         c = SizedVector{length(β_init)}(β_init);
         c .= β_init;
 
         results =  Optim.optimize(obj_uncon, grad_uncon!, c,
-        method, Optim.Options(show_trace = show_trace, iterations = max_iterations));
+        method, Optim.Options(show_trace = show_trace, iterations = max_inner_iterations));
     else
-        println("Solving problem without inequality constraints....")
+        verbose && println("Solving problem without inequality constraints....")
         # c = @SizedVector zeros(length(β_init))
         c = SizedVector{length(β_init)}(β_init);
         c .= β_init;
@@ -115,7 +118,7 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
         # @time grad_uncon!(c,c)
 
         results =  Optim.optimize(obj_uncon, grad_uncon!, c,
-        method, Optim.Options(show_trace = show_trace, iterations = max_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
+        method, Optim.Options(show_trace = show_trace, iterations = max_inner_iterations, x_tol = obj_xtol, f_tol = obj_ftol));
         
         L = 0.1;
         θ = results.minimizer[1:design_width];
@@ -141,15 +144,15 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
         if elast_mats!=[]
             J = length(Xvec);
             c = results.minimizer[1:design_width];
-            penalty_violated = (penalty_violated) & (elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat) >constraint_tol);
+            penalty_violated = (penalty_violated) | (elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat)/L >constraint_tol);
         end
 
         if penalty_violated 
-            println("Iteratively increasing penalties on inequality constraints....")
+            verbose && println("Iteratively increasing penalties on inequality constraints....")
         end
 
-        while penalty_violated
-            println("Iteration $(iter)...")
+        while (penalty_violated) & (iter <max_outer_iterations)
+            verbose && println("Iteration $(iter)...")
             L *= 100;
 
             # Pre-allocating 
@@ -170,7 +173,7 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
                 c .= R;
 
                 results =  Optim.optimize(obj, grad!, c,
-                method, Optim.Options(show_trace = show_trace, iterations = max_iterations, 
+                method, Optim.Options(show_trace = show_trace, iterations = max_inner_iterations, 
                     x_tol = obj_xtol, f_tol = obj_ftol));
             else
                 R = results.minimizer; 
@@ -178,7 +181,7 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
                 # c = SizedVector{length(R)}(R);
                 c = R;
                 results =  Optim.optimize(obj, grad!, c,
-                method, Optim.Options(show_trace = show_trace, iterations = max_iterations, 
+                method, Optim.Options(show_trace = show_trace, iterations = max_inner_iterations, 
                     x_tol = obj_xtol, f_tol = obj_ftol));
             end
 
@@ -195,18 +198,24 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
 
             if !isempty(Aineq)
                 penalty_violated = (maximum(Aineq * θ) > constraint_tol);
+                @show maximum(Aineq * θ)
             end
             if elast_mats!=[]
                 # c = @MArray zeros(length(θ))
                 # c = SizedVector{length(θ)}(θ);
                 c = θ;
-                penalty_violated = (penalty_violated) | (elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat) > constraint_tol);
+                penalty_violated = (penalty_violated) | (elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat)/L > constraint_tol);
+                @show elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat)/L
             end
 
             iter+=1;
         end
     end
-
+    if penalty_violated 
+        problem.converged = false;
+    else
+        problem.converged = true;
+    end
     problem.results = results;
     # problem.deltas = deltas;
     return 

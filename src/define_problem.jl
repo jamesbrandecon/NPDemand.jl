@@ -20,10 +20,11 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
     - :diagonal\\_dominance\\_group 
     - :diagonal\\_dominance\\_all 
     - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
+- `verbose`: if `false`, will not print updates as problem is generated
 """
 function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["prices"], price_iv = [], FE = [], 
     constraints = [], bO = 2, obj_xtol = 1e-5, obj_ftol = 1e-5, 
-    constraint_tol = 1e-5, normalization=[], chunk_size = [], grid_size = [])
+    constraint_tol = 1e-5, normalization=[], chunk_size = [], grid_size = [], verbose = false)
     
     find_prices = findall(index_vars .== "prices")[1];
 
@@ -91,7 +92,7 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     if FE!=[]
         FEvec = [];
         FEmat = [];
-        println("Reshaping fixed-effects into dummy variables....")
+        verbose && println("Reshaping fixed-effects into dummy variables....")
         for f ∈ FE
             if f != "product"
                 unique_vals = unique(df[!,f]);
@@ -113,16 +114,16 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     end
     
 
-    println("Making Bernstein polynomials....")
+    verbose && println("Making Bernstein polynomials....")
     Xvec, Avec, Bvec, syms, combos = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; price_iv = price_iv);
     
     # @show size(syms)
     if constraints !=[]
-        println("Making linear constraint matrices....")
+        verbose && println("Making linear constraint matrices....")
         Aineq, Aeq, maxs, mins = make_constraint(df, constraints, exchange, syms);
     end
     
-    println("Reformulating problem....")
+    verbose && println("Reformulating problem....")
     matrices = prep_inner_matrices(Xvec, Avec, Bvec);
 
     design_width = sum(size.(Xvec,2));
@@ -154,10 +155,11 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
                         elast_mats,
                         elast_prices,
                         [],
+                        [], 
                         [])
 
     if :subs_in_group ∈ constraints
-        println("Preparing inputs for nonlinear constraints....")
+        verbose && println("Preparing inputs for nonlinear constraints....")
         subset = subset_for_elast_const(problem, df; grid_size = grid_size);
         elast_mats, elast_prices = make_elasticity_mat(problem, subset);
         problem.elast_mats = elast_mats;
@@ -201,6 +203,7 @@ mutable struct NPDProblem
     elast_prices
     cfg
     all_elasticities
+    converged
 end
 
 import Base.+
@@ -210,13 +213,13 @@ import Base.+
 Re-calculates constraint matrices under `new_constraints`, ignoring previous constraints used to define the problem.
 The `exchangeability` constraint is an exception. To change anything about the structure of exchangeability for the problem changes, define a new problem.
 """
-function update_constraints!(problem::NPDProblem, new_constraints::Vector{Symbol})
+function update_constraints!(problem::NPDProblem, new_constraints::Vector{Symbol}; verbose = true)
     case1  = ((:exchangeability ∈ new_constraints) & (:exchangeability ∉ problem.constraints));
     case2 = ((:exchangeability ∉ new_constraints) & (:exchangeability ∈ problem.constraints));
     if case1 | case2
         error("Constraint :exchangeability should be included in updated problem (only) if in original problem.")
     else
-        println("Updating linear constraint matrices....")
+        verbose && println("Updating linear constraint matrices....")
         Aineq, Aeq, maxs, mins = make_constraint(problem.data, new_constraints, 
                                                         problem.exchange, problem.syms);
 
@@ -226,7 +229,7 @@ function update_constraints!(problem::NPDProblem, new_constraints::Vector{Symbol
         problem.mins = mins;
 
         if :subs_in_group ∈ new_constraints
-            println("Preparing inputs for nonlinear constraints....")
+            verbose && println("Preparing inputs for nonlinear constraints....")
             subset = subset_for_elast_const(problem, problem.data; grid_size=2);
             elast_mats, elast_prices = make_elasticity_mat(problem, subset);
             problem.elast_mats = elast_mats;

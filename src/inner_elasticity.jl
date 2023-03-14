@@ -226,8 +226,8 @@ function elast_penaltyrev(θ::AbstractArray, exchange::Array, elast_mats::Matrix
     
     if failed_inverse 
         penalty += 1e10;
-    else
-        # @show det(J_s)
+    elseif isnan(penalty)
+        penalty = 1e10;
     end
     
     return penalty
