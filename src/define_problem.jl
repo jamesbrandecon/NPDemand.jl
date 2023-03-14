@@ -115,7 +115,7 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     
 
     verbose && println("Making Bernstein polynomials....")
-    Xvec, Avec, Bvec, syms, combos = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; price_iv = price_iv);
+    Xvec, Avec, Bvec, syms, combos = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; price_iv = price_iv, verbose = verbose);
     
     # @show size(syms)
     if constraints !=[]
@@ -124,7 +124,7 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     end
     
     verbose && println("Reformulating problem....")
-    matrices = prep_inner_matrices(Xvec, Avec, Bvec);
+    matrices = prep_inner_matrices(Xvec, Avec, Bvec; verbose = false);
 
     design_width = sum(size.(Xvec,2));
     elast_mats = Matrix[];

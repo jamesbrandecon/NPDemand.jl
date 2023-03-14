@@ -198,14 +198,14 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
 
             if !isempty(Aineq)
                 penalty_violated = (maximum(Aineq * θ) > constraint_tol);
-                @show maximum(Aineq * θ)
+                # @show maximum(Aineq * θ)
             end
             if elast_mats!=[]
                 # c = @MArray zeros(length(θ))
                 # c = SizedVector{length(θ)}(θ);
                 c = θ;
                 penalty_violated = (penalty_violated) | (elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat)/L > constraint_tol);
-                @show elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat)/L
+                # @show elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat)/L
             end
 
             iter+=1;

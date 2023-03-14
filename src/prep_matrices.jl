@@ -1,5 +1,5 @@
 function prep_matrices(df::DataFrame, exchange, index_vars, 
-    FEmat, product_FEs, bO; price_iv = [], inner = false)
+    FEmat, product_FEs, bO; price_iv = [], inner = false, verbose = true)
 
 # Unpack DataFrame df
 s = Matrix(df[:, r"shares"]);
@@ -145,7 +145,7 @@ end
             A_xj = hcat(A_xj, prodFE);
         end
     end
-    if !inner
+    if (!inner) & (verbose)
         println("Done with choice $(xj-1)")
     end
     push!(Xvec, full_interaction)

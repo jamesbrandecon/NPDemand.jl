@@ -10,7 +10,7 @@ function prep2(B::Matrix, X::Matrix, W::Matrix)
     return mat1, mat2, mat3, mat4, mat5, mat6, mat7, mat8, mat9
 end
 
-function prep_inner_matrices(bigX, bigA, bigB)
+function prep_inner_matrices(bigX, bigA, bigB; verbose = true)
     m1 = []; m2 = []; m3 = []; m4 = []; m5 = []; m6 = []; m7 = []; m8 = []; m9 = [];
     bigW = [];
     GC.gc()
@@ -47,7 +47,9 @@ function prep_inner_matrices(bigX, bigA, bigB)
         push!(DWD, D'*W*D);
 
         GC.gc()
-        println("Done with choice $(j-1)")
+        if verbose
+            println("Done with choice $(j-1)")
+        end
     end
 
     matrices = PreppedMatrices(m1,
