@@ -117,7 +117,7 @@ function price_elasticities!(npd_problem; whichProducts = [1,1])
         # ps_mat = repeat(at[ii,:]', J,1) ./ repeat(svec2[ii,:], 1,J);
         ps_mat = zeros(J,J)
         for j1=1:J, j2 = 1:J 
-            ps_mat[j1,j2] = at[ii,j1]/svec2[ii,j2];
+            ps_mat[j1,j2] = at[ii,j2]/svec2[ii,j1];
         end
         avg_elast_mat += (temp .* ps_mat) ./ size(at,1); # take average over 
         push!(all_elast_mat, temp .* ps_mat)
