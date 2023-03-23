@@ -100,6 +100,8 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
     obj_uncon(x::SizedVector) = obj_func(x,0);
     grad_uncon!(G::SizedVector,x::SizedVector) = grad_func!(G,x,0, x -> 0);
 
+    penalty_violated = false;
+
     if isempty(Aineq) & (:subs_in_group ∉ problem.constraints);
         verbose && println("Problem only has equality constraints. Solving...")
         # c = @MArray zeros(length(β_init))
@@ -108,6 +110,7 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
 
         results =  Optim.optimize(obj_uncon, grad_uncon!, c,
         method, Optim.Options(show_trace = show_trace, iterations = max_inner_iterations));
+        penalty_violated = false;
     else
         verbose && println("Solving problem without inequality constraints....")
         # c = @SizedVector zeros(length(β_init))
