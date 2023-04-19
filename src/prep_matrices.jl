@@ -89,15 +89,17 @@ end
 
         perm_s = copy(s);
         perm_s[:,first_product_in_group] = s[:,xj]; perm_s[:,xj] = s[:,first_product_in_group];
-        # @show s[1,:] perm_s[1,:]
+       
         # Market shares
         for j = 1:1:J
-                BERN_xj = [BERN_xj bern(perm_s[:,j], bO) ]
+            BERN_xj = [BERN_xj bern(perm_s[:,j], bO) ]
         end
         BERN_xj = BERN_xj[:,2:end]
     
         # full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, bO, first_product_in_group, perm);
         full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, bO, first_product_in_group, perm);
+        # temp_combo_size = size(full_interaction,2);
+        # println("size of combos: $temp_combo_size")
     # --------------------------------------------
     # Instruments
     if !inner 

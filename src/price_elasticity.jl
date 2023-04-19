@@ -1,5 +1,5 @@
 """
-    price_elasticity!(problem::NPDProblem, df::DataFrame; at::Matrix, whichProducts = [1,1])
+    price_elasticities!(problem::NPDProblem, df::DataFrame; at::Matrix, whichProducts = [1,1])
 
 Takes the solved `problem` as first argument, a `DataFrame` as the second argument, and evaluates price elasticities in-sample at prices `at`. 
 Currently does not calculate out-of-sample price elasticities. This will be added to compute_demand_function!. 
@@ -13,7 +13,7 @@ function price_elasticities!(npd_problem; whichProducts = [1,1])
 
     df = npd_problem.data;
     at = df[!,r"prices"];
-
+    
     # Unpack results
     β = npd_problem.results.minimizer
     θ = β[1:npd_problem.design_width]
@@ -71,19 +71,21 @@ function price_elasticities!(npd_problem; whichProducts = [1,1])
     
         perm_s = copy(s);
         perm_s[:,first_product_in_group] = s[:,j1]; perm_s[:,j1] = s[:,first_product_in_group];
-
+        
         if j1 ==1 
-            init_ind=0;
+            init_ind = 0;
         else
             init_ind = sum(size.(X[1:j1-1],2))
         end
         θ_j1 = θ[init_ind+1:init_ind+size(X[j1],2)];
+        
         # @show θ_j1
         for j2 = 1:J 
             tempmat_s = zeros(size(index,1),1)
             for j_loop = 1:1:J
-                stemp = perm_s[:,j_loop]; # j_loop = 1 -> stemp == perm_s[:,1] = s[:,2]
-                if j2==perm[j_loop] # j2==2, perm[1] ==2, so s[:,2] added as derivative 
+                stemp = perm_s[:,j_loop]; # j_loop = 1 -> stemp == perm_s[:,1] = s[:,2];
+                # j1=3, j2=4. j_loop = 4 -> stemp = perm_s[:,4] = s[:,4]
+                if j2 == perm[j_loop] # j2==2, perm[1] ==2, so s[:,2] added as derivative 
                     tempmat_s = [tempmat_s dbern(stemp, bernO)];
                 else 
                     tempmat_s = [tempmat_s bern(stemp, bernO)];
@@ -116,11 +118,11 @@ function price_elasticities!(npd_problem; whichProducts = [1,1])
         ps = at[ii,:]./svec2[ii,:];
         # ps_mat = repeat(at[ii,:]', J,1) ./ repeat(svec2[ii,:], 1,J);
         ps_mat = zeros(J,J)
-        for j1=1:J, j2 = 1:J 
+        for j1 = 1:J, j2 = 1:J 
             ps_mat[j1,j2] = at[ii,j2]/svec2[ii,j1];
         end
         avg_elast_mat += (temp .* ps_mat) ./ size(at,1); # take average over 
-        push!(all_elast_mat, temp .* ps_mat)
+        push!(all_elast_mat, temp .* ps_mat) #, temp .* ps_mat
 
         # All own-price elasticities
         all_own[ii,:] = -1*Diagonal(inv(J_s))*ps;

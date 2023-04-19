@@ -37,6 +37,7 @@ function md_obj(β::AbstractVector; exchange = [], X = [], B = [], A = [],
         design_width_j = size(X[j],2);
         j_ind = (theta_count + 1):(theta_count + design_width_j);
         @views θ_j = θ[j_ind]
+        # println("product $j, $j_ind")
         if ultra == false 
             vecmat!(y, B[j],γ)
             obj += wsse_avx(y, X[j], θ_j, W[j]);
@@ -47,7 +48,6 @@ function md_obj(β::AbstractVector; exchange = [], X = [], B = [], A = [],
         end
         theta_count += design_width_j;
     end
-
     if Aineq !=[]
         Atheta = Aineq*θ;
         @views temp_ineq = sum(lambda1 .* (Atheta[Atheta .>0]).^2 );
@@ -67,8 +67,9 @@ function md_obj(β::AbstractVector; exchange = [], X = [], B = [], A = [],
         # end
         # c = @MArray zeros(length(θ))
         # c = SizedVector{length(θ)}(θ);
-        c = θ;
-        obj += elast_penaltyrev(c, exchange, elast_mats, elast_prices, lambda1, conmat; during_obj=true);
+        # c = θ;
+        obj += elast_penaltyrev(θ, exchange, elast_mats, elast_prices, lambda1, conmat; during_obj=true);
+        # obj += elast_penalty(θ, exchange, elast_mats, elast_prices, lambda1, conmat);
     end
 
     obj

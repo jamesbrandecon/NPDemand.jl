@@ -16,7 +16,6 @@ function elast_penalty(θ_packed::AbstractArray, exchange::Array, elast_mats::Ma
     if typeof(at) ==DataFrame
         at = Matrix(at);
     end
-
     # svec = elast_mats;
     # J = maximum(maximum.(exchange));
 
@@ -48,7 +47,7 @@ function elast_penalty(θ_packed::AbstractArray, exchange::Array, elast_mats::Ma
     Threads.@threads for ii = 1:length(dsids[1,1,:])
         for j1 = 1:J
             for j2 = 1:J
-                @views J_s[j1,j2] = dsids[j1,j2,ii]
+                J_s[j1,j2] = dsids[j1,j2,ii]
             end
         end
         
@@ -79,8 +78,8 @@ function subset_for_elast_const(npd_problem, df::DataFrame; grid_size=10)
     max_s = quantile(s[:,1], 0.9);
     min_s = quantile(s[:,1], 0.1);
     for j = 2:J
-        max_s = vcat(max_s, quantile(s[:,1], 0.9));
-        min_s = vcat(min_s, quantile(s[:,1], 0.1));
+        max_s = vcat(max_s, quantile(s[:,1], 0.6));
+        min_s = vcat(min_s, quantile(s[:,1], 0.4));
     end
 
     temp = [];
@@ -158,7 +157,7 @@ function make_elasticity_mat(npd_problem, df::DataFrame)
     temp_elast_mats = deepcopy(elast_mats);
     for j1 = 1:J
         for j2 = 1:J
-            temp_elast_mats[j1,j2] = elast_mats[j2,j1];
+            temp_elast_mats[j1,j2] = elast_mats[j1,j2];
         end
     end
     elast_mats = temp_elast_mats;
@@ -183,10 +182,10 @@ function elast_penaltyrev(θ::AbstractArray, exchange::Array, elast_mats::Matrix
             if j1 ==1 
                 init_ind = 0;
             else
-                @views init_ind = sum(size.(elast_mats[1:j1-1,1],2))
+                init_ind = sum(size.(elast_mats[1:j1-1,1],2))
             end
             
-            @views θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1,1],2)];
+            θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1,1],2)];
             
             try
                 dsids[j1,j2,:] .= elast_mats[j1,j2] * θ_j1; 
@@ -210,8 +209,6 @@ function elast_penaltyrev(θ::AbstractArray, exchange::Array, elast_mats::Matrix
                 J_s[j1,j2] = dsids[j1,j2,ii]
             end
         end
-        
-        # @show det(J_s)
 
         try
             temp = -1*inv(J_s);
@@ -221,13 +218,13 @@ function elast_penaltyrev(θ::AbstractArray, exchange::Array, elast_mats::Matrix
         end
         
         DET = det(J_s)^2;
-        penalty += sum((temp .< conmat) .* abs.(temp).^2 .* lambda)+ lambda * ((DET + 1e-12) / DET - 1); 
+        penalty += sum((temp .< conmat) .* abs.(temp).^2 .* lambda);# + lambda * ((DET + 1e-12) / DET - 1); 
     end
     
     if failed_inverse 
         penalty += 1e10;
     elseif isnan(penalty)
-        penalty = 1e10;
+        # penalty = 1e10;
     end
     
     return penalty

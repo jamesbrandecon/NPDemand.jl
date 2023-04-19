@@ -40,15 +40,18 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
         end
     end
     sym_vec = temp;
-    
+    # @show sym_vec 
 
     # Apply remaining combos to symbolic vector
     sym_combos = []
     for i ∈ eachindex(combos)
         push!(sym_combos, prod(string.(sym_vec[combos[i]])))
     end
-    # sym_combos
+    
+    # @show sym_combos[1:5,:]
+
     inds = Array{Array}(undef, maximum(size(combos)))
+
     # Actually implement exchangeability 
     for exchange ∈ exchange_vec
         ex = setdiff(exchange, this_j); # 3
@@ -73,7 +76,7 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
                 combotemp = getindex.(findall((own_order .== own_order[i]) .&
                     (prod_order_in_group .== prod_order_in_group[i]) .& 
                     (prod_order_not_in_group .== prod_order_not_in_group[i])),1)
-                combotemp = combotemp[combotemp .> i]
+                # combotemp = combotemp[combotemp .> i]
                 inds[i] = [i,combotemp]
             end
         else
@@ -83,12 +86,15 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
                     (prod_order_in_group .== prod_order_in_group[i]) .& 
                     (prod_order_not_in_group .== prod_order_not_in_group[i])),1)
                 # JMB edited above from prod_order_not_in_group
-                combotemp = combotemp[combotemp .> i]
+                # combotemp = combotemp[combotemp .> i]
                 inds[i][2] = intersect(inds[i][2], combotemp)
             end
                 ## inds = indstemp;
         end
     end
+
+    # @show this_j getindex.(inds,2)
+
     # own_order = getindex.(orders, this_j);
     # which_ex = findall(this_j .∈ exchange_vec)[1];
     # # @show which_ex exchange_vec[which_ex] setdiff(exchange_vec[which_ex], this_j)
@@ -115,9 +121,10 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
     for i ∈ eachindex(combos)
         if skip_inds[i] ==0
             redundant = inds[i][2];
+        
             redundant = sort(unique(redundant));
-            duplicates[redundant[1:end]] .= 1;
-            skip_inds[redundant[1:end]] .= 1;
+            duplicates[redundant[2:end]] .= 1;
+            skip_inds[redundant[2:end]] .= 1;
             if i ==1
                 first_column = prod(X[:,combos[i]], dims=2);
                 if length(redundant) > 0
@@ -137,8 +144,14 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
             end
         end
     end
-
+    # print("final-------- $this_j")
+    # @show sym_combos[1:5,:] duplicates[1:5,:]
+    # print("--------")
     sym_combos = sym_combos[duplicates .==0]
     combos = combos[duplicates .==0]
+    
+    # print("final-------- $this_j")
+    # @show sym_combos[1:5,:]
+    # print("--------")
     return full_interaction, sym_combos, combos
 end

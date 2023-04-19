@@ -21,7 +21,7 @@ function prep_inner_matrices(bigX, bigA, bigB; verbose = true)
     J = length(bigX);
 
     for j = 1:J
-        A = bigA[1];
+        A = bigA[j];
         # println("loaded X, A, B")
 
         W = A*pinv(A'A)*A'

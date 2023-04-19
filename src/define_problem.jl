@@ -117,10 +117,15 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     verbose && println("Making Bernstein polynomials....")
     Xvec, Avec, Bvec, syms, combos = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; price_iv = price_iv, verbose = verbose);
     
-    # @show size(syms)
+    
     if constraints !=[]
         verbose && println("Making linear constraint matrices....")
         Aineq, Aeq, maxs, mins = make_constraint(df, constraints, exchange, syms);
+    else
+        Aineq = [];
+        Aeq = [];
+        mins = []; 
+        maxs = [];
     end
     
     verbose && println("Reformulating problem....")
