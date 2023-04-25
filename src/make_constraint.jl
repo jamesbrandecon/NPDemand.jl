@@ -198,7 +198,12 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
                     end
                     # rows = getindex.(rows, 1);
                     # rows = rows[1];
-                    Aineq = add_constraint(Aineq, row2, row1);
+                    
+                    if (row1 !=nothing) & (row2 !=nothing)
+                        row1 = getindex(row1,1);
+                        row2 = getindex(row2,1);
+                        Aineq = add_constraint(Aineq, row2, row1);
+                    end
                 end
             end
         end
