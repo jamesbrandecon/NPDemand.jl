@@ -1,13 +1,10 @@
 """
-    price_elasticities!(problem::NPDProblem, df::DataFrame; at::Matrix, whichProducts = [1,1])
+    price_elasticities!(problem::NPDProblem, df::DataFrame; whichProducts = [1,1])
 
-Takes the solved `problem` as first argument, a `DataFrame` as the second argument, and evaluates price elasticities in-sample at prices `at`. 
-Currently does not calculate out-of-sample price elasticities. This will be added to compute_demand_function!. 
+Takes the solved `problem` as first argument, a `DataFrame` as the second argument, and evaluates all price elasticities in-sample. 
+Currently does not calculate out-of-sample price elasticities. For this, use the function `compute_demand_function!`. 
 
-Results of this function are stored as a `DataFrame` in problem.all_elasticities. Results can be summarized by hand or with summary functions: 
-- `mean_elasticity(problem::NPDProblem)`
-- `median_elasticity(problem::NPDProblem)`
-- quantile_elasticiy(problem::NPDProblem, q ∈ [0,1])
+Results of this function are stored as a `DataFrame` in problem.all_elasticities. Results can be summarized by hand or using the `summarize_elasticities` function. 
 """
 function price_elasticities!(npd_problem; whichProducts = [1,1])
 
@@ -23,7 +20,7 @@ function price_elasticities!(npd_problem; whichProducts = [1,1])
     for i ∈ npd_problem.normalization
         γ[i] =0; 
     end
-    for i∈eachindex(npd_problem.mins)
+    for i ∈ eachindex(npd_problem.mins)
         θ[npd_problem.mins[i]] = θ[npd_problem.maxs[i]]
     end
 
@@ -92,11 +89,12 @@ function price_elasticities!(npd_problem; whichProducts = [1,1])
                 end
             end
             tempmat_s = tempmat_s[:,2:end]
-            tempmat_s, a, b = make_interactions(tempmat_s, exchange, bernO, first_product_in_group, perm);
+            tempmat_s, a, b = make_interactions(tempmat_s, exchange, bernO, j1, perm);
             dsids[j1,j2,:] = tempmat_s * θ_j1;
             push!(tempmats, tempmat_s)
         end
     end
+    
     Jmat = []; # vector of derivatives of inverse shares
     J_sp = zeros(size(svec[:,1]));
     all_own = zeros(size(svec,1),J);
@@ -121,6 +119,7 @@ function price_elasticities!(npd_problem; whichProducts = [1,1])
         for j1 = 1:J, j2 = 1:J 
             ps_mat[j1,j2] = at[ii,j2]/svec2[ii,j1];
         end
+        
         avg_elast_mat += (temp .* ps_mat) ./ size(at,1); # take average over 
         push!(all_elast_mat, temp .* ps_mat) #, temp .* ps_mat
 
@@ -139,7 +138,12 @@ function price_elasticities!(npd_problem; whichProducts = [1,1])
     npd_problem.all_elasticities = all_elast_mat; #DataFrame(product1 = prod1, product2 = prod2, elasticity = elas_ijj, market_ids = market);
 end
     
+"""
+    summarize_elasticities(problem::NPDProblem, stat::String; q = [])
 
+Convenience function for summarizing price elasticities. `problem` should be a solved `NPDProblem` after running `price_elasticities!`. 
+`stat` should be in ["mean", "median", "quantile"], and if `stat`=="quantile", the option `q` should include the quantile of interest (e.g., 0.75 for the 75th percentile price elasticities).
+"""
 function summarize_elasticities(problem::NPDProblem, stat::String; q = [])
     @assert stat ∈ ["mean", "median", "quantile"]
 

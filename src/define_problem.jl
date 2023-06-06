@@ -43,6 +43,12 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
         end
     end
 
+    try 
+        @assert length(exchange) <=2
+    catch 
+        error("NPDemand currently only supports models with two or fewer exchangeable groups in `exchange`")
+    end
+
     E1 = (:exchangeability ∈ constraints);
     E2 = (exchange!=[])
     if (E1!=E2)

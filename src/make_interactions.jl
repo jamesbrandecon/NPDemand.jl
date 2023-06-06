@@ -25,9 +25,13 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
     orders = reshape(orders, length(orders));
     orders = collect.(orders);
     
+    myswitch(x) = [x[i][perm] for i ∈ eachindex(x)];
+    orders = myswitch(orders);
+    
     combos = collect(Iterators.product(G2...));
     combos = reshape(combos, length(combos));
     combos = collect.(combos);
+    
 
     # Make symbol vector to apply combos to so that constriaints can be applied by name
     sym_vec = [Symbol("shares$i") for i in perm]
@@ -47,31 +51,33 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
     for i ∈ eachindex(combos)
         push!(sym_combos, prod(string.(sym_vec[combos[i]])))
     end
-    
+
+    order_vec = reduce(hcat, orders)';
+
     # @show sym_combos[1:5,:]
-
     inds = Array{Array}(undef, maximum(size(combos)))
-
     # Actually implement exchangeability 
-    for exchange ∈ exchange_vec
-        ex = setdiff(exchange, this_j); # 3
-        not_in_group = setdiff(1:J, ex)' # [1 2 4]
-        not_in_group_or_own = setdiff(not_in_group, this_j)' # [1 2]
+    if maximum(length.(exchange_vec)) > 1
+        exchange = exchange_vec[findfirst(this_j .∈ exchange_vec)];
+        # this_j = 1 
+        ex = setdiff(exchange, this_j); # 2
+        not_in_group = setdiff(perm, ex)' # [1 3 4] perm was 1:J
+        not_in_group_or_own = setdiff(not_in_group, this_j)' # [3 4]
 
-        orders_not_in_group = getindex.(orders, not_in_group_or_own) # orders of goods 1 and 2
+        orders_not_in_group = getindex.(orders, not_in_group_or_own) # orders of goods 3 and 4
         if minimum(size(orders_not_in_group)) ==0 
             orders_not_in_group = ones(length(combos));
         end
 
-        orders_in_group = getindex.(orders, ex'); # 3 
-        
-        prod_order_in_group = prod(orders_in_group, dims=2)
-        prod_order_not_in_group = prod(orders_not_in_group, dims=2)
+        orders_in_group = getindex.(orders, ex'); # good 2 
+        prod_order_in_group = prod(order_vec, dims=2) # good 2
+        prod_order_not_in_group = prod(orders_not_in_group, dims=2) # good 3 and 4
         own_order = getindex.(orders, this_j)
+
         order_vec = reduce(hcat, orders)';
         
         @assert this_j ∉ ex
-        if exchange == exchange_vec[1]
+        # if exchange == exchange_vec[1]
             Threads.@threads for i ∈ eachindex(combos)
                 combotemp = getindex.(findall((own_order .== own_order[i]) .&
                     (prod_order_in_group .== prod_order_in_group[i]) .& 
@@ -79,79 +85,65 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
                 # combotemp = combotemp[combotemp .> i]
                 inds[i] = [i,combotemp]
             end
-        else
-            indstemp = deepcopy(inds);
-            Threads.@threads for i ∈ collect(eachindex(combos))
-                combotemp = getindex.(findall((own_order .== own_order[i]) .&
-                    (prod_order_in_group .== prod_order_in_group[i]) .& 
-                    (prod_order_not_in_group .== prod_order_not_in_group[i])),1)
-                # JMB edited above from prod_order_not_in_group
-                # combotemp = combotemp[combotemp .> i]
-                inds[i][2] = intersect(inds[i][2], combotemp)
-            end
-                ## inds = indstemp;
-        end
+        # display(order_vec[1:10,:])
+        # display(inds[1:10])
+        # else
+            # indstemp = deepcopy(inds);
+            # Threads.@threads for i ∈ collect(eachindex(combos))
+            #     combotemp = getindex.(findall((own_order .== own_order[i]) .&
+            #         (prod_order_in_group .== prod_order_in_group[i]) .& 
+            #         (prod_order_not_in_group .== prod_order_not_in_group[i])),1)
+            #     # JMB edited above from prod_order_not_in_group
+            #     # combotemp = combotemp[combotemp .> i]
+            #     inds[i][2] = intersect(inds[i][2], combotemp)
+            # end
+            ## inds = indstemp;
+        # end
+    # end
     end
-
-    # @show this_j getindex.(inds,2)
-
-    # own_order = getindex.(orders, this_j);
-    # which_ex = findall(this_j .∈ exchange_vec)[1];
-    # # @show which_ex exchange_vec[which_ex] setdiff(exchange_vec[which_ex], this_j)
-    # not_in_group = setdiff(1:J, exchange_vec[which_ex])'
-    # # @show not_in_group
-    # if length(exchange_vec[which_ex]) > 1
-    #     prod_order_in_group = prod(getindex.(orders, setdiff(exchange_vec[which_ex], this_j)), dims=2);
-    # else
-    #     prod_order_in_group = ones(size(own_order));
-    # end
-    # prod_order_not_in_group = prod(getindex.(orders, not_in_group), dims=2);
-
-    # Threads.@threads for i ∈ eachindex(combos)
-    #     combotemp = getindex.(findall((own_order .== own_order[i]) .&
-    #         (prod_order_in_group .== prod_order_in_group[i]) .& 
-    #         (prod_order_not_in_group .== prod_order_not_in_group[i])),1)
-    #     combotemp = combotemp[combotemp .> i]
-    #     inds[i] = [i,combotemp]
-    # end
 
     duplicates = zeros(length(combos));
     full_interaction = [];
     skip_inds = zeros(size(duplicates))
     for i ∈ eachindex(combos)
         if skip_inds[i] ==0
-            redundant = inds[i][2];
-        
-            redundant = sort(unique(redundant));
-            duplicates[redundant[2:end]] .= 1;
-            skip_inds[redundant[2:end]] .= 1;
-            if i ==1
-                first_column = prod(X[:,combos[i]], dims=2);
-                if length(redundant) > 0
-                    for j ∈ 1:length(redundant)
-                        first_column += prod(X[:,combos[redundant[j]]], dims=2);
+            if maximum(length.(exchange_vec))>1
+                redundant = inds[i][2];
+                # @show i redundant
+                redundant = sort(unique(redundant));
+                duplicates[redundant[2:end]] .= 1;
+                skip_inds[redundant[2:end]] .= 1;
+            
+                if i ==1
+                    first_column = prod(X[:,combos[i]], dims=2);
+                    if length(redundant) > 0
+                        for j ∈ 2:length(redundant)
+                            first_column += prod(X[:,combos[redundant[j]]], dims=2);
+                        end
                     end
+                    full_interaction = first_column;
+                else
+                    new_column = prod(X[:,combos[i]], dims=2);
+                    if length(redundant) > 0
+                        for j ∈ 2:length(redundant)
+                            new_column += prod(X[:,combos[redundant[j]]], dims=2);
+                        end
+                    end
+                    full_interaction = hcat(full_interaction, new_column)
                 end
-                full_interaction = first_column;
             else
-                new_column = prod(X[:,combos[i]], dims=2);
-                if length(redundant) > 0
-                    for j ∈ 1:length(redundant)
-                        new_column += prod(X[:,combos[redundant[j]]], dims=2);
-                    end
+                if i ==1
+                    first_column = prod(X[:,combos[i]], dims=2);
+                    full_interaction = first_column;
+                else
+                    new_column = prod(X[:,combos[i]], dims=2);
+                    full_interaction = hcat(full_interaction, new_column)
                 end
-                full_interaction = hcat(full_interaction, new_column)
             end
         end
     end
-    # print("final-------- $this_j")
-    # @show sym_combos[1:5,:] duplicates[1:5,:]
-    # print("--------")
     sym_combos = sym_combos[duplicates .==0]
     combos = combos[duplicates .==0]
-    
-    # print("final-------- $this_j")
-    # @show sym_combos[1:5,:]
-    # print("--------")
+
     return full_interaction, sym_combos, combos
 end

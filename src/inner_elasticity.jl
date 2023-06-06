@@ -24,9 +24,9 @@ function elast_penalty(θ_packed::AbstractArray, exchange::Array, elast_mats::Ma
             if j1 ==1 
                 init_ind = 0;
             else
-                @views init_ind = sum(size.(elast_mats[1:j1-1,1],2))
+                init_ind = sum(size.(elast_mats[1:j1-1,1],2))
             end
-            @views θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1,1],2)];
+                θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1,1],2)];
             try
                 @views dsids[j1,j2,:] = elast_mats[j1,j2] * θ_j1; 
             catch
@@ -78,8 +78,8 @@ function subset_for_elast_const(npd_problem, df::DataFrame; grid_size=10)
     max_s = quantile(s[:,1], 0.9);
     min_s = quantile(s[:,1], 0.1);
     for j = 2:J
-        max_s = vcat(max_s, quantile(s[:,1], 0.6));
-        min_s = vcat(min_s, quantile(s[:,1], 0.4));
+        max_s = vcat(max_s, quantile(s[:,1], 0.9));
+        min_s = vcat(min_s, quantile(s[:,1], 0.1));
     end
 
     temp = [];
@@ -147,7 +147,7 @@ function make_elasticity_mat(npd_problem, df::DataFrame)
                 end
             end
             tempmat_s = tempmat_s[:,2:end]
-            tempmat_s, a, b = make_interactions(tempmat_s, exchange, bernO, first_product_in_group, perm);
+            tempmat_s, a, b = make_interactions(tempmat_s, exchange, bernO, j1, perm);
             push!(elast_mats, tempmat_s)
         end
     end
@@ -157,7 +157,7 @@ function make_elasticity_mat(npd_problem, df::DataFrame)
     temp_elast_mats = deepcopy(elast_mats);
     for j1 = 1:J
         for j2 = 1:J
-            temp_elast_mats[j1,j2] = elast_mats[j1,j2];
+            temp_elast_mats[j1,j2] = elast_mats[j2,j1];
         end
     end
     elast_mats = temp_elast_mats;
@@ -218,9 +218,10 @@ function elast_penaltyrev(θ::AbstractArray, exchange::Array, elast_mats::Matrix
         end
         
         DET = det(J_s)^2;
-        penalty += sum((temp .< conmat) .* abs.(temp).^2 .* lambda);# + lambda * ((DET + 1e-12) / DET - 1); 
+        penalty += sum((temp .< conmat) .* log.((abs.(temp).+1).^2) .* lambda) + 10 * lambda * ((DET + 1e-12) / DET - 1); 
+        
     end
-    
+    # @show penalty
     if failed_inverse 
         penalty += 1e10;
     elseif isnan(penalty)

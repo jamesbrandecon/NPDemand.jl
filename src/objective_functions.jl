@@ -42,15 +42,15 @@ function md_obj(β::AbstractVector; exchange = [], X = [], B = [], A = [],
             vecmat!(y, B[j],γ)
             obj += wsse_avx(y, X[j], θ_j, W[j]);
         else
-            @views γtemp = γ[2:end];
-            @views temp = m1[j] .+ Array(m2[j]*γtemp) .- Array(m3[j]*θ_j) .+ γtemp'*m4[j] .+ γtemp'* m5[j] * γtemp .- γtemp'*m6[j]*θ_j .- θ_j'*m7[j] .- Array(θ_j'*m8[j])*γtemp .+ θ_j'*m9[j]*θ_j;
+            γtemp = γ[2:end];
+            temp = m1[j] .+ Array(m2[j]*γtemp) .- Array(m3[j]*θ_j) .+ γtemp'*m4[j] .+ γtemp'* m5[j] * γtemp .- γtemp'*m6[j]*θ_j .- θ_j'*m7[j] .- Array(θ_j'*m8[j])*γtemp .+ θ_j'*m9[j]*θ_j;
             obj += temp[1];
         end
         theta_count += design_width_j;
     end
     if Aineq !=[]
         Atheta = Aineq*θ;
-        @views temp_ineq = sum(lambda1 .* (Atheta[Atheta .>0]).^2 );
+        temp_ineq = sum(lambda1 .* (Atheta[Atheta .>0]).^2 );
         obj +=  temp_ineq[1];
     end
 
@@ -141,32 +141,6 @@ function md_grad!(grad::AbstractVector, β::AbstractVector; exchange::Array = []
 
     # Nonlinear constraints
     if (elast_mats != []) & (lambda1!=0)
-        # Convert jacobian_vec to Penalty
-        # Have to calculate sign matrix from exchange
-        # g(x) = elast_penaltyrev(x, exchange, elast_mats, elast_prices, lambda1, conmat);
-
-        # g(x::Vector) = sum(x .^2)
-        # θ_packed =  pack_parameters(θ, exchange, size.(X,2))
-        # if chunk_size ==[]
-        #     # cfg = GradientConfig(g, θ_packed);
-        #     cfg = GradientConfig(nothing, θ_packed);
-        # else
-        #     # cfg = GradientConfig(g, θ_packed, Chunk{chunk_size}());
-        #     cfg = GradientConfig(nothing, θ_packed, Chunk{chunk_size}());
-        # end
-        # @show g(θ_packed)
-        # print(reshape(unpack(θ_packed, exchange, size.(X,2), grad=true), 140, 5))
-        # c = @MVector ones(length(θ_packed))
-        # c = SizedVector{length(θ_packed)}(θ_packed);
-        # c = θ_packed;
-        # c  = @MArray [i for i in pack_parameters(θ, exchange, size.(X,2))]
-        # packed_grad = ForwardDiff.gradient(g,
-            # c, GradientConfig(g, c, Chunk{1}())); 
-        # packed_grad = FiniteDiff.finite_difference_gradient(g, c);
-        # packed_grad = ForwardDiff.gradient(g, c, GradientConfig(g, c, Chunk{1}())); #MArray{Tuple(length(θ_packed))}(θ_packed)
-        
-        # grad0[1:length(θ)] += unpack(packed_grad, exchange, size.(X,2), grad=true);
-        # grad0[1:length(θ)] += ForwardDiff.gradient(g, θ);
         grad0[1:length(θ)] += g(θ);
     end
 

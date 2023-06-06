@@ -164,7 +164,7 @@ grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; exchange =exchange, X
             # J_s = @MArray zeros(ForwardDiff.Dual{Float64},J,J)
 
             g_d(x) = elast_penaltyrev(x, exchange, elast_mats, 
-                                        elast_prices, L, conmat);
+                                        elast_prices, L/200, conmat);
             g(x) = ForwardDiff.gradient(g_d, x);
 
             obj(x::SizedVector) = obj_func(x,L);
