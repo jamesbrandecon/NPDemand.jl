@@ -11,7 +11,7 @@ df = toDataFrame(s,p,z,x);
 
 # Specify estimation/model parameters
 bO = 2; 
-exchange = [[1 2], [3], [4]]
+exchange = [[1 2], [3 4]]
 index_vars = ["prices", "x"]
 constraint_tol = 1e-5;
 obj_xtol = 1e-5;
@@ -30,11 +30,14 @@ npd_problem = define_problem(df;
 show(npd_problem)
 
 # Estimate problem and plot comparison of estimated and true own-price elasticities
-estimate!(npd_problem, max_iterations = 20000)
-elast_prod1, avg, shares, all_own = price_elasticity(npd_problem, df; whichProducts=[1,1]);
+estimate!(npd_problem, 
+    max_outer_iterations = 20000, # max number of times to solve problem while iteratively increasing penalties
+    max_inner_iterations = 2000) # max number of iterations within each run of the objective function
+
+price_elasticities!(npd_problem);
 true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
 
-scatter(true_elast_prod1, elast_prod1, alpha = 0.3, ylims = (-4,1), 
+scatter(true_elast_prod1, own_elasticities(npd_problem)[:,1], alpha = 0.3, ylims = (-4,1), 
             legend = false, xlabel = "Truth", ylabel = "Estimate")
 plot!(true_elast_prod1, true_elast_prod1, linewidth = 2, linecolor = :black)
 
@@ -43,9 +46,8 @@ npd_problem2 = deepcopy(npd_problem)
 update_constraints!(npd_problem2, [:exchangeability])
 
 estimate!(npd_problem2)
-elast_prod1, avg, shares, all_own = price_elasticity(npd_problem2, df; whichProducts=[1,1]);
-true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
+price_elasticities!(npd_problem2);
 
-scatter(true_elast_prod1, elast_prod1, alpha = 0.3, ylims = (-4,1), 
+scatter(true_elast_prod1, own_elasticities(npd_problem2)[:,1], alpha = 0.3, ylims = (-4,1), 
             legend = false, xlabel = "Truth", ylabel = "Estimate")
 plot!(true_elast_prod1, true_elast_prod1, linewidth = 2, linecolor = :black)

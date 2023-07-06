@@ -136,6 +136,7 @@ function price_elasticities!(npd_problem; whichProducts = [1,1])
     # return esep, Jmat, svec, all_own
     # return esep, avg_elast_mat, svec, all_own, all_elast_mat, Jmat
     npd_problem.all_elasticities = all_elast_mat; #DataFrame(product1 = prod1, product2 = prod2, elasticity = elas_ijj, market_ids = market);
+    npd_problem.all_jacobians = Jmat;
 end
     
 """

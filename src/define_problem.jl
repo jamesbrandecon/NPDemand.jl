@@ -166,6 +166,7 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
                         elast_mats,
                         elast_prices,
                         [],
+                        [],
                         [], 
                         [])
 
@@ -214,6 +215,7 @@ mutable struct NPDProblem
     elast_prices
     cfg
     all_elasticities
+    all_jacobians
     converged
 end
 
