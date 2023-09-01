@@ -21,10 +21,9 @@ makedocs(
 # Documenter can also automatically deploy documentation to gh-pages.
 # See "Hosting Documentation" and deploydocs() in the Documenter manual
 # for more information.
-config = Documenter.Travis()
+# config = Documenter.GitHubActions()
 deploydocs(
     repo = "github.com/jamesbrandecon/NPDemand.jl.git",
-    deploy_config = config,
     push_preview = true,
     devbranch = "master"
 )
