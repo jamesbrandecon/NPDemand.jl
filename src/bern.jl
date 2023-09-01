@@ -1,3 +1,8 @@
+"""
+    bern(t, order)
+
+Returns a univariate Bernstein polynomial of order `order` constructed from array/matrix `t`
+"""
 function bern(t, order)
 # construct bernstein polynomial of order ``order"
 out = zeros(size(t,1),1)
