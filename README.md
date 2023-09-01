@@ -2,9 +2,9 @@
 
 [![Build Status](https://travis-ci.com/jamesbrandecon/NPDemand.jl.svg?branch=master)](https://travis-ci.com/jamesbrandecon/NPDemand.jl)
 
-This package has been significantly re-designed. I have removed the functionality for variable/model selection, but have significantly increased the performance of the package and improved the simplicity of use. 
+This package has been significantly re-designed as part of a work in progress with Giovanni Compiani and Adam Smith. I have removed the functionality for variable/model selection, but have significantly increased the performance of the package and improved the simplicity of use. The old code has been saved in the `copy_old_code` branch, if for some reason that code is useful for you.
 
-Please let me know if you have any suggestions for the package.
+Please let me know if you have any suggestions for the package or find any bugs.
 
 ## Installation
 The package is not registered. To install, use
@@ -28,12 +28,12 @@ There are three important functions included here so far: `define_problem`, `est
         - :diagonal_dominance_all: Diagonal dominance across all products.
         - :subs_in_group: All products within exchangeable groupings are substitutes.(**Note**: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
 - `estimate!(problem::NPDProblem; max_iterations=10000, show_trace = false)`: solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector. `max_iterations` is passed into Optim.Options for every optimization step.  
-- `update_constraints(problem::NPDProblem, new_constraints::Vector{Symbol})`: Replaces the constraints in `problem` with `new_constraints`. Because of the way `:exchangeability` is enforced, this function cannot be used to change the structure of exchangeable groupings. 
-- `price_elasticity(problem::NPDProblem, df::DataFrame; at::Matrix, whichProducts = [1,1])`: Takes the solved `problem` as first argument, a `DataFrame` as the second argument, and evaluates price elasticities in-sample at prices `at`. Currently does not calculate out-of-sample price elasticities, though this will be added in the future. Returns four results, in order: 
-    - (1) a vector of elasticities of demand for product `whichProducts[1]` with respect to `whichProducts[2]`
-    - (2) the average of the price elasticity matrix across all markets
-    - (3) the vector of shares at which the elasticities were calculated 
-    - (4) a matrix for which each column `j` is a vector of own-price elasticities in all markets
+- `update_constraints!(problem::NPDProblem, new_constraints::Vector{Symbol})`: Replaces the constraints in `problem` with `new_constraints`. Because of the way `:exchangeability` is enforced, this function cannot be used to change the structure of exchangeable groupings. 
+- `price_elasticities!(problem::NPDProblem)`: Takes the solved `problem` as first argument, a `DataFrame` as the second argument, and evaluates all price elasticities in-sample. Currently does not calculate out-of-sample price elasticities. For this, use the function `compute_demand_function!`.
+- `compute_demand_function!(problem, df; max_iter = 1000, show_trace = false)`: estimates the demand function/curve using NPD estimates calculated via estimate!. The function takes in an estimated problem::NPDProblem and a dataframe with counterfactual values of the covariates in the utility function. One must specify all fields that were used in estimation (including shares). The function will change the values of df[!,r"shares"] to take on the value of the estimated demand function. Options: 
+    - `max_iter`: controls the number of iterations for the nonlinear solver calculating market shares. Default is 1000 but well-estimated problems should converge faster.
+    - `show_trace`: if `true`, Optim will print the trace for each iteration of the nonlinear solver. 
+
 
 
 Two helpful additional functions are `simulate_logit` and `toDataFrame`, which allows one to easily simulate data from a logit demand system with endogenous prices (and instruments for those prices) to test the `NPDemand` functions. Usage shown in `/examples`.

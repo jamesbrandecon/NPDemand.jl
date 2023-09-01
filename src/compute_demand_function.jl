@@ -1,5 +1,5 @@
 """
-    compute_demand_function!(problem, df; max_iter = 1000, show_trace = false, compute_own_elasticities = true)
+    compute_demand_function!(problem, df; max_iter = 1000, show_trace = false)
 
 `compute_demand_function!` estimates the demand function/curve using NPD estimates calculated via estimate!.
 
@@ -12,7 +12,7 @@ Options:
 - `show_trace`: if `true`, Optim will print the trace for each iteration of the nonlinear solver. 
 -  `compute_own_elasticities`: NOT yet implemented-- if `true`, will also generate columns called `own_elast` which will include estimated own-price elasticities at all counterfactual points.
 """
-function compute_demand_function!(problem, df; max_iter = 1000, show_trace = false, compute_elasticities = true)
+function compute_demand_function!(problem, df; max_iter = 1000, show_trace = false)
     J = length(problem.Xvec);
     FE = problem.FE;
 

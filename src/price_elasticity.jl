@@ -1,12 +1,13 @@
 """
-    price_elasticities!(problem::NPDProblem, df::DataFrame; whichProducts = [1,1])
+    price_elasticities!(problem::NPDProblem)
 
 Takes the solved `problem` as first argument, a `DataFrame` as the second argument, and evaluates all price elasticities in-sample. 
 Currently does not calculate out-of-sample price elasticities. For this, use the function `compute_demand_function!`. 
 
 Results of this function are stored as a `DataFrame` in problem.all_elasticities. Results can be summarized by hand or using the `summarize_elasticities` function. 
+We also store the Jacobian of the demand function with respect to prices, which can be used to calculate other quantities of interest.
 """
-function price_elasticities!(npd_problem; whichProducts = [1,1])
+function price_elasticities!(npd_problem)
 
     df = npd_problem.data;
     at = df[!,r"prices"];
@@ -127,11 +128,11 @@ function price_elasticities!(npd_problem; whichProducts = [1,1])
         all_own[ii,:] = -1*Diagonal(inv(J_s))*ps;
     
         # Save to calculate desired own-price elasticities
-        J_sp[ii,1] = temp[whichProducts[1],whichProducts[2]];
+        # J_sp[ii,1] = temp[whichProducts[1],whichProducts[2]];
     end
         
     # New code, uses matrix of index, which are equal to -1 .* prices
-    esep = J_sp.* (at[:,whichProducts[2]]./svec2[:,whichProducts[1]]); # own-price varying
+    # esep = J_sp.* (at[:,whichProducts[2]]./svec2[:,whichProducts[1]]); # own-price varying
     
     # return esep, Jmat, svec, all_own
     # return esep, avg_elast_mat, svec, all_own, all_elast_mat, Jmat
