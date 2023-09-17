@@ -1,3 +1,5 @@
+# Example which shows how to simulate data, estimate a model, and compare estimated to true own-price elasticities
+
 using Plots
 using NPDemand
 

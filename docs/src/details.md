@@ -21,13 +21,29 @@ where $x_{jt}$ denote observable product characteristics including price, and $\
 
 The **inverse** demand functions can then be estimated via Nonparametric Instrumental Variables (NPIV). We discuss the exact implementation below. 
 
+## Bernstein Polynomials 
+One key decision in estimating the functions $\sigma^{-1}_j$ is how to approximate them. In this package we approximate each function using [Bernstein polynomials](https://en.wikipedia.org/wiki/Bernstein_polynomial). A Bernstein polynomial of order $n$ takes the form of a sum of basis functions:  
+
+```math
+B_n(x) = \sum_{k=1}^n \theta_k b_{k,n}(x)
+```
+where the basis functions are defined as:
+
+```math
+b_{k,n}(x) = \nchoosek{n}{k} x^k (1-x)^{n-k}.
+```
+
+Although one could make other reasonable choices for approximating $\sigma^{-1}_j$, Bernstein polynomials were chosen because they an approximation for which it is uniquely easy to impose constraints, which is a central focus of our package. 
+
+Whenever you run `define_problem`, we generate two Bernstein polynomials. The first is in market shares, and serves as the design matrix for the NPIV regression. The second is in the vector of instruments. 
+
 ## Estimation
 The estimation problem takes the following form: 
 
 ```math
     \min_{\theta} \sum_{j=1}^J \Big [\sum_{t=1}^T \tilde \xi_{jt} \Big ]'(A_j'A_j)^- \Big [\sum_{t=1}^T \tilde \xi_{jt} \Big ]
 ```
-where $\tilde \xi_{jt}$ are the values of $\xi_{jt}$ implies by the current estimate of the demand system. The matrix $A_j$ is a matrix of demand instruments for product $j$.
+where $\tilde \xi_{jt}$ are the values of $\xi_{jt}$ implies by the current estimate of the demand system. The matrix $A_j$ is the aforementioned Bernstein polynomial in demand instruments for product $j$.
 
 In practice, we found this problem to be difficult to efficiently solve as written. Instead, during the process of problem construction, we reformulate the problem
 by multiplying out the product of matrices above. In particular, for appropriately defined values of $y,X$ and $Z$, we can rewrite the objective function as 

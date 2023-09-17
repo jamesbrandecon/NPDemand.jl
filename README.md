@@ -1,6 +1,7 @@
 # NPDemand
 
 [![Build Status](https://travis-ci.com/jamesbrandecon/NPDemand.jl.svg?branch=master)](https://travis-ci.com/jamesbrandecon/NPDemand.jl)
+[![](https://img.shields.io/badge/docs-stable-blue.svg)](https://jamesbrandecon.github.io/NPDemand.jl/dev/)
 
 This package has been significantly re-designed as part of a work in progress with Giovanni Compiani and Adam Smith. I have removed the functionality for variable/model selection, but have significantly increased the performance of the package and improved the simplicity of use. The old code has been saved in the `copy_old_code` branch, if for some reason that code is useful for you.
 
@@ -15,7 +16,7 @@ pkg> add https://github.com/jamesbrandecon/NPDemand.jl
 ## Main Functions
 There are three important functions included here so far: `define_problem`, `estimate!`, and `price_elasticity`:  
 - `define_problem(df::DataFrame; exchange = [], index_vars = ["prices"], FE = [], constraints = [], bO = 2, obj_tol = 1e-5, constraint_tol = 1e-5)`: Constructs a `problem::NPDProblem` using the provided problem characteristics. Inputs: 
-    - `exchange`::Vector: A vector of groups of products which are exchangeable. E.g., with 4 goods, if the first
+    - `exchange`: A vector of (at most two) groups of products which are exchangeable. E.g., with 4 goods, if the first
     and second are exchangeable and so are the third and fourth, set `exchange` = [[1 2], [3 4]].
     - `index_vars`: String array listing column names in `df` which represent variables that enter the inverted index.
     - `FE`: String array listing column names in `df` which should be included as fixed effects.
