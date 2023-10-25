@@ -1,3 +1,42 @@
+function estimate_fast!(problem::NPDProblem)
+    β, γ = jmp_obj(problem);
+    problem.results = NPD_JuMP_results([β;γ]);
+end
+
+function jmp_obj(npd_problem::NPDProblem)
+    # Unpack 
+    Avec = npd_problem.Avec;
+    Xvec = npd_problem.Xvec;
+    Bvec = npd_problem.Bvec;
+    indexes = vcat(0,cumsum(size.(Xvec,2)));
+    J = length(Xvec);
+
+    # Define JuMP problem 
+    model = Model(OSQP.Optimizer)
+    @variable(model, γ[1:sum(size(npd_problem.Bvec[1],2))]);
+    @variable(model, β[1:npd_problem.design_width]);
+    println("Setting up problem in JuMP ....")
+    @objective(model, Min,
+    sum((Bvec[i]*γ - Xvec[i] * β[(indexes[i]+1:indexes[i+1])])'*Avec[i]*pinv(Avec[i]'*Avec[i])*Avec[i]'*(Bvec[i] * γ - Xvec[i] * β[indexes[i]+1:indexes[i+1]]) for i ∈ 1:J));
+
+    # Add constraints
+    @constraint(model, γ[1]==1); # Price coefficient normalized
+    @constraint(model, [i = 1:size(npd_problem.mins,1)], 
+        β[npd_problem.mins[i]] == β[npd_problem.maxs[i]]) # Enforcing exchangeability
+    @constraint(model, [i = 1:size(npd_problem.Aineq,1)], # Enforcing inequality constraints
+        npd_problem.Aineq[i,:]'*β .<= 0)
+    @constraint(model, [i = 1:size(npd_problem.Aeq,1)], # Enforcing equality constraints
+        npd_problem.Aeq[i,:]'*β .== 0)
+    
+    println("Solving problem in JuMP ....")
+
+    # Solve problem and store results
+    JuMP.optimize!(model);
+    β_solved = value.(β);
+    γ_solved = value.(γ);
+    return β_solved, γ_solved
+end
+
 """
     estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = false, chunk_size = Int[])
 

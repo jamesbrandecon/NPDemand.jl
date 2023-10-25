@@ -188,6 +188,16 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     return problem
 end
 
+"""
+    NPD_JuMP_results
+
+    Custom struct to store results that are derived from JuMP. NPDemand currently doesn't use anything from the results field of 
+    NPDProblem other than results.minimizer, so this struct will preserve that functionality even when the results are not derived from Optim.
+"""
+mutable struct NPD_JuMP_results 
+    minimizer
+end
+
 mutable struct NPDProblem
     data 
     matrices 

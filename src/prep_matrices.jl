@@ -58,7 +58,6 @@ for j = 0:J-1
     if product_FEs == true 
         num_FEs = J - length(exchange);
         prodFE = zeros(size(index_j,1),num_FEs);
-
         which_group = findall(j+1 .∈ exchange)[1];
         first_product_in_group = exchange[which_group][1];
 

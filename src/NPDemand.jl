@@ -3,7 +3,7 @@ module NPDemand
 using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, LineSearches, Combinatorics, Primes
 using ForwardDiff, Strided
 using ForwardDiff: GradientConfig, Chunk
-using StaticArrays
+using StaticArrays, JuMP, OSQP
 
 include("simulate_logit.jl")
 include("toDataFrame.jl")
@@ -26,7 +26,7 @@ include("compute_demand_function.jl")
 
 # include("solve_s_nested_flexible.jl")
 
-export estimate!,define_problem, show, price_elasticities!, toDataFrame, simulate_logit, update_constraints!
+export estimate!, estimate_fast!, define_problem, show, price_elasticities!, toDataFrame, simulate_logit, update_constraints!
 export bern, dbern, compute_demand_function!, summarize_elasticities, own_elasticities
 
 end
