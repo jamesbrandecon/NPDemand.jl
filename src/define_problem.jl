@@ -28,6 +28,14 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     
     find_prices = findall(index_vars .== "prices")[1];
 
+    # Check to make all constraints are valid
+    for con ∈ constraints
+        if con ∉ [:monotone, :all_substitutes, :diagonal_dominance_group, :diagonal_dominance_all, :exchangeability, :subs_in_group]
+            error("Constraint $con not recognized. Valid constraints include: 
+            :monotone, :all_substitutes, :diagonal_dominance_group, :diagonal_dominance_all, :exchangeability, :subs_in_group")
+        end
+    end
+
     # Checking structure of index
     if (find_prices !=1 ) | !(typeof(index_vars)<:Vector) #index_vars[1] !="prices"
         error("Variable index_vars must be a Vector, and `prices` must be the first element")

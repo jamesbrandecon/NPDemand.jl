@@ -16,7 +16,6 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     order_vec = [];
     for j = 1:J
         sym_combos = combo_vec[j]
-        # @show sym_combos[1:5]
         orders = -1 .* ones(size(sym_combos,1), J)
         for i ∈ eachindex(sym_combos)
             inds = getindex.(collect.(findall("_", sym_combos[i])),1) .+1
@@ -157,14 +156,14 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             orders = order_vec[inv_j];
             for i = 1:lengths[inv_j]
                 # for j ∈ setdiff(collect(1:J), inv_j)
-                for j ∈ setdiff(e, inv_j)
+                for j ∈ setdiff(exchange[e], inv_j)
                     other_orders = setdiff(collect(1:J), [inv_j, j])
                     row1 = findfirst(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
                     (orders[:,inv_j] .== orders[i,inv_j]+1) .& (orders[:,j] .== orders[i,j]));
                     row2 = findfirst(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
                     (orders[:,inv_j] .== orders[i,inv_j]) .& (orders[:,j] .== orders[i,j]-1));
                 
-                    if (row1 !=nothing) & (row2 !=nothing)
+                    if (!isnothing(row1)) & (!isnothing(row2))
                         row1 = getindex(row1,1);
                         row2 = getindex(row2,1);
                         Aineq = add_constraint(Aineq, init_ind + row2, init_ind + row1);
@@ -175,8 +174,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     end
 
     if :diagonal_dominance_all ∈ constraints
-        for e ∈ eachindex(exchange)
-            inv_j = first_in_exchange[e]
+        for inv_j ∈ first_in_exchange
             orders = order_vec[inv_j];
             if inv_j >1
                 init_ind = sum(lengths[1:inv_j-1])
@@ -187,20 +185,17 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
                 for j ∈ setdiff(collect(1:J), inv_j)
                     other_orders = setdiff(collect(1:J), [inv_j, j])
                     if J > 2
-                        # rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
-                        # (orders[:,inv_j] .== orders[i,inv_j]+1) .& (orders[:,j] .== orders[i,j]-1));
                         row1 = findfirst(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
                         (orders[:,inv_j] .== orders[i,inv_j]+1) .& (orders[:,j] .== orders[i,j]));
+                        # JMB should orders[i,j] + 1 at the END of this line be plus or minus 1?
                         row2 = findfirst(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
-                        (orders[:,inv_j] .== orders[i,inv_j]) .& (orders[:,j] .== orders[i,j]+1));
+                        (orders[:,inv_j] .== orders[i,inv_j]) .& (orders[:,j] .== orders[i,j]-1));
                     else
                         row1 = findfirst((orders[:,inv_j] .== orders[i,inv_j]+1) .& (orders[:,j] .== orders[i,j]));
                         row2 = findfirst((orders[:,inv_j] .== orders[i,inv_j]) .& (orders[:,j] .== orders[i,j]+1));
-                    end
-                    # rows = getindex.(rows, 1);
-                    # rows = rows[1];
-                
-                    if (row1 !=nothing) & (row2 !=nothing)
+                    end 
+
+                    if (!isnothing(row1)) & (!isnothing(row2))
                         row1 = getindex(row1,1);
                         row2 = getindex(row2,1);
                         Aineq = add_constraint(Aineq, init_ind + row2, init_ind + row1);
@@ -239,4 +234,23 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     maxs = maxs[order];
 
     return Aineq, Aeq, maxs, mins
+end
+
+function are_constraints_satisfied(npd_problem)
+    if npd_problem.Aineq != []
+        # Modify theta as in objective function 
+        β = npd_problem.results.minimizer;
+        θ = β[1:npd_problem.design_width]
+
+        # Enforce equality constraints directly
+        for i∈eachindex(npd_problem.mins)
+            θ[npd_problem.mins[i]] = θ[npd_problem.maxs[i]]
+        end
+        if maximum(npd_problem.Aineq * θ) > npd_problem.constraint_tol
+            println("Constraints not satisfied -- maximum deviation is $(maximum(npd_problem.Aineq * θ))")
+            return false
+        else
+            return true
+        end
+    end
 end

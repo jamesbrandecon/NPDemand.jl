@@ -1,10 +1,15 @@
-function estimate_fast!(problem::NPDProblem)
-    β, γ = jmp_obj(problem);
+function estimate_fast!(problem::NPDProblem; min_iter = 2000, max_iter = 10000)
+    β, γ = jmp_obj(problem, min_iter = min_iter, max_iter = max_iter);
     problem.results = NPD_JuMP_results([β;γ]);
 end
 
-function jmp_obj(npd_problem::NPDProblem)
-    # Unpack 
+function jmp_obj(npd_problem::NPDProblem; min_iter = 2000, max_iter = 10000)
+    # Unpack tolerances, even if not using
+    constraint_tol = npd_problem.constraint_tol;
+    obj_xtol = npd_problem.obj_xtol;
+    obj_ftol = npd_problem.obj_ftol;
+
+    # Unpack data
     Avec = npd_problem.Avec;
     Xvec = npd_problem.Xvec;
     Bvec = npd_problem.Bvec;
@@ -13,6 +18,12 @@ function jmp_obj(npd_problem::NPDProblem)
 
     # Define JuMP problem 
     model = Model(OSQP.Optimizer)
+    set_optimizer_attribute(model, "check_termination", min_iter);
+    # set_optimizer_attribute(model, "eps_abs", 1e-12);
+    # set_optimizer_attribute(model, "eps_prim_inf", 1e-12);
+    # set_optimizer_attribute(model, "eps_rel", 1e-12);
+    set_optimizer_attribute(model, "max_iter", max_iter);
+    
     @variable(model, γ[1:sum(size(npd_problem.Bvec[1],2))]);
     @variable(model, β[1:npd_problem.design_width]);
     println("Setting up problem in JuMP ....")
@@ -21,12 +32,15 @@ function jmp_obj(npd_problem::NPDProblem)
 
     # Add constraints
     @constraint(model, γ[1]==1); # Price coefficient normalized
+    
     @constraint(model, [i = 1:size(npd_problem.mins,1)], 
         β[npd_problem.mins[i]] == β[npd_problem.maxs[i]]) # Enforcing exchangeability
+
     @constraint(model, [i = 1:size(npd_problem.Aineq,1)], # Enforcing inequality constraints
-        npd_problem.Aineq[i,:]'*β .<= 0)
+        sum(npd_problem.Aineq[i,:] .* β) <= 0)
+    
     @constraint(model, [i = 1:size(npd_problem.Aeq,1)], # Enforcing equality constraints
-        npd_problem.Aeq[i,:]'*β .== 0)
+        sum(npd_problem.Aeq[i,:]' .* β) == 0)
     
     println("Solving problem in JuMP ....")
 
@@ -52,6 +66,7 @@ Options:
 """
 function estimate!(problem::NPDProblem; max_inner_iterations = 10000, 
     max_outer_iterations = 100, show_trace = false, verbose = true)
+
     # Unpack problem 
     matrices = problem.matrices;
     Xvec = problem.Xvec;

@@ -27,6 +27,6 @@ include("compute_demand_function.jl")
 # include("solve_s_nested_flexible.jl")
 
 export estimate!, estimate_fast!, define_problem, show, price_elasticities!, toDataFrame, simulate_logit, update_constraints!
-export bern, dbern, compute_demand_function!, summarize_elasticities, own_elasticities
+export bern, dbern, compute_demand_function!, summarize_elasticities, own_elasticities, are_constraints_satisfied
 
 end
