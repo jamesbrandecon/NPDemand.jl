@@ -1,7 +1,9 @@
 function elast_penalty(θ_packed::AbstractArray, exchange::Array, elast_mats::Matrix{Any}, elast_prices::Matrix{Float64}, 
-    lambda::Real, conmat::Matrix{Float64}; 
+    lambda::Real, 
+    conmat::Dict{Symbol,Matrix{Float64}}; 
     J = maximum(maximum.(exchange)),
-    J_sp = zeros(eltype(θ_packed),size(elast_mats[:,1])), during_obj = false)
+    J_sp = zeros(eltype(θ_packed),size(elast_mats[:,1])), 
+    during_obj = false)
     
     dsids = zeros(eltype(θ_packed),J,J,size(elast_mats[1,1],1))
     at = elast_prices;
@@ -26,13 +28,8 @@ function elast_penalty(θ_packed::AbstractArray, exchange::Array, elast_mats::Ma
             else
                 init_ind = sum(size.(elast_mats[1:j1-1,1],2))
             end
-                θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1,1],2)];
-            try
-                @views dsids[j1,j2,:] = elast_mats[j1,j2] * θ_j1; 
-            catch
-                @show size(θ_j1) size(elast_mats[j1,j2])
-                @show j1 j2
-            end
+            θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1,1],2)];
+            @views dsids[j1,j2,:] = elast_mats[j1,j2] * θ_j1; 
         end
     end
     
@@ -75,11 +72,11 @@ function subset_for_elast_const(npd_problem, df::DataFrame; grid_size=10)
 
     # max_s = maximum(s, dims=1);
     # min_s = minimum(s, dims=1);
-    max_s = quantile(s[:,1], 0.9);
-    min_s = quantile(s[:,1], 0.1);
+    max_s = quantile(s[:,1], 0.75);
+    min_s = quantile(s[:,1], 0.25);
     for j = 2:J
-        max_s = vcat(max_s, quantile(s[:,1], 0.9));
-        min_s = vcat(min_s, quantile(s[:,1], 0.1));
+        max_s = vcat(max_s, quantile(s[:,1], 0.75));
+        min_s = vcat(min_s, quantile(s[:,1], 0.25));
     end
 
     temp = [];
@@ -167,7 +164,8 @@ end
 
 
 function elast_penaltyrev(θ::AbstractArray, exchange::Array, elast_mats::Matrix{Any}, elast_prices::Matrix{Float64}, 
-    lambda::Real, conmat::Matrix{Float64}; 
+    lambda::Real, 
+    conmat::Dict; 
     J = maximum(maximum.(exchange)),
     during_obj = false)
 
@@ -217,8 +215,13 @@ function elast_penaltyrev(θ::AbstractArray, exchange::Array, elast_mats::Matrix
             break
         end
         
-        DET = det(J_s)^2;
-        penalty += sum((temp .< conmat) .* log.((abs.(temp).+1).^2) .* lambda) + 10 * lambda * ((DET + 1e-12) / DET - 1); 
+        DET = det(J_s)^2; 
+        if conmat[:subs] !=[]
+            penalty += sum((temp .< conmat[:subs]) .* log.((abs.(temp).+1).^2) .* lambda); # + 10 * lambda * ((DET + 1e-12) / DET - 1); 
+        end
+        if conmat[:complements] !=[]
+            penalty += sum((temp .> conmat[:complements]) .* log.((abs.(temp).+1).^2) .* lambda); # + 10 * lambda * ((DET + 1e-12) / DET - 1); 
+        end
         
     end
     # @show penalty
@@ -229,4 +232,77 @@ function elast_penaltyrev(θ::AbstractArray, exchange::Array, elast_mats::Matrix
     end
     
     return penalty
+end
+
+
+function elasticities_on_grid(problem::NPDProblem)
+    # θ::AbstractArray, exchange::Array, elast_mats::Matrix{Any}, elast_prices::Matrix{Float64}, 
+    # lambda::Real, conmat::Matrix{Float64}; 
+    # J = maximum(maximum.(exchange)),
+    # during_obj = false
+
+    β = problem.results.minimizer
+    θ = β[1:problem.design_width]
+    γ = β[length(θ)+1:end]
+    γ[1] = 1;
+    for i ∈ problem.normalization
+        γ[i] =0; 
+    end
+    for i∈eachindex(problem.mins)
+        θ[problem.mins[i]] = θ[problem.maxs[i]]
+    end
+
+    at = problem.elast_prices;
+    elast_mats = problem.elast_mats;
+    J = maximum(maximum.(problem.exchange));
+
+    dsids = zeros(eltype(θ),J,J,size(elast_mats[1,1],1));
+    temp = zeros(eltype(θ), J,J);
+    J_s = zeros(eltype(θ),J,J);
+
+    for j1 = 1:J
+        for j2 = 1:J
+            if j1 ==1 
+                init_ind = 0;
+            else
+                init_ind = sum(size.(elast_mats[1:j1-1,1],2))
+            end
+            
+            θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1,1],2)];
+            
+            try
+                dsids[j1,j2,:] .= elast_mats[j1,j2] * θ_j1; 
+            catch
+                # @show size(θ_j1) size(elast_mats[j1,j2])
+                # @show j1 j2
+                error("Error in inner_elasticity functions")
+            end
+        end
+    end
+    
+    Jmat = eltype(θ)[];
+    jacobian_vec = eltype(θ)[];
+    failed_inverse = false;
+
+    penalty = zero(eltype(θ));
+
+    vector_of_elast_mats = [];
+    for ii = 1:length(dsids[1,1,:])
+        for j1 = 1:J
+            for j2 = 1:J
+                J_s[j1,j2] = dsids[j1,j2,ii]
+            end
+        end
+
+        try
+            temp = -1*inv(J_s);
+        catch
+            failed_inverse = true;
+            break
+        end
+        
+        push!(vector_of_elast_mats, temp)
+    end
+
+    return vector_of_elast_mats
 end

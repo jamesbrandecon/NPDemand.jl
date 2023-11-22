@@ -169,6 +169,12 @@ function summarize_elasticities(problem::NPDProblem, stat::String; q = [])
     return output
 end
 
+function elasticity_cdf(problem::NPDProblem, ind1, ind2)
+    tempfunc(x) = summarize_elasticities(problem, "quantile", q = x)[ind1,ind2];
+    return 0.01:0.01:0.99, [tempfunc(x) for x ∈ 0.01:0.01:0.99]
+end
+
+
 function own_elasticities(problem::NPDProblem)
     try
         @assert problem.all_elasticities !=[]

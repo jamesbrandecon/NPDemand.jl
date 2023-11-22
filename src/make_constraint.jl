@@ -246,8 +246,17 @@ function are_constraints_satisfied(npd_problem)
         for i∈eachindex(npd_problem.mins)
             θ[npd_problem.mins[i]] = θ[npd_problem.maxs[i]]
         end
-        if maximum(npd_problem.Aineq * θ) > npd_problem.constraint_tol
-            println("Constraints not satisfied -- maximum deviation is $(maximum(npd_problem.Aineq * θ))")
+        nonlinear_condition = false;
+        if npd_problem.converged!=[] 
+            nonlinear_condition = !(npd_problem.converged)
+        end
+        if (maximum(npd_problem.Aineq * θ) > npd_problem.constraint_tol) | nonlinear_condition 
+            if nonlinear_condition
+                println("Estimation with nonlinear constraints did not converge")
+            end
+            if (maximum(npd_problem.Aineq * θ) > npd_problem.constraint_tol)
+                println("Linear constraints not satisfied -- maximum deviation is $(maximum(npd_problem.Aineq * θ))")
+            end
             return false
         else
             return true

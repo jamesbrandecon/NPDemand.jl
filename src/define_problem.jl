@@ -1,3 +1,24 @@
+
+"""
+    list_constraints()
+
+Returns a dictionary of constraints supported by the `define_problem` function in the NPDemand package. Each constraint is represented by a symbol and its corresponding description.
+"""
+function list_constraints()
+   result = Dict(
+    :monotone => "Impose downward sloping demand curves",
+    :diagonal_dominance_all => "Impose diagonal dominance Jacobian of demand -- limits the strength of cross-price effects relative to own-price effects",
+    :diagonal_dominance_group => "Same as diagonal_dominance_all, but only within exchangeable groups",
+    :all_substitutes => "Impose that all products are substitutes. This constraint is imposed linearly",
+    :exchangeability => "Impose that all products within provided groups (in `exchange`) are exchangeable",
+    :subs_in_group => "Impose that all products within provided groups (in `exchange`) are substitutes. This constraint is imposed nonlinearly",
+    :complements_in_group => "Impose that all products within provided groups (in `exchange`) are complements. This constraint is imposed nonlinearly",
+    :subs_across_group => "Impose that all products *across* provided groups (in `exchange`) are substitutes. No constraints are imposed within group. This constraint is imposed nonlinearly", 
+    :complements_across_group => "Impose that all products *across* provided groups (in `exchange`) are complements. No constraints are imposed within group. This constraint is imposed nonlinearly" 
+   ) 
+   return result
+end
+
 """
     define_problem(df::DataFrame; exchange = [], index_vars = ["prices"], FE = [], constraints = [], bO = 2, tol = 1e-5)
 
@@ -34,6 +55,14 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
             error("Constraint $con not recognized. Valid constraints include: 
             :monotone, :all_substitutes, :diagonal_dominance_group, :diagonal_dominance_all, :exchangeability, :subs_in_group")
         end
+    end
+
+    # Make sure that we're not trying to constrain subs in group and complements in group, or the same across groups 
+    if (:subs_in_group ∈ constraints) & (:complements_in_group ∈ constraints)
+        error("Cannot constrain both :subs_in_group and :complements_in_group")
+    end
+    if (:subs_across_group ∈ constraints) & (:complements_across_group ∈ constraints)
+        error("Cannot constrain both :subs_in_group and :complements_across_group")
     end
 
     # Checking structure of index
