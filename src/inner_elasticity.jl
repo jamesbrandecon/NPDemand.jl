@@ -75,8 +75,8 @@ function subset_for_elast_const(npd_problem, df::DataFrame; grid_size=10)
     max_s = quantile(s[:,1], 0.75);
     min_s = quantile(s[:,1], 0.25);
     for j = 2:J
-        max_s = vcat(max_s, quantile(s[:,1], 0.75));
-        min_s = vcat(min_s, quantile(s[:,1], 0.25));
+        max_s = vcat(max_s, quantile(s[:,j], 0.75));
+        min_s = vcat(min_s, quantile(s[:,j], 0.25));
     end
 
     temp = [];

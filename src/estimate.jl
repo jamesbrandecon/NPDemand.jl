@@ -44,7 +44,7 @@ function jmp_obj(npd_problem::NPDProblem; linear_solver = "Ipopt", verbose = tru
 
     # Add constraints
     @constraint(model, γ[1]==1); # Price coefficient normalized
-    
+
     # @constraint(model, [i = 1:size(npd_problem.mins,1)], 
     #     β[npd_problem.mins[i]] == β[npd_problem.maxs[i]]) # Enforcing exchangeability
 
@@ -52,7 +52,7 @@ function jmp_obj(npd_problem::NPDProblem; linear_solver = "Ipopt", verbose = tru
         sum(npd_problem.Aineq[i,:] .* β) <= 0)
     
     @constraint(model, [i = 1:size(npd_problem.Aeq,1)], # Enforcing exchangeability
-        sum(npd_problem.Aeq[i,:]' .* β) == 0)
+        sum(npd_problem.Aeq[i,:] .* β) == 0)
     
     verbose && println("Solving problem in JuMP ....")
 
