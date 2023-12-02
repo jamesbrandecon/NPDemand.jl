@@ -8,6 +8,10 @@ Results of this function are stored as a `DataFrame` in problem.all_elasticities
 We also store the Jacobian of the demand function with respect to prices, which can be used to calculate other quantities of interest.
 """
 function price_elasticities!(npd_problem)
+    # Add a market ID column if not already present
+    if !(:market_ids ∈ names(npd_problem.data))
+        npd_problem.data[!,"market_ids"] .= 1:size(npd_problem.data,1);
+    end
 
     df = npd_problem.data;
     at = df[!,r"prices"];
@@ -137,6 +141,8 @@ function price_elasticities!(npd_problem)
     # return esep, Jmat, svec, all_own
     # return esep, avg_elast_mat, svec, all_own, all_elast_mat, Jmat
     npd_problem.all_elasticities = all_elast_mat; #DataFrame(product1 = prod1, product2 = prod2, elasticity = elas_ijj, market_ids = market);
+    npd_problem.all_elasticities = DataFrame(market_ids = df.market_ids, all_elasticities = npd_problem.all_elasticities)
+    
     npd_problem.all_jacobians = Jmat;
 end
     
@@ -151,18 +157,18 @@ function summarize_elasticities(problem::NPDProblem, stat::String; q = [])
 
     J = length(problem.Xvec);
     output = zeros(J,J);
-    for j1 ∈ 1:size(problem.all_elasticities[1],1)
-        for j2 ∈ 1:size(problem.all_elasticities[1],1)
+    for j1 ∈ 1:size(problem.all_elasticities[!,:all_elasticities][1],1)
+        for j2 ∈ 1:size(problem.all_elasticities[!,:all_elasticities][1],1)
             if stat=="median"
-                output[j1,j2] = median(getindex.(problem.all_elasticities, j1, j2));
+                output[j1,j2] = median(getindex.(problem.all_elasticities[!,:all_elasticities], j1, j2));
             elseif stat=="mean"
-                output[j1,j2] = mean(getindex.(problem.all_elasticities, j1, j2));
+                output[j1,j2] = mean(getindex.(problem.all_elasticities[!,:all_elasticities], j1, j2));
             elseif stat =="quantile" 
                 if q==[]
                     println("Quantile q not specified -- assuming median")
                     q = 0.5;
                 end
-                output[j1,j2] = quantile(getindex.(problem.all_elasticities, j1, j2), q);
+                output[j1,j2] = quantile(getindex.(problem.all_elasticities[!,:all_elasticities], j1, j2), q);
             end
         end
     end
@@ -185,8 +191,11 @@ function own_elasticities(problem::NPDProblem)
     N = size(problem.Xvec[1],1);
     output = zeros(N,J);
     for j1 ∈ 1:J
-        output[:,j1] = getindex.(problem.all_elasticities, j1, j1);
+        output[:,j1] = getindex.(problem.all_elasticities[!,:all_elasticities], j1, j1);
     end
-
+    output = DataFrame(output, :auto);
+    for j1 ∈ 1:J
+        rename!(output, Symbol("x$j1") => "product_"*string(j1));
+    end
     return output
 end

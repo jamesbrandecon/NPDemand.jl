@@ -337,7 +337,7 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
                 if !isempty(Aineq)
                     penalty_violated = (maximum(Aineq * θ) > constraint_tol);
                 end
-                if elast_mats!=[]
+                if (elast_mats!=[]) & problem_has_nonlinear_constraints # Added second check just to be sure
                     c = θ;
                     penalty_violated = (penalty_violated) | (elast_penaltyrev(c, exchange, elast_mats, elast_prices, L, conmat)/L > constraint_tol);
                 end

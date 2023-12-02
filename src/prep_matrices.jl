@@ -119,7 +119,7 @@ if !inner
     end
 
     # add IVs for price
-    if price_iv == []
+    if (price_iv == []) | (price_iv == ["price_iv"])
         A_xj = hcat(A_xj, df[!,"price_iv$(xj-1)"])
     else
         for p_ivs ∈ price_iv

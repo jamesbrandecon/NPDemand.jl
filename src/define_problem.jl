@@ -14,7 +14,8 @@ function list_constraints()
     :subs_in_group => "Impose that all products within provided groups (in `exchange`) are substitutes. This constraint is imposed nonlinearly",
     :complements_in_group => "Impose that all products within provided groups (in `exchange`) are complements. This constraint is imposed nonlinearly",
     :subs_across_group => "Impose that all products *across* provided groups (in `exchange`) are substitutes. No constraints are imposed within group. This constraint is imposed nonlinearly", 
-    :complements_across_group => "Impose that all products *across* provided groups (in `exchange`) are complements. No constraints are imposed within group. This constraint is imposed nonlinearly" 
+    :complements_across_group => "Impose that all products *across* provided groups (in `exchange`) are complements. No constraints are imposed within group. This constraint is imposed nonlinearly",
+    :all_substitutes_nonlinear => "Impose that all products are substitutes. This constraint is imposed nonlinearly"
    ) 
    return result
 end
@@ -43,11 +44,19 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
     - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
 - `verbose`: if `false`, will not print updates as problem is generated
 """
-function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["prices"], price_iv = [], FE = [], 
-    constraints = [], bO = 2, obj_xtol = 1e-5, obj_ftol = 1e-5, 
-    constraint_tol = 1e-5, normalization=[], chunk_size = [], grid_size = [], verbose = false)
+function define_problem(df::DataFrame; exchange::Vector = [], 
+    index_vars = ["prices"], price_iv = [], FE = [], 
+    constraints = [], bO = 2, 
+    obj_xtol = 1e-5, obj_ftol = 1e-5, 
+    constraint_tol = 1e-5, normalization=[], 
+    chunk_size = [], grid_size = [], verbose = false)
     
     find_prices = findall(index_vars .== "prices")[1];
+
+    # Set default value of price_iv 
+    if price_iv == []
+        price_iv = ["price_iv"];
+    end
 
     # Check to make all constraints are valid
     for con ∈ constraints
@@ -78,6 +87,13 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
         if (exchange != []) & (:exchangeability ∉ constraints)
             error("Vector exchange is nonempty but :exchangeability is listed in constraints")
         end
+    end
+
+    # Re-sort columns so that they are in numeric order 
+    for column_name in union(["shares", "share_iv"], index_vars, price_iv)
+        stub_cols = filter(col -> occursin(Regex("($column_name)\\d+"), col), names(df))
+        sorted_stub_cols = sort(stub_cols, by = col -> parse(Int, match(Regex("$column_name(\\d+)"), col).captures[1]))
+        df = df[:, vcat(setdiff(names(df), stub_cols), sorted_stub_cols)]
     end
 
     try 
