@@ -70,19 +70,21 @@ function subset_for_elast_const(npd_problem, df::DataFrame; grid_size=10)
     s = Matrix(df[:, r"shares"]);
     J = size(s,2);
 
-    # max_s = maximum(s, dims=1);
-    # min_s = minimum(s, dims=1);
-    max_s = quantile(s[:,1], 0.75);
-    min_s = quantile(s[:,1], 0.25);
+    ub = 0.6;
+    lb = 0.4;
+
+    max_s = quantile(s[:,1], ub);
+    min_s = quantile(s[:,1], lb);
     for j = 2:J
-        max_s = vcat(max_s, quantile(s[:,j], 0.75));
-        min_s = vcat(min_s, quantile(s[:,j], 0.25));
+        max_s = vcat(max_s, quantile(s[:,j], ub));
+        min_s = vcat(min_s, quantile(s[:,j], lb));
     end
 
     temp = [];
     for j = 1:J
+        midpoint = (min_s[j] + max_s[j])/2;
         if grid_size ==1
-            push!(temp, [(min_s[j] + max_s[j])/2])
+            push!(temp, [midpoint])
         else
             push!(temp, collect(range(min_s[j], max_s[j], length = grid_size)))
         end
@@ -182,7 +184,6 @@ function elast_penaltyrev(θ::AbstractArray, exchange::Array, elast_mats::Matrix
             else
                 init_ind = sum(size.(elast_mats[1:j1-1,1],2))
             end
-            
             θ_j1 = θ[init_ind+1:init_ind+size(elast_mats[j1,1],2)];
             
             try
@@ -233,6 +234,205 @@ function elast_penaltyrev(θ::AbstractArray, exchange::Array, elast_mats::Matrix
     
     return penalty
 end
+
+function elast_penalty_all(x, exchange, elast_mats, 
+    elast_prices, lambda, conmat; J = maximum(maximum.(exchange)),
+    during_obj = false,
+    quantile_vec = [0.5], 
+    problem_details_dict = Dict(),
+    nonlinear_method = "grid")
+
+    if nonlinear_method =="grid" 
+        out = elast_penaltyrev(x, exchange, elast_mats, elast_prices, lambda, conmat; J = maximum(maximum.(exchange)),
+        during_obj = false)
+    else
+        out = elast_penalty_quantile(x, exchange, elast_mats, elast_prices, lambda, conmat; J = maximum(maximum.(exchange)),
+        during_obj = false,
+        quantile_vec = quantile_vec, 
+        problem_details_dict = problem_details_dict,
+        tempmat_storage = problem_details_dict["tempmat_storage"])
+    end
+    return out
+end
+
+function calc_tempmats(problem)
+
+    J = length(problem.Xvec);
+    #     ----------------------------
+    # JMB need to fix args here and fix references to this function
+    s = problem.data[:, r"shares"];
+    exchange = problem.exchange;
+    bO = problem.bO;
+    bernO = convert.(Integer, bO);
+    
+    tempmats = []
+    perm_s = zeros(size(s));
+    dsids = zeros(J,J,size(s,1)) # initialize matrix of ∂s^{-1}/∂s
+
+    for j1 = 1:J
+        which_group = findall(j1 .∈ exchange)[1];
+        first_product_in_group = exchange[which_group][1];
+
+        perm = collect(1:J);
+        perm[first_product_in_group] = j1; perm[j1] = first_product_in_group;
+    
+        perm_s .= s;
+        perm_s[:,first_product_in_group] = s[:,j1]; perm_s[:,j1] = s[:,first_product_in_group];
+                
+        for j2 = 1:J 
+            tempmat_s = zeros(size(s,1),1)
+            for j_loop = 1:1:J
+                stemp = perm_s[:,j_loop]; # j_loop = 1 -> stemp == perm_s[:,1] = s[:,2];
+                # j1=3, j2=4. j_loop = 4 -> stemp = perm_s[:,4] = s[:,4]
+                if j2 == perm[j_loop] # j2==2, perm[1] ==2, so s[:,2] added as derivative 
+                    tempmat_s = [tempmat_s dbern(stemp, bernO)];
+                else 
+                    tempmat_s = [tempmat_s bern(stemp, bernO)];
+                end
+            end
+            tempmat_s = tempmat_s[:,2:end]
+            tempmat_s, a, b = make_interactions(tempmat_s, exchange, bernO, j1, perm);
+            push!(tempmats, tempmat_s);
+        end
+    end
+    return tempmats
+end
+
+function elast_penalty_quantile(θ::AbstractArray, exchange::Array, 
+    elast_mats::Matrix{Any}, elast_prices::Matrix{Float64}, 
+    lambda::Real, 
+    conmat::Dict; 
+    J = maximum(maximum.(exchange)),
+    during_obj = false,
+    quantile_vec = [0.5], 
+    problem_details_dict = Dict(), 
+    tempmat_storage = [])
+
+    # print("Elasticity penalty")
+    # @show problem_details_dict
+    df = problem_details_dict["data"];
+    at = df[!,r"prices"];
+    
+    # Unpack results
+    β = problem_details_dict["β"]
+    θ = β[1:problem_details_dict["design_width"]]
+    γ = β[length(θ)+1:end]
+
+    γ[1] = 1;
+    for i ∈ problem_details_dict["normalization"]
+        γ[i] =0; 
+    end
+    for i ∈ eachindex(problem_details_dict["mins"])
+        θ[problem_details_dict["mins"][i]] = θ[problem_details_dict["maxs"][i]]
+    end
+
+    X = problem_details_dict["Xvec"];
+    J = length(X);
+    B = problem_details_dict["Bvec"];
+    bO = problem_details_dict["bO"];
+    exchange = problem_details_dict["exchange"];
+
+    # Check inputs
+    if (at!=[]) & (size(at,2) != size(df[:,r"prices"],2))
+        error("Argument `at` must be a matrix of prices with J columns if provided")
+    end
+    if typeof(at) ==DataFrame
+        at = Matrix(at);
+    end
+
+    s = Matrix(df[:, r"shares"]);
+    J = size(s,2);
+    bernO = convert.(Integer, bO);
+    order = bernO;
+    
+    design_width = sum(size.(X,2));
+    # θ = β[1:design_width]
+    # γ = β[length(θ)+1:end]
+
+    # Construct index 
+        # Note: Currently evaluates at realized prices. Have to edit to allow for counterfactual prices
+    index = zeros(size(X[1],1),J)
+    for j = 1:J
+        index[:,j] = B[j]*γ;
+    end
+
+    # Shares to evaluate derivatives -- bad form, holdover from old code
+    svec = s;
+    
+    # Share Jacobian
+    # tempmats = []
+    # perm_s = zeros(eltype(θ), size(s));
+    dsids = zeros(eltype(θ), J,J,size(index,1)) # initialize matrix of ∂s^{-1}/∂s
+    counter = 1;
+    for j1 = 1:J 
+        if j1 ==1 
+            init_ind = 0;
+        else
+            init_ind = sum(size.(X[1:j1-1],2))
+        end
+        
+        θ_j1 = θ[init_ind+1:init_ind+size(X[j1],2)];
+        for j2 = 1:J 
+            # @show size(tempmat_storage[counter]) size(θ)
+            dsids[j1,j2,:] = tempmat_storage[counter] * θ_j1;
+            counter += 1;
+        end
+    end
+    
+    Jmat = []; # vector of derivatives of inverse shares
+    J_sp = zeros(size(svec[:,1]));
+    all_own = zeros(size(svec,1),J);
+    svec2 = svec;
+    # avg_elast_mat = zeros(J,J);
+    all_elast_mat = zeros(eltype(θ), J,J,length(index[:,1]));
+
+    Threads.@threads for ii = 1:length(dsids[1,1,:])
+        J_s = zeros(J,J);
+        for j1 = 1:J
+            for j2 = 1:J
+                J_s[j1,j2] = dsids[j1,j2,ii]
+            end
+        end
+        temp = -1*pinv(J_s);
+    
+        # Market vector of prices/shares
+        ps = at[ii,:] ./svec2[ii,:];
+        ps_mat = zeros(J,J)
+        for j1 = 1:J, j2 = 1:J 
+            ps_mat[j1,j2] = at[ii,j2]/svec2[ii,j1];
+        end
+         
+        all_elast_mat[:,:,ii] = temp .* ps_mat #, temp .* ps_mat
+    end
+        
+    # J = length(problem.Xvec);
+    output = zeros(J,J,length(quantile_vec));
+    for qi in eachindex(quantile_vec)
+        for j1 ∈ 1:size(all_elast_mat,1)
+            for j2 ∈ 1:size(all_elast_mat,1)
+                # output[j1,j2,q] = quantile(getindex.(all_elast_mat, j1, j2), q);
+                output[j1,j2,qi] = quantile(all_elast_mat[j1,j2,:], quantile_vec[qi]);
+            end
+        end
+    end
+
+    # calculate penalty for each provided element of quantile_vec 
+    penalty = zero(eltype(θ));
+
+    if conmat[:subs] !=[]
+        for q = 1:length(quantile_vec)
+            penalty += sum((output[:,:,q] .< conmat[:subs]) .* abs.(output[:,:,q]).^2 .* lambda); # + 10 * lambda * ((DET + 1e-12) / DET - 1); 
+        end
+    end
+    if conmat[:complements] !=[]
+        for q = 1:length(quantile_vec)
+            penalty += sum((output[:,:,q] .> conmat[:complements]) .* abs.(output[:,:,q]).^2 .* lambda); # + 10 * lambda * ((DET + 1e-12) / DET - 1); 
+        end
+    end
+    
+    return penalty
+end
+
 
 
 function elasticities_on_grid(problem::NPDProblem)

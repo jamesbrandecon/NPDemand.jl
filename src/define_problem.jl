@@ -60,10 +60,22 @@ function define_problem(df::DataFrame; exchange::Vector = [],
 
     # Check to make all constraints are valid
     for con ∈ constraints
-        if con ∉ [:monotone, :all_substitutes, :diagonal_dominance_group, :diagonal_dominance_all, :exchangeability, :subs_in_group]
+        if con ∉ [:monotone, :all_substitutes,
+            :all_substitutes_nonlinear, 
+            :diagonal_dominance_group, :diagonal_dominance_all, 
+            :exchangeability, :subs_in_group,
+            :complements_across_group, :subs_across_group, 
+            :complements_in_group]
             error("Constraint $con not recognized. Valid constraints include: 
-            :monotone, :all_substitutes, :diagonal_dominance_group, :diagonal_dominance_all, :exchangeability, :subs_in_group")
+            :monotone, :all_substitutes, :diagonal_dominance_group, :diagonal_dominance_all, 
+            :exchangeability, :subs_in_group, :complements_across_group, :subs_across_group,
+            :complements_in_group, :all_substitutes_nonlinear")
         end
+    end
+
+    problem_has_nonlinear_constraints = false;
+    if (:subs_in_group ∈ constraints) | (:complements_in_group ∈ constraints) | (:all_substitutes_nonlinear ∈ constraints) | (:subs_across_group ∈ constraints) | (:complements_across_group ∈ constraints)
+        problem_has_nonlinear_constraints = true;
     end
 
     # Make sure that we're not trying to constrain subs in group and complements in group, or the same across groups 
@@ -113,8 +125,8 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     end
 
     # Nonlinear constraint grid size check: 
-    if ((grid_size == []) & (:subs_in_group ∈ constraints)) | ((grid_size != []) & (:subs_in_group ∉ constraints))
-        error("Specify grid_size if and only if :subs_in_group is in `constraints`")
+    if ((grid_size == []) & (problem_has_nonlinear_constraints)) | ((grid_size != []) & (!problem_has_nonlinear_constraints))
+        error("Specify grid_size if and only if the problem has nonlinear constraints")
     end
 
     # Confirm that shares are numbered as expected: 
@@ -223,7 +235,7 @@ function define_problem(df::DataFrame; exchange::Vector = [],
                         [], 
                         [])
 
-    if :subs_in_group ∈ constraints
+    if problem_has_nonlinear_constraints
         verbose && println("Preparing inputs for nonlinear constraints....")
         subset = subset_for_elast_const(problem, df; grid_size = grid_size);
         elast_mats, elast_prices = make_elasticity_mat(problem, subset);
