@@ -30,7 +30,7 @@ B_n(x) = \sum_{k=1}^n \theta_k b_{k,n}(x)
 where the basis functions are defined as:
 
 ```math
-b_{k,n}(x) = \nchoosek{n}{k} x^k (1-x)^{n-k}.
+b_{k,n}(x) =  {n \choose k} x^k (1-x)^{n-k}
 ```
 
 Although one could make other reasonable choices for approximating $\sigma^{-1}_j$, Bernstein polynomials were chosen because they an approximation for which it is uniquely easy to impose constraints, which is a central focus of our package. 

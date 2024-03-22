@@ -1,8 +1,10 @@
 ultra = true
-function md_obj(β::AbstractVector; exchange = [], X = [], B = [], A = [],
+function md_obj(β::AbstractVector; df = [], exchange = [], X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
     Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], 
-    price_index = 1, lambda1=0.0, elast_mats=[], elast_prices = [], conmat = [])
+    price_index = 1, lambda1=0.0, elast_mats=[], elast_prices = [], conmat = [], 
+    nonlinear_method = "grid", quantiles = [0.5], bO = 2, tempmat_storage = [], 
+    weights = [1.0,1.0])
 
     J = length(X);
 
@@ -56,31 +58,49 @@ function md_obj(β::AbstractVector; exchange = [], X = [], B = [], A = [],
 
     # Nonlinear constraints
     if (elast_mats != []) & (lambda1!=0)
-        # conmat = zeros(eltype(θ),J,J);
-        # Threads.@threads for j1 = 1:J
-        #     ej = getindex.(findall(j1 .∈ exchange),1)[1];
-        #     for j2 = 1:J
-        #         if (j2==j1) | (j2 ∉ exchange[ej])
-        #             conmat[j1,j2] = -Inf;
-        #         end                
-        #     end
-        # end
-        # c = @MArray zeros(length(θ))
-        # c = SizedVector{length(θ)}(θ);
-        # c = θ;
-        obj += elast_penaltyrev(θ, exchange, elast_mats, elast_prices, lambda1, conmat; during_obj=true);
+        if nonlinear_method == "grid"
+            obj += elast_penaltyrev(θ, exchange, elast_mats, elast_prices, lambda1, conmat; during_obj=true);
+        else 
+            if typeof(quantiles) <: Real 
+                quantiles = [quantiles];
+            end
+            # β, design_width, J, exchange, normalization, mins, maxs, Xvec, Bvec, b0
+            problem_details_dict = Dict(
+                "data" => df,
+                "β" => β,
+                "design_width" => design_width,
+                "J" => J,
+                "exchange" => exchange,
+                "normalization" => normalization,
+                "tempmat_storage" => tempmat_storage,
+                "mins" => mins,
+                "maxs" => maxs,
+                "Xvec" => X,
+                "Bvec" => B,
+                "bO" => bO,
+            );
+            penalty = elast_penalty_all(θ, exchange, elast_mats, elast_prices, lambda1, conmat; quantile_vec = quantiles, 
+                problem_details_dict = problem_details_dict, 
+                nonlinear_method = nonlinear_method,
+                during_obj=true);   
+    
+            obj = weights[1] * obj + weights[2] * penalty;
+            # obj += penalty;
+        end
         # obj += elast_penalty(θ, exchange, elast_mats, elast_prices, lambda1, conmat);
     end
 
     obj
 end
 
-function md_grad!(grad::AbstractVector, β::AbstractVector; exchange::Array = [], X = [], B = [], A = [],
+function md_grad!(grad::AbstractVector, β::AbstractVector; df = [], exchange::Array = [], X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
     Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], price_index = 1, 
     lambda1 = 0.0, g = x -> x , elast_mats =[], elast_prices = [], chunk_size = [], cfg = [],
     ineq_con = zeros(eltype(β), size(Aineq,1)),
-    eq_con = zeros(eltype(β), size(Aeq,1)), conmat = [], grad0 = zeros(eltype(β), size(grad)))
+    eq_con = zeros(eltype(β), size(Aeq,1)), 
+    conmat = [], grad0 = zeros(eltype(β), size(grad)),
+    weights = [1.0,1.0])
 
     # y = zeros(eltype(β), size(X[1],1));
     # e = zeros(eltype(β), size(y));
@@ -141,7 +161,8 @@ function md_grad!(grad::AbstractVector, β::AbstractVector; exchange::Array = []
 
     # Nonlinear constraints
     if (elast_mats != []) & (lambda1!=0)
-        grad0[1:length(θ)] += g(θ);
+        # grad0[1:length(θ)] += g(θ);
+        grad0[1:length(θ)] = weights[1] * grad0[1:length(θ)] + weights[2] * g(θ);
     end
 
     # Enforce normalization in gradient too
@@ -158,11 +179,11 @@ function md_grad!(grad::AbstractVector, β::AbstractVector; exchange::Array = []
         grad0[mins[i]] = zero(eltype(θ));
     end
 
-    try 
+    # try 
         grad .= grad0
-    catch
-        grad .= dropdims(grad0, dims=1);
-    end
+    # catch
+        # grad .= dropdims(grad0, dims=1);
+    # end
     # @show typeof(θ)
     grad
 end  

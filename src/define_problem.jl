@@ -1,3 +1,25 @@
+
+"""
+    list_constraints()
+
+Returns a dictionary of constraints supported by the `define_problem` function in the NPDemand package. Each constraint is represented by a symbol and its corresponding description.
+"""
+function list_constraints()
+   result = Dict(
+    :monotone => "Impose downward sloping demand curves",
+    :diagonal_dominance_all => "Impose diagonal dominance Jacobian of demand -- limits the strength of cross-price effects relative to own-price effects",
+    :diagonal_dominance_group => "Same as diagonal_dominance_all, but only within exchangeable groups",
+    :all_substitutes => "Impose that all products are substitutes. This constraint is imposed linearly",
+    :exchangeability => "Impose that all products within provided groups (in `exchange`) are exchangeable",
+    :subs_in_group => "Impose that all products within provided groups (in `exchange`) are substitutes. This constraint is imposed nonlinearly",
+    :complements_in_group => "Impose that all products within provided groups (in `exchange`) are complements. This constraint is imposed nonlinearly",
+    :subs_across_group => "Impose that all products *across* provided groups (in `exchange`) are substitutes. No constraints are imposed within group. This constraint is imposed nonlinearly", 
+    :complements_across_group => "Impose that all products *across* provided groups (in `exchange`) are complements. No constraints are imposed within group. This constraint is imposed nonlinearly",
+    :all_substitutes_nonlinear => "Impose that all products are substitutes. This constraint is imposed nonlinearly"
+   ) 
+   return result
+end
+
 """
     define_problem(df::DataFrame; exchange = [], index_vars = ["prices"], FE = [], constraints = [], bO = 2, tol = 1e-5)
 
@@ -22,11 +44,48 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
     - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
 - `verbose`: if `false`, will not print updates as problem is generated
 """
-function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["prices"], price_iv = [], FE = [], 
-    constraints = [], bO = 2, obj_xtol = 1e-5, obj_ftol = 1e-5, 
-    constraint_tol = 1e-5, normalization=[], chunk_size = [], grid_size = [], verbose = false)
+function define_problem(df::DataFrame; exchange::Vector = [], 
+    index_vars = ["prices"], price_iv = [], FE = [], 
+    constraints = [], bO = 2, 
+    obj_xtol = 1e-5, obj_ftol = 1e-5, 
+    constraint_tol = 1e-5, normalization=[], 
+    chunk_size = [], grid_size = [], verbose = false)
     
     find_prices = findall(index_vars .== "prices")[1];
+
+    # Set default value of price_iv 
+    if price_iv == []
+        price_iv = ["price_iv"];
+    end
+
+    # Check to make all constraints are valid
+    for con ∈ constraints
+        if con ∉ [:monotone, :all_substitutes,
+            :all_substitutes_nonlinear, 
+            :diagonal_dominance_group, :diagonal_dominance_all, 
+            :exchangeability, :subs_in_group,
+            :complements_across_group, :subs_across_group, 
+            :complements_in_group, :monotone_nonlinear]
+            error("Constraint $con not recognized. Valid constraints include: 
+            :monotone, :all_substitutes, :diagonal_dominance_group, :diagonal_dominance_all, 
+            :exchangeability, :subs_in_group, :complements_across_group, :subs_across_group,
+            :complements_in_group, :all_substitutes_nonlinear")
+        end
+    end
+
+    problem_has_nonlinear_constraints = false;
+    if (:subs_in_group ∈ constraints) | (:complements_in_group ∈ constraints) | (:all_substitutes_nonlinear ∈ constraints) | (:subs_across_group ∈ constraints) | (:complements_across_group ∈ constraints) |
+        (:monotone_nonlinear ∈ constraints)
+        problem_has_nonlinear_constraints = true;
+    end
+
+    # Make sure that we're not trying to constrain subs in group and complements in group, or the same across groups 
+    if (:subs_in_group ∈ constraints) & (:complements_in_group ∈ constraints)
+        error("Cannot constrain both :subs_in_group and :complements_in_group")
+    end
+    if (:subs_across_group ∈ constraints) & (:complements_across_group ∈ constraints)
+        error("Cannot constrain both :subs_in_group and :complements_across_group")
+    end
 
     # Checking structure of index
     if (find_prices !=1 ) | !(typeof(index_vars)<:Vector) #index_vars[1] !="prices"
@@ -41,6 +100,13 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
         if (exchange != []) & (:exchangeability ∉ constraints)
             error("Vector exchange is nonempty but :exchangeability is listed in constraints")
         end
+    end
+
+    # Re-sort columns so that they are in numeric order 
+    for column_name in union(["shares", "share_iv"], index_vars, price_iv)
+        stub_cols = filter(col -> occursin(Regex("($column_name)\\d+"), col), names(df))
+        sorted_stub_cols = sort(stub_cols, by = col -> parse(Int, match(Regex("$column_name(\\d+)"), col).captures[1]))
+        df = df[:, vcat(setdiff(names(df), stub_cols), sorted_stub_cols)]
     end
 
     try 
@@ -60,8 +126,8 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     end
 
     # Nonlinear constraint grid size check: 
-    if ((grid_size == []) & (:subs_in_group ∈ constraints)) | ((grid_size != []) & (:subs_in_group ∉ constraints))
-        error("Specify grid_size if and only if :subs_in_group is in `constraints`")
+    if ((grid_size == []) & (problem_has_nonlinear_constraints)) | ((grid_size != []) & (!problem_has_nonlinear_constraints))
+        error("Specify grid_size if and only if the problem has nonlinear constraints")
     end
 
     # Confirm that shares are numbered as expected: 
@@ -170,7 +236,7 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
                         [], 
                         [])
 
-    if :subs_in_group ∈ constraints
+    if problem_has_nonlinear_constraints
         verbose && println("Preparing inputs for nonlinear constraints....")
         subset = subset_for_elast_const(problem, df; grid_size = grid_size);
         elast_mats, elast_prices = make_elasticity_mat(problem, subset);
@@ -186,6 +252,16 @@ function define_problem(df::DataFrame; exchange::Vector = [], index_vars = ["pri
     end
 
     return problem
+end
+
+"""
+    NPD_JuMP_results
+
+    Custom struct to store results that are derived from JuMP. NPDemand currently doesn't use anything from the results field of 
+    NPDProblem other than results.minimizer, so this struct will preserve that functionality even when the results are not derived from Optim.
+"""
+mutable struct NPD_JuMP_results 
+    minimizer
 end
 
 mutable struct NPDProblem

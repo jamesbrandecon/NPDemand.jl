@@ -58,7 +58,6 @@ for j = 0:J-1
     if product_FEs == true 
         num_FEs = J - length(exchange);
         prodFE = zeros(size(index_j,1),num_FEs);
-
         which_group = findall(j+1 .∈ exchange)[1];
         first_product_in_group = exchange[which_group][1];
 
@@ -120,7 +119,7 @@ if !inner
     end
 
     # add IVs for price
-    if price_iv == []
+    if (price_iv == []) | (price_iv == ["price_iv"])
         A_xj = hcat(A_xj, df[!,"price_iv$(xj-1)"])
     else
         for p_ivs ∈ price_iv

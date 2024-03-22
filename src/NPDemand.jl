@@ -1,9 +1,11 @@
 module NPDemand
 
+using StaticArrays, JuMP, Ipopt, OSQP
 using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, LineSearches, Combinatorics, Primes
 using ForwardDiff, Strided
 using ForwardDiff: GradientConfig, Chunk
-using StaticArrays
+
+using Zygote
 
 include("simulate_logit.jl")
 include("toDataFrame.jl")
@@ -26,7 +28,8 @@ include("compute_demand_function.jl")
 
 # include("solve_s_nested_flexible.jl")
 
-export estimate!,define_problem, show, price_elasticities!, toDataFrame, simulate_logit, update_constraints!
-export bern, dbern, compute_demand_function!, summarize_elasticities, own_elasticities
+export estimate!, define_problem, show, price_elasticities!, toDataFrame, simulate_logit, update_constraints!
+export bern, dbern, compute_demand_function!, summarize_elasticities, own_elasticities, are_constraints_satisfied
+export elasticity_cdf 
 
 end

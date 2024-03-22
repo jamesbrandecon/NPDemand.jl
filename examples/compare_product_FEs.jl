@@ -24,7 +24,7 @@ constraint_tol = 1e-5;
 obj_xtol = 1e-5;
 obj_ftol = 1e-5;
 
-constraints = [:exchangeability];
+constraints = [:exchangeability, :monotone];
 npd_problem = define_problem(df; 
                             exchange = exchange, 
                             index_vars = index_vars, 
@@ -37,7 +37,7 @@ npd_problem = define_problem(df;
 show(npd_problem)
 
 # Estimate problem and plot comparison of estimated and true own-price elasticities
-estimate!(npd_problem) 
+estimate!(npd_problem, linear_solver = "Ipopt") 
 
 # True product FEs are stored in the DataFrame df. They are not normalized so we add normalization here. 
 true_FEs = Matrix(unique(df[!,r"productFE"]));
