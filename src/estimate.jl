@@ -105,8 +105,31 @@ function JMP_obj_constrained(npd_problem::NPDProblem;
     @variable(model, γ[1:size(npd_problem.Bvec[1],2)]);
     @variable(model, β[1:npd_problem.design_width]);
     verbose && println("Setting up problem in JuMP ....")
-    @objective(model, Min,
-    sum((Bvec[i]*γ - Xvec[i] * β[(indexes[i]+1:indexes[i+1])])'*Avec[i]*pinv(Avec[i]'*Avec[i])*Avec[i]'*(Bvec[i] * γ - Xvec[i] * β[indexes[i]+1:indexes[i+1]]) for i ∈ 1:J));
+    tempmat_storage = NPDemand.calc_tempmats(npd_problem);
+    jump_penalty(x) = elast_penalty_JUMP(x, npd_problem.exchange, 
+        npd_problem.elast_mats, npd_problem.elast_prices, 100.0, conmat; J = J,
+            during_obj = false,
+            quantile_vec = [0.5], 
+            problem_details_dict = Dict(
+            "data" => npd_problem.data,
+            "β" => x,
+            "design_width" => npd_problem.design_width,
+            "J" => J,
+            "exchange" => npd_problem.exchange,
+            "normalization" => npd_problem.normalization,
+            "tempmat_storage" => tempmat_storage,
+            "mins" => npd_problem.mins,
+            "maxs" => npd_problem.maxs,
+            "Xvec" => Xvec,
+            "Bvec" => Bvec,
+            "bO" => npd_problem.bO
+        ),
+        tempmat_storage = tempmat_storage)
+    jump_wrap(x...) = jump_penalty(x)
+    # @show jump_penalty(rand(npd_problem.design_width))
+    register(model, :pinv, 1, pinv; autodiff = true)
+    # register(model, :jump_penalty, 1, jump_wrap; autodiff = true)
+    @objective(model, Min, sum((Bvec[i]*γ - Xvec[i] * β[(indexes[i]+1:indexes[i+1])])'*Avec[i]*pinv(Avec[i]'*Avec[i])*Avec[i]'*(Bvec[i] * γ - Xvec[i] * β[indexes[i]+1:indexes[i+1]]) for i ∈ 1:J));
  
     # Add constraints
     @constraint(model, γ[1]==1); # Price coefficient normalized
@@ -117,48 +140,48 @@ function JMP_obj_constrained(npd_problem::NPDProblem;
     @constraint(model, [i = 1:size(npd_problem.Aeq,1)], # Enforcing exchangeability
         sum(npd_problem.Aeq[i,:] .* β) == 0)
     
-    if nonlinear_method == "jump"
-        print("Adding nonlinear constraints in JuMP....")
-        tempmat_storage = NPDemand.calc_tempmats(npd_problem);
-        temp_storage_mat = Array{Matrix{Float64},2}(undef, J,J);
-        at = npd_problem.data[!,r"prices"];
-        svec2 = npd_problem.data[!,r"shares"];
-        ps_mat = zeros(J,J,size(at,1))
-        for j1 = 1:J, j2 = 1:J, ii = 1:size(at,1)
-            ps_mat[j1,j2,ii] = at[ii,j2]/svec2[ii,j1];
-        end
-        counter = 1
-        for j1 = 1:J
-            for j2 = 1:J
-                temp_storage_mat[j1,j2] = tempmat_storage[counter];
-                counter +=1;
-            end
-        end
-        # temp_storage_mat = npd_problem.elast_mats;
-        beta_indexes = vcat([1:size(Xvec[1],2)], [sum(size.(Xvec[1:j1-1],2))+1:sum(size.(Xvec[1:j1-1],2))+size(Xvec[j1],2) for j1 in 2:J])
-        dsids_expr = @expression(model,[j1=1:J, j2 = 1:J], temp_storage_mat[j1,j2] *  β[beta_indexes[j1]])
-        #         # all_elast_expr = @expression(model, [j1=1:J, j2=1:J], -1 .* dsids_expr[j1,j2] .* ps_mat[j1,j2,:])
-        #         # dsids_expr = @expression(model,[j1=1:J, j2 = 1:J], temp_storage_mat[j1,j2] *  β[beta_indexes[j1]])
-        @variable(model, all_elast_mat[j1=1:J, j2=1:J, i = 1:size(npd_problem.elast_mats[1],1)]);
-        @constraint(model, [i = 1:size(npd_problem.elast_mats[1],1)], -1 .* getindex.(dsids_expr,i) * all_elast_mat[:,:,i] .== ps_mat[:,:,i]);
+    # if nonlinear_method == "jump"
+    #     print("Adding nonlinear constraints in JuMP....")
+    #     tempmat_storage = NPDemand.calc_tempmats(npd_problem);
+    #     temp_storage_mat = Array{Matrix{Float64},2}(undef, J,J);
+    #     at = npd_problem.data[!,r"prices"];
+    #     svec2 = npd_problem.data[!,r"shares"];
+    #     ps_mat = zeros(J,J,size(at,1))
+    #     for j1 = 1:J, j2 = 1:J, ii = 1:size(at,1)
+    #         ps_mat[j1,j2,ii] = at[ii,j2]/svec2[ii,j1];
+    #     end
+    #     counter = 1
+    #     for j1 = 1:J
+    #         for j2 = 1:J
+    #             temp_storage_mat[j1,j2] = tempmat_storage[counter];
+    #             counter +=1;
+    #         end
+    #     end
+    #     # temp_storage_mat = npd_problem.elast_mats;
+    #     beta_indexes = vcat([1:size(Xvec[1],2)], [sum(size.(Xvec[1:j1-1],2))+1:sum(size.(Xvec[1:j1-1],2))+size(Xvec[j1],2) for j1 in 2:J])
+    #     dsids_expr = @expression(model,[j1=1:J, j2 = 1:J], temp_storage_mat[j1,j2] *  β[beta_indexes[j1]])
+    #     #         # all_elast_expr = @expression(model, [j1=1:J, j2=1:J], -1 .* dsids_expr[j1,j2] .* ps_mat[j1,j2,:])
+    #     #         # dsids_expr = @expression(model,[j1=1:J, j2 = 1:J], temp_storage_mat[j1,j2] *  β[beta_indexes[j1]])
+    #     @variable(model, all_elast_mat[j1=1:J, j2=1:J, i = 1:size(npd_problem.elast_mats[1],1)]);
+    #     @constraint(model, [i = 1:size(npd_problem.elast_mats[1],1)], -1 .* getindex.(dsids_expr,i) * all_elast_mat[:,:,i] .== ps_mat[:,:,i]);
         
-        # my_conmat = [-100 0; 0 -100]
-        # @constraint(model, mean(all_elast_mat, dims=3) .>= my_conmat);
-        conmat_subs = conmat[:subs]
-        conmat_subs[conmat_subs .== -Inf] .= -100;
-        conmat_complements = conmat[:complements] 
-        conmat_complements[conmat_complements .== Inf] .= 100;
+    #     # my_conmat = [-100 0; 0 -100]
+    #     # @constraint(model, mean(all_elast_mat, dims=3) .>= my_conmat);
+    #     conmat_subs = conmat[:subs]
+    #     conmat_subs[conmat_subs .== -Inf] .= -100;
+    #     conmat_complements = conmat[:complements] 
+    #     conmat_complements[conmat_complements .== Inf] .= 100;
 
-        if conmat_subs != []
-            @constraint(model, [i = 1:size(npd_problem.elast_mats[1],1)], all_elast_mat[:,:,i] .>= conmat_subs);
-        end
-        if conmat_complements != []
-            @constraint(model, [i = 1:size(npd_problem.elast_mats[1],1)], all_elast_mat[:,:,i] .<= conmat_complements);
-        end
-        # @constraint(model, [i = 1:size(npd_problem.elast_mats[1],1)], all_elast_mat[:,:,i] .>= conmat_subs);
-        # @constraint(model, [i = 1:size(npd_problem.elast_mats[1],1)], all_elast_mat[:,:,i] .<= conmat_complements);
-        # @constraint(model, mean.(all_elast_expr) .>= my_conmat);
-    end
+    #     if conmat_subs != []
+    #         @constraint(model, [i = 1:size(npd_problem.elast_mats[1],1)], all_elast_mat[:,:,i] .>= conmat_subs);
+    #     end
+    #     if conmat_complements != []
+    #         @constraint(model, [i = 1:size(npd_problem.elast_mats[1],1)], all_elast_mat[:,:,i] .<= conmat_complements);
+    #     end
+    #     # @constraint(model, [i = 1:size(npd_problem.elast_mats[1],1)], all_elast_mat[:,:,i] .>= conmat_subs);
+    #     # @constraint(model, [i = 1:size(npd_problem.elast_mats[1],1)], all_elast_mat[:,:,i] .<= conmat_complements);
+    #     # @constraint(model, mean.(all_elast_expr) .>= my_conmat);
+    # end
     
     verbose && println("Solving problem in JuMP ....")
 
@@ -172,6 +195,15 @@ end
 function make_conmat(problem)
     exchange = problem.exchange;
     J = length(problem.Xvec);
+
+    conmat_monotone = [];
+    if :monotone_nonlinear in problem.constraints 
+        conmat_monotone = zeros(Float64,J,J);
+        conmat_monotone .= Inf;
+        for j = 1:J    
+            conmat_monotone[j,j] = 0.0;
+        end
+    end
 
     if maximum(x ∈[:subs_in_group, :all_substitutes_nonlinear, :subs_across_group] for x ∈ problem.constraints)
         conmat_subs = zeros(Float64,J,J);
@@ -232,10 +264,11 @@ function make_conmat(problem)
         end
     end   
 
-    conmat_subs = [-Inf 0.0; 0.0 -Inf];
+    # conmat_subs = [-Inf 0.0; 0.0 -Inf];
     conmat = Dict(
         :subs => conmat_subs,
-        :complements => conmat_complements
+        :complements => conmat_complements, 
+        :monotone => conmat_monotone
     )
     return conmat
 end
@@ -259,7 +292,9 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
     verbose = true,
     linear_solver = "Ipopt", 
     quantiles = [0.5],
-    nonlinear_method = "grid")
+    nonlinear_method = "grid", 
+    penalized::Bool = true,
+    lambda::Float64 = 1.0)
 
     # Check that linear solver is Ipopt or OSQP 
     if linear_solver ∉ ["Ipopt", "OSQP"]
@@ -305,7 +340,7 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
     # Current nonlinear constraints: [:subs_in_group, :all_substitutes_nonlinear]
     problem_has_nonlinear_constraints = false;
     if !JUMP && maximum(x ∈ [:subs_in_group, :all_substitutes_nonlinear, :subs_across_group, 
-        :complements_across_group, :complements_in_group] for x ∈ problem.constraints)
+        :complements_across_group, :complements_in_group, :monotone_nonlinear] for x ∈ problem.constraints)
         problem_has_nonlinear_constraints = true;
     end
 
@@ -323,7 +358,7 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
             else
                 tempmat_storage = [];
             end
-        obj_func(β::SizedArray, lambda::Real) = md_obj(β;df = df, exchange =exchange,X = Xvec, B = Bvec, A = Avec,
+        obj_func(β, lambda::Real,w) = md_obj(β;df = df, exchange =exchange,X = Xvec, B = Bvec, A = Avec,
                 m1=matrices.m1, 
                 m2=matrices.m2, 
                 m3=matrices.m3, 
@@ -339,9 +374,10 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
                 Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
                 mins = mins, maxs = maxs, normalization = normalization, price_index = price_index, 
                 lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices, conmat = conmat, 
-                nonlinear_method = nonlinear_method, quantiles = quantiles, bO = bO, tempmat_storage = tempmat_storage);
+                nonlinear_method = nonlinear_method, quantiles = quantiles, bO = bO, 
+                tempmat_storage = tempmat_storage, weights = [1.0,1.0]);
 
-        grad_func!(grad, β, lambda::Real, g) = md_grad!(grad, β; df = df, exchange =exchange, X = Xvec, B = Bvec, A = Avec,
+        grad_func!(grad, β, lambda::Real, g,w) = md_grad!(grad, β; df = df, exchange =exchange, X = Xvec, B = Bvec, A = Avec,
                 m1=matrices.m1, 
                 m2=matrices.m2, 
                 m3=matrices.m3, 
@@ -357,10 +393,11 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
                 Aineq = Aineq, Aeq = Aeq, design_width = design_width, 
                 mins = mins, maxs = maxs, normalization = normalization, price_index = price_index, 
                 lambda1 = lambda, elast_mats = elast_mats, elast_prices = elast_prices, 
-                chunk_size = [], cfg = cfg, g = g, conmat = conmat);
+                chunk_size = [], cfg = cfg, g = g, conmat = conmat,
+                weights = w);
 
         # Minimizer method 
-        method = LBFGS();
+        method = LBFGS(); #LBFGS();
 
         # Estimation 
         β_length = design_width + sum(size(Bvec[1],2))
@@ -372,15 +409,16 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
             β_init = problem.results.minimizer;
         end
 
-        obj_uncon(x::SizedVector) = obj_func(x,0);
-        grad_uncon!(G::SizedVector,x::SizedVector) = grad_func!(G,x,0, x -> 0);
+        obj_uncon(x::Vector) = obj_func(x,0, [1.0, 0.0]);
+        grad_uncon!(G::Vector,x::Vector) = grad_func!(G,x,0, x -> 0, [1.0, 0.0]);
 
         penalty_violated = false;
 
         if isempty(Aineq) & (!problem_has_nonlinear_constraints);
             verbose && println("Problem only has equality constraints. Solving...")
             # c = @MArray zeros(length(β_init))
-            c = SizedVector{length(β_init)}(β_init);
+            # c = SizedVector{length(β_init)}(β_init);
+            c = Vector{Float64}(undef, length(β_init));
             c .= β_init;
 
             results =  Optim.optimize(obj_uncon, grad_uncon!, c,
@@ -389,7 +427,8 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
         else
             verbose && println("Solving problem without inequality constraints....")
             # c = @SizedVector zeros(length(β_init))
-            c = SizedVector{length(β_init)}(β_init);
+            # c = SizedVector{length(β_init)}(β_init);
+            c = Vector{Float64}(undef, length(β_init));
             c .= β_init;
             
             # @time obj_uncon(c)
@@ -429,7 +468,12 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
                 verbose && println("Iteratively increasing penalties on inequality constraints....")
             end
 
-            while (penalty_violated) & (iter <max_outer_iterations)
+            not_penalized_or_first_run = true;
+            if penalized 
+                L = lambda/100;
+            end
+
+            while (not_penalized_or_first_run) & (penalty_violated) & (iter <max_outer_iterations)
                 verbose && println("Iteration $(iter)...")
                 L *= 100;
                 
@@ -454,12 +498,19 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
                     during_obj = false);
 
                 g(x) = ForwardDiff.gradient(g_d, x);
-                obj(x::SizedVector) = obj_func(x,L);
-                grad!(G::SizedVector,x::SizedVector) = grad_func!(G,x,L, g);
+                # g(x) = Zygote.gradient(g_d, x)
+                if L == 10
+                    w = [0.0, 1e9];
+                else
+                    w = [1.0, 1e6];
+                end
+                obj(x::Vector) = obj_func(x,L, w);
+                grad!(G::Vector,x::Vector) = grad_func!(G,x,L,g, w);
 
                 if iter ==0
                     R = results.minimizer;
-                    c = SizedVector{length(R)}(R);
+                    # c = SizedVector{length(R)}(R);
+                    c = Vector{Float64}(undef, length(R));
                     c .= R;
 
                     results =  Optim.optimize(obj, grad!, c,
@@ -511,16 +562,21 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
                         during_obj = false)
                         println("Current nonlinear penalty: $nonlinear_penalty")
                     penalty_violated = (penalty_violated) | (nonlinear_penalty > constraint_tol);
+                    
                 end
-
+                if penalized 
+                    not_penalized_or_first_run = false;
+                end
                 iter+=1;
             end
         end
+        
         if penalty_violated 
             problem.converged = false;
         else
             problem.converged = true;
         end
+        
         problem.results = results;
         return 
     end

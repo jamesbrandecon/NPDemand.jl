@@ -5,6 +5,7 @@ using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, Line
 using ForwardDiff, Strided
 using ForwardDiff: GradientConfig, Chunk
 
+using Zygote
 
 include("simulate_logit.jl")
 include("toDataFrame.jl")

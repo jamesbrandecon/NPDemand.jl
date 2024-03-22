@@ -65,7 +65,7 @@ function define_problem(df::DataFrame; exchange::Vector = [],
             :diagonal_dominance_group, :diagonal_dominance_all, 
             :exchangeability, :subs_in_group,
             :complements_across_group, :subs_across_group, 
-            :complements_in_group]
+            :complements_in_group, :monotone_nonlinear]
             error("Constraint $con not recognized. Valid constraints include: 
             :monotone, :all_substitutes, :diagonal_dominance_group, :diagonal_dominance_all, 
             :exchangeability, :subs_in_group, :complements_across_group, :subs_across_group,
@@ -74,7 +74,8 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     end
 
     problem_has_nonlinear_constraints = false;
-    if (:subs_in_group ∈ constraints) | (:complements_in_group ∈ constraints) | (:all_substitutes_nonlinear ∈ constraints) | (:subs_across_group ∈ constraints) | (:complements_across_group ∈ constraints)
+    if (:subs_in_group ∈ constraints) | (:complements_in_group ∈ constraints) | (:all_substitutes_nonlinear ∈ constraints) | (:subs_across_group ∈ constraints) | (:complements_across_group ∈ constraints) |
+        (:monotone_nonlinear ∈ constraints)
         problem_has_nonlinear_constraints = true;
     end
 
