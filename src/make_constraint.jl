@@ -236,6 +236,9 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     # Clean up 
     Aineq = Aineq[2:end,:];
     Aineq = Matrix(hcat(unique(eachrow(Aineq))...)') # Drop redundant inequality constraints
+    if size(Aineq,2)==0
+        Aineq = [];
+    end
 
     Aeq = Aeq[2:end,:];
 
