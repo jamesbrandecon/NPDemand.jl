@@ -109,16 +109,20 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
                     init_ind = 0;
                 end
                 # Loop over all products in demand function
+                orders = order_vec[inv_j];
                 for j_loop = 1:J
                     other_orders = setdiff(collect(1:J), j_loop)
-                    orders = order_vec[j_loop];
                     for i ∈ eachindex(orders[:,1])
                         rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
                                 (orders[:,j_loop] .== orders[i,j_loop]+1));
                         rows = getindex.(rows, 1);
                         if length(rows) >= 1
                             rows = rows[1];
+                            try 
                             Aineq = add_constraint(Aineq, init_ind + i, init_ind + rows);
+                            catch 
+                                @show i init_ind rows size(orders) j_loop
+                            end
                         end
                     end
                 end
@@ -132,9 +136,9 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
                     init_ind = 0;
                 end
                 # Loop over all products in demand function
+                orders = order_vec[inv_j];
                 for j_loop = 1:J
                     other_orders = setdiff(collect(1:J), j_loop)
-                    orders = order_vec[j_loop];
                     for i ∈ eachindex(orders[:,1])
                         rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
                             (orders[:,j_loop] .== orders[i,j_loop]+1));
@@ -153,6 +157,9 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     # diagonal dominance 
         # currently only within group
     if :diagonal_dominance_group ∈ constraints
+        if (J==2) & length(exchange)==1
+            error("With two products and one exchangeable group, use diagonal_dominance_all instead of diagonal_dominance_group")
+        end
         for e ∈ eachindex(exchange)
             inv_j = first_in_exchange[e]
             others_in_group = setdiff(exchange[e], inv_j)
