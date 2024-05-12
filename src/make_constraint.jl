@@ -257,38 +257,3 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
 
     return Aineq, Aeq, maxs, mins
 end
-
-function are_constraints_satisfied(npd_problem)
-    if npd_problem.Aineq != []
-        # Modify theta as in objective function 
-        β = npd_problem.results.minimizer;
-        θ = β[1:npd_problem.design_width]
-        problem_has_linear_constraints = false;
-        if npd_problem.Aineq != []
-            problem_has_linear_constraints = true;
-            linear_constraints_violated = false;
-        else 
-            linear_constraints_violated = (maximum(npd_problem.Aineq * θ) > npd_problem.constraint_tol);
-        end
-
-        # Enforce equality constraints directly
-        for i∈eachindex(npd_problem.mins)
-            θ[npd_problem.mins[i]] = θ[npd_problem.maxs[i]]
-        end
-        nonlinear_condition = false;
-        if npd_problem.converged!=[] 
-            nonlinear_condition = !(npd_problem.converged)
-        end
-        if linear_constraints_violated | nonlinear_condition 
-            if nonlinear_condition
-                println("Estimation with nonlinear constraints did not converge")
-            end
-            if linear_constraints_violated
-                println("Linear constraints not satisfied -- maximum deviation is $(maximum(npd_problem.Aineq * θ))")
-            end
-            return false
-        else
-            return true
-        end
-    end
-end

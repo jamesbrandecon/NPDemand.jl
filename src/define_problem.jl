@@ -185,10 +185,8 @@ function define_problem(df::DataFrame; exchange::Vector = [],
         product_FEs = true;
     end
     
-
     verbose && println("Making Bernstein polynomials....")
     Xvec, Avec, Bvec, syms, combos = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; price_iv = price_iv, verbose = verbose);
-    
     
     if constraints !=[]
         verbose && println("Making linear constraint matrices....")
@@ -201,17 +199,20 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     end
     
     verbose && println("Reformulating problem....")
-    matrices = prep_inner_matrices(Xvec, Avec, Bvec; verbose = false);
+    # matrices = prep_inner_matrices(Xvec, Avec, Bvec; verbose = false);
 
     design_width = sum(size.(Xvec,2));
     elast_mats = Matrix[];
     elast_prices = Matrix[];
 
+    weight_matrices = bigA = [Avec[i]*pinv(Avec[i]'*Avec[i])*Avec[i]' for i in 1:length(Xvec)]; 
+
     problem = NPDProblem(df,
-                        matrices, 
+                        [], 
                         Xvec, 
                         Bvec, 
                         Avec,
+                        weight_matrices,
                         index_vars,
                         constraints,
                         syms,
@@ -233,6 +234,7 @@ function define_problem(df::DataFrame; exchange::Vector = [],
                         elast_prices,
                         [],
                         [],
+                        [], 
                         [], 
                         [])
 
@@ -270,6 +272,7 @@ mutable struct NPDProblem
     Xvec 
     Bvec 
     Avec
+    weight_matrices
     index_vars
     constraints 
     syms 
@@ -293,6 +296,7 @@ mutable struct NPDProblem
     all_elasticities
     all_jacobians
     converged
+    chain
 end
 
 import Base.+
@@ -330,6 +334,8 @@ end
 
 function Base.show(io::IO, problem::NPDProblem)
     J = length(problem.Xvec);
+    T = size(problem.Xvec[1],1);
+
     constraints = problem.constraints;
     bO = problem.bO;
     index_vars = problem.index_vars;
@@ -340,11 +346,11 @@ function Base.show(io::IO, problem::NPDProblem)
     
     println(io, "NPD Problem:")
     println(io, "- Number of choices: $(J)")
+    println(io, "- Number of markets: $(T)")
     println(io, "- Exchangeable groups of choices: $exchange")
     println(io, "- Constraints: $constraints")
     println(io, "- Fixed Effects: $FE")
     println(io, "- Index Variables: $index_vars")
     println(io, "- Bernstein polynomials of order: $bO")
     println(io, "- (x_tol, f_tol): ($obj_xtol, $obj_ftol)")
-
 end

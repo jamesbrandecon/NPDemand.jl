@@ -44,7 +44,6 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
         end
     end
     sym_vec = temp;
-    # @show sym_vec 
 
     # Apply remaining combos to symbolic vector
     sym_combos = []
@@ -54,7 +53,6 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
 
     order_vec = reduce(hcat, orders)';
 
-    # @show sym_combos[1:5,:]
     inds = Array{Array}(undef, maximum(size(combos)))
     # Actually implement exchangeability 
     if maximum(length.(exchange_vec)) > 1
@@ -77,28 +75,12 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
         order_vec = reduce(hcat, orders)';
         
         @assert this_j ∉ ex
-        # if exchange == exchange_vec[1]
             Threads.@threads for i ∈ eachindex(combos)
                 combotemp = getindex.(findall((own_order .== own_order[i]) .&
                     (prod_order_in_group .== prod_order_in_group[i]) .& 
                     (prod_order_not_in_group .== prod_order_not_in_group[i])),1)
-                # combotemp = combotemp[combotemp .> i]
                 inds[i] = [i,combotemp]
             end
-        # display(order_vec[1:10,:])
-        # display(inds[1:10])
-        # else
-            # indstemp = deepcopy(inds);
-            # Threads.@threads for i ∈ collect(eachindex(combos))
-            #     combotemp = getindex.(findall((own_order .== own_order[i]) .&
-            #         (prod_order_in_group .== prod_order_in_group[i]) .& 
-            #         (prod_order_not_in_group .== prod_order_not_in_group[i])),1)
-            #     # JMB edited above from prod_order_not_in_group
-            #     # combotemp = combotemp[combotemp .> i]
-            #     inds[i][2] = intersect(inds[i][2], combotemp)
-            # end
-            ## inds = indstemp;
-        # end
     # end
     end
 
@@ -109,7 +91,6 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
         if skip_inds[i] ==0
             if maximum(length.(exchange_vec))>1
                 redundant = inds[i][2];
-                # @show i redundant
                 redundant = sort(unique(redundant));
                 duplicates[redundant[2:end]] .= 1;
                 skip_inds[redundant[2:end]] .= 1;

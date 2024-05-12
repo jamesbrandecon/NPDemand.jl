@@ -4,6 +4,7 @@ authors = ["James Brand"]
 version = "0.1.0"
 
 [deps]
+AdvancedMH = "5b7e9947-ddc0-4b3f-9b55-0d8042f74170"
 Combinatorics = "861a8166-3701-5b0c-9a16-15d98fcdc6aa"
 Compat = "34da2185-b29b-5c13-b0c7-acf172513d20"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
@@ -24,6 +25,7 @@ RCall = "6f49c342-dc21-5d91-9882-a32aef131414"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Strided = "5e0ebb24-38b0-5f93-81fe-25c709ecae67"
+Turing = "fce5fe82-541a-59a6-adf8-730c64b5f9a0"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]

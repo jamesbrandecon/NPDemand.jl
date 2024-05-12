@@ -71,13 +71,6 @@ function compute_demand_function!(problem, df; max_iter = 1000, show_trace = fal
     if "product" ∈ FE
         product_FEs = true;
     end
-    
-    # new_linear_matrices = prep_matrices(df, problem.exchange, problem.index_vars, FEmat, product_FEs, problem.bO; linear_only = true);
-
-    # deltas = new_linear_matrices[1] * γ;
-    # for j = 2:J 
-    #     deltas = hcat(deltas, new_linear_matrices[j]*γ)
-    # end
 
     println("Beginning to solve for counterfactual market shares.....")
     println("Assumes residual demand shifters set to zero")
@@ -92,8 +85,6 @@ function inner_demand_function(shares_search, df, θ, γ, problem, FEmat, produc
     J = length(problem.Xvec);
     N = Int(length(shares_search)/J);
     bO = problem.bO;
-    # all_combos = problem.combos;
-    # all_redundant = problem.redundant;
 
     exchange = problem.exchange;
     index_vars = problem.index_vars;
