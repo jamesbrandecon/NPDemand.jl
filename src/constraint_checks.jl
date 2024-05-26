@@ -6,27 +6,36 @@ function report_constraint_violations(problem;
     reshaped_jacobians = [jacobians[i][j1,j2] for j1=1:J, j2 = 1:J, i = 1:size(problem.data,1)];
 
     violations = Dict();
+    any_violations = ones(Bool, size(problem.data,1));
     # Monotonicity
     if :monotone in problem.constraints
-        frac_monotone_violations = round(1 - mean([all(diag(reshaped_jacobians[:,:,i]) .<0) for i in 1:size(reshaped_jacobians,3)]), digits = 2);
+        monotone_satisfied = [all(diag(reshaped_jacobians[:,:,i]) .<0) for i in 1:size(reshaped_jacobians,3)];
+        any_violations = any_violations .& monotone_satisfied;
+        frac_monotone_violations = round(1 - mean(monotone_satisfied), digits = 2);
         verbose && println("Fraction of violations of :monotonicity: $frac_monotone_violations")
         push!(violations, :monotone => frac_monotone_violations)
     end
 
     # All substitutes
     if :all_substitutes in problem.constraints
-        frac_all_subs_violations = round(1 - mean([check_all_subs(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)]), digits = 2);
+        all_subs_satisfied = [check_all_subs(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
+        any_violations = any_violations .& all_subs_satisfied;
+        frac_all_subs_violations = round(1 - mean(all_subs_satisfied), digits = 2);
         verbose && println("Fraction of violations of :all_substitutes: $frac_all_subs_violations")
         push!(violations, :all_substitutes => frac_all_subs_violations)
     end
 
     # Diagonal dominance
     if :diagonal_dominance_all in problem.constraints
-        frac_diag_dom_violations = round(1 - mean([check_diagonal_dominance(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)]), digits = 2);
+        diag_dom_satisfied = [check_diagonal_dominance(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
+        any_violations = any_violations .& diag_dom_satisfied;
+        frac_diag_dom_violations = round(1 - mean(diag_dom_satisfied), digits = 2);
         verbose && println("Fraction of violations of :diagonal_dominance_all: $frac_diag_dom_violations")
         push!(violations, :diagonal_dominance_all => frac_diag_dom_violations)
     end
 
+    push!(violations, :any => mean(any_violations))
+    
     return violations
 end
 

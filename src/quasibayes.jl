@@ -6,7 +6,7 @@ function calc_tempmats(problem::NPDProblem)
     bO = problem.bO;
     bernO = convert.(Integer, bO);
     
-    tempmats = []
+    tempmats = Matrix{Float64}[]
     perm_s = zeros(size(s));
     dsids = zeros(J,J,size(s,1)) # initialize matrix of ∂s^{-1}/∂s
 
@@ -48,32 +48,49 @@ function calc_tempmats(problem::NPDProblem)
     return temp_storage_mat
 end
 
-function inner_elast_loop(dsids_i, J, at, svec; type = "jacobian")
+function inner_elast_loop(dsids_i::Matrix{T}, J::Int, at::Vector{Float64}, svec::Vector{Float64}; type::String = "jacobian") where T
+    
     J_s = [dsids_i[j1,j2] for j1 in 1:J, j2 in 1:J]
     temp = -1*inv(J_s);
 
-    if type =="jacobian"
+    if type == "jacobian"
         return temp 
     else
         return temp .* [at[j2]/svec[j1] for j1 in 1:J, j2 in 1:J]
     end
 end
 
-function elast_mat_zygote(θ, problem,
-    tempmat_storage = []; 
-    at = [], s = [], type = "jacobian")
+function elast_mat_zygote(θ::Array{T}, 
+    problem::NPDemand.NPDProblem,
+    tempmat_storage::Matrix{Matrix{Float64}} = []; 
+    at::Matrix = [], s::Matrix = [], 
+    type::String = "jacobian") where T <:Real
 
     J = length(problem.Xvec);
-    exchange = problem.exchange;
-    
-    design_width = sum(size.(problem.Xvec,2));
     indexes = [0;cumsum(size.(problem.Xvec,2))];
 
     dsids_raw = [tempmat_storage[j1,j2] * θ[indexes[j1]+1:indexes[j1+1]] for j1 = 1:J, j2 = 1:J];
     
     dsids = [dsids_raw[j1,j2][i] for j1 = 1:J, j2 = 1:J, i = 1:length(dsids_raw[1,1])]
-    all_elast_mat = [inner_elast_loop(dsids[:,:,ii], J, at[ii,:], s[ii,:]; type = type) for ii in 1:length(dsids[1,1,:])];
+    all_elast_mat::Vector{Matrix{Real}} = [inner_elast_loop(dsids[:,:,ii], J, at[ii,:], s[ii,:]; type = type) for ii in 1:length(dsids[1,1,:])];
     return all_elast_mat
+end
+
+function gmm_fast(x::Matrix{T}, problem::NPDemand.NPDProblem, 
+    yZX::Vector{LinearAlgebra.Adjoint{Float64, Vector{Float64}}},
+    XZy::Vector{Vector{Float64}},
+    XX::Vector{Matrix{Float64}},
+    design_width::Int,
+    J::Int) where T<:Real
+
+    γ2 = x[design_width+2:end]; 
+    indexes = vcat(0,cumsum(size.(problem.Xvec,2)));
+    out = zero(eltype(x));
+    for i in 1:J
+        θi = [x[indexes[i]+1:indexes[i+1]];γ2];
+        out += -1 * yZX[i] * θi - θi' * XZy[i] + θi' * XX[i] * θi
+    end
+    return out[1]
 end
 
 function gmm(x::Matrix{T}, problem::NPDemand.NPDProblem, bigA::Vector{Matrix{Float64}}) where T<:Real
@@ -144,7 +161,7 @@ function get_parameter_order(lbs)
     return assigned
 end
 
-function reparameterization(betastar, lbs, parameter_order)
+function reparameterization(betastar::Vector{T}, lbs::Vector, parameter_order::Vector) where T<:Real
     nbeta = length(betastar)
     buffer_beta = Zygote.Buffer(betastar); # Have to define a "Buffer" to make an editable object for Zygote
     for i in parameter_order
@@ -155,7 +172,8 @@ function reparameterization(betastar, lbs, parameter_order)
             buffer_beta[i] = wchlb + exp(betastar[i])
         end
     end
-    return copy(buffer_beta)
+    # return copy(buffer_beta)
+    return buffer_beta
 end
 
 function reparameterization_draws(betastar_draws, lbs, parameter_order)
@@ -206,7 +224,7 @@ function pick_step_size(problem, prior, tempmats, bigA; target = 0.2, n_samples 
     accept = [];
     for x in step_grid
         step = x;
-        chain = Turing.sample(mysample(problem, prior, tempmats, bigA), MH(
+        chain = Turing.sample(sample_quasibayes(problem, prior, tempmats, bigA), MH(
             :gamma => AdvancedMH.RandomWalkProposal(Normal(0, step)),
             :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), diagm(step*ones(sum(nbetas)))))
             ), n_samples, initial_params = start); 
@@ -220,18 +238,20 @@ end
     tempmats=[], 
     weight_matrices::Vector{Matrix{Float64}}=[],
     prices::Matrix{Float64} = Matrix(problem.data[!,r"prices"]), 
-    shares::Matrix{Float64} = Matrix(problem.data[:, r"shares"]); penalty = 1_000)
+    shares::Matrix{Float64} = Matrix(problem.data[:, r"shares"]); 
+    penalty = 1_000,
+    matrix_storage_dict = Dict())
     
     # prior
-    betabar = prior["betabar"]
-    gammabar = prior["gammabar"]
-    vbeta = prior["vbeta"]
-    vgamma = prior["vgamma"]    
-    lbs = prior["lbs"]
+    betabar         = prior["betabar"]
+    gammabar        = prior["gammabar"]
+    vbeta           = prior["vbeta"]
+    vgamma          = prior["vgamma"]    
+    lbs             = prior["lbs"]
     parameter_order = prior["parameter_order"]
-    nbetas = prior["nbetas"]
+    nbetas          = prior["nbetas"]
     
-    gamma_length = size(problem.Bvec[1],2);
+    gamma_length::Int = size(problem.Bvec[1],2);
 
     gamma ~ MvNormal(gammabar,vgamma*diagm(ones(gamma_length-1)));
     betastar ~ MvNormal(betabar, diagm(vbeta))
@@ -242,6 +262,16 @@ end
     # Format parameter vec so that gmm can use it
     all_params = map_to_sieve(beta, gamma, problem.exchange, nbetas, problem)
 
+    # Define objective function 
+    if matrix_storage_dict == Dict()
+        objective = x -> gmm(x, problem, weight_matrices)
+    else 
+        yZX = matrix_storage_dict["yZX"]
+        XZy = matrix_storage_dict["XZy"]
+        XX = matrix_storage_dict["XX"]
+        objective = x -> gmm_fast(x, problem, yZX, XZy, XX, problem.design_width, length(problem.Avec));
+    end
+
     if tempmats!=[]
         J = length(problem.Xvec);
         elasts = elast_mat_zygote(all_params, problem, tempmats; at = prices, s = shares);
@@ -251,15 +281,15 @@ end
 
         if elasticity_check[1]
             # Quasi-Likelihood
-            Turing.@addlogprob! -0.5*gmm(all_params, problem, weight_matrices)
+            Turing.@addlogprob! -0.5 * objective(all_params)
             return
         else
-            Turing.@addlogprob! (-0.5*gmm(all_params, problem, weight_matrices)- penalty)
+            Turing.@addlogprob! (-0.5 * objective(all_params)- penalty)
             return
         end
     else
         # Quasi-Likelihood
-        Turing.@addlogprob! -0.5*gmm(all_params, problem, weight_matrices)
+        Turing.@addlogprob! -0.5 * objective(all_params)
         return
     end
 end

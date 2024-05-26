@@ -275,11 +275,18 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
             step, step_grid, accept = pick_step_size(problem, prior, tempmats, weight_matrices; n_samples = n_samples);
         end
 
+        J = length(Xvec);
+        matrix_storage_dict = Dict();
+        augmented_X = [hcat(Xvec[i], -1 .* Bvec[i][:,2:end]) for i in 1:J]
+        matrix_storage_dict["yZX"] = [(-1 .* df[!,"prices$i"])' * weight_matrices[i+1] * augmented_X[i+1] for i in 0:J-1]
+        matrix_storage_dict["XX"] = [augmented_X[i+1]'* weight_matrices[i+1] * augmented_X[i+1] for i in 0:J-1]
+        matrix_storage_dict["XZy"] = [augmented_X[i+1]' * weight_matrices[i+1]' * (-1 .* df[!,"prices$i"]) for i in 0:J-1]
+
         # Sample 
         verbose && println("Beginning sampling....")
         chain = Turing.sample(
                 sample_quasibayes(problem, prior, tempmats, weight_matrices; 
-                penalty = penalty), 
+                penalty = penalty, matrix_storage_dict = matrix_storage_dict), 
                 sampler, n_samples, 
                 initial_params = start); 
 
