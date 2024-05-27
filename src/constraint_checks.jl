@@ -10,7 +10,7 @@ function report_constraint_violations(problem;
     # Monotonicity
     if :monotone in problem.constraints
         monotone_satisfied = [all(diag(reshaped_jacobians[:,:,i]) .<0) for i in 1:size(reshaped_jacobians,3)];
-        any_violations = any_violations .& monotone_satisfied;
+        any_violations = any_violations .& .!(monotone_satisfied);
         frac_monotone_violations = round(1 - mean(monotone_satisfied), digits = 2);
         verbose && println("Fraction of violations of :monotonicity: $frac_monotone_violations")
         push!(violations, :monotone => frac_monotone_violations)
@@ -19,7 +19,7 @@ function report_constraint_violations(problem;
     # All substitutes
     if :all_substitutes in problem.constraints
         all_subs_satisfied = [check_all_subs(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
-        any_violations = any_violations .& all_subs_satisfied;
+        any_violations = any_violations .& .!(all_subs_satisfied);
         frac_all_subs_violations = round(1 - mean(all_subs_satisfied), digits = 2);
         verbose && println("Fraction of violations of :all_substitutes: $frac_all_subs_violations")
         push!(violations, :all_substitutes => frac_all_subs_violations)
@@ -28,14 +28,14 @@ function report_constraint_violations(problem;
     # Diagonal dominance
     if :diagonal_dominance_all in problem.constraints
         diag_dom_satisfied = [check_diagonal_dominance(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
-        any_violations = any_violations .& diag_dom_satisfied;
+        any_violations = any_violations .& .!(diag_dom_satisfied);
         frac_diag_dom_violations = round(1 - mean(diag_dom_satisfied), digits = 2);
         verbose && println("Fraction of violations of :diagonal_dominance_all: $frac_diag_dom_violations")
         push!(violations, :diagonal_dominance_all => frac_diag_dom_violations)
     end
 
     push!(violations, :any => mean(any_violations))
-    
+
     return violations
 end
 
