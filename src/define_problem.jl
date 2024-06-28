@@ -126,9 +126,9 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     end
 
     # Nonlinear constraint grid size check: 
-    if ((grid_size == []) & (problem_has_nonlinear_constraints)) | ((grid_size != []) & (!problem_has_nonlinear_constraints))
-        error("Specify grid_size if and only if the problem has nonlinear constraints")
-    end
+    # if ((grid_size == []) & (problem_has_nonlinear_constraints)) | ((grid_size != []) & (!problem_has_nonlinear_constraints))
+    #     error("Specify grid_size if and only if the problem has nonlinear constraints")
+    # end
 
     # Confirm that shares are numbered as expected: 
     J = size(df[!,r"shares"],2);
@@ -236,22 +236,23 @@ function define_problem(df::DataFrame; exchange::Vector = [],
                         [],
                         [], 
                         [], 
+                        [], 
                         [])
 
-    if problem_has_nonlinear_constraints
-        verbose && println("Preparing inputs for nonlinear constraints....")
-        subset = subset_for_elast_const(problem, df; grid_size = grid_size);
-        elast_mats, elast_prices = make_elasticity_mat(problem, subset);
-        problem.elast_mats = elast_mats;
-        problem.elast_prices = elast_prices;
-        θ_packed =  pack_parameters(zeros(Float64, sum(size.(Xvec,2))), exchange, size.(Xvec,2))
-        if chunk_size ==[]
-            cfg = GradientConfig(nothing, θ_packed);
-        else
-            cfg = GradientConfig(nothing, θ_packed, Chunk{chunk_size}());
-        end
-        problem.cfg = cfg;
-    end
+    # if problem_has_nonlinear_constraints
+    #     verbose && println("Preparing inputs for nonlinear constraints....")
+    #     subset = subset_for_elast_const(problem, df; grid_size = grid_size);
+    #     elast_mats, elast_prices = make_elasticity_mat(problem, subset);
+    #     problem.elast_mats = elast_mats;
+    #     problem.elast_prices = elast_prices;
+    #     θ_packed =  pack_parameters(zeros(Float64, sum(size.(Xvec,2))), exchange, size.(Xvec,2))
+    #     if chunk_size ==[]
+    #         cfg = GradientConfig(nothing, θ_packed);
+    #     else
+    #         cfg = GradientConfig(nothing, θ_packed, Chunk{chunk_size}());
+    #     end
+    #     problem.cfg = cfg;
+    # end
 
     return problem
 end
@@ -297,6 +298,7 @@ mutable struct NPDProblem
     all_jacobians
     converged
     chain
+    tempmats
 end
 
 import Base.+
@@ -313,7 +315,7 @@ function update_constraints!(problem::NPDProblem, new_constraints::Vector{Symbol
         error("Constraint :exchangeability should be included in updated problem (only) if in original problem.")
     else
         verbose && println("Updating linear constraint matrices....")
-        Aineq, Aeq, maxs, mins = make_constraint(problem.data, new_constraints, 
+        Aineq, ~, maxs, mins = make_constraint(problem.data, new_constraints, 
                                                         problem.exchange, problem.syms);
 
         problem.Aineq = Aineq;
@@ -321,13 +323,13 @@ function update_constraints!(problem::NPDProblem, new_constraints::Vector{Symbol
         problem.maxs = maxs;
         problem.mins = mins;
 
-        if :subs_in_group ∈ new_constraints
-            verbose && println("Preparing inputs for nonlinear constraints....")
-            subset = subset_for_elast_const(problem, problem.data; grid_size=2);
-            elast_mats, elast_prices = make_elasticity_mat(problem, subset);
-            problem.elast_mats = elast_mats;
-            problem.elast_prices = elast_prices;
-        end
+        # if :subs_in_group ∈ new_constraints
+        #     verbose && println("Preparing inputs for nonlinear constraints....")
+        #     subset = subset_for_elast_const(problem, problem.data; grid_size=2);
+        #     elast_mats, elast_prices = make_elasticity_mat(problem, subset);
+        #     problem.elast_mats = elast_mats;
+        #     problem.elast_prices = elast_prices;
+        # end
         problem.constraints = new_constraints;
     end
 end

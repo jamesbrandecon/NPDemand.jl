@@ -8,7 +8,7 @@ function calc_tempmats(problem::NPDProblem)
     
     tempmats = Matrix{Float64}[]
     perm_s = zeros(size(s));
-    dsids = zeros(J,J,size(s,1)) # initialize matrix of ∂s^{-1}/∂s
+    # dsids = zeros(J,J,size(s,1)) # initialize matrix of ∂s^{-1}/∂s
 
     for j1 = 1:J
         which_group = findall(j1 .∈ exchange)[1];
@@ -32,7 +32,7 @@ function calc_tempmats(problem::NPDProblem)
                 end
             end
             tempmat_s = tempmat_s[:,2:end]
-            tempmat_s, a, b = NPDemand.make_interactions(tempmat_s, exchange, bernO, j1, perm);
+            tempmat_s, ~, ~ = NPDemand.make_interactions(tempmat_s, exchange, bernO, j1, perm);
             push!(tempmats, tempmat_s);
         end
     end
@@ -128,51 +128,63 @@ function get_nbetas(problem)
 end
 
 function get_lower_bounds(problem)
-    A = problem.Aineq[:,sieve_to_betas_index(problem)]
-    lbs = []
-    for j in 1:size(A,2)
-        if findall(A[:,j] .== -1) == []
-            push!(lbs, nothing)
-        else
-            push!(lbs, findall(vec(sum(A[findall(A[:,j] .== -1),:], dims=1)) .== 1))
+    if problem.Aineq != []
+        A = problem.Aineq[:,sieve_to_betas_index(problem)]
+        lbs = []
+        for j in 1:size(A,2)
+            if findall(A[:,j] .== -1) == []
+                push!(lbs, nothing)
+            else
+                push!(lbs, findall(vec(sum(A[findall(A[:,j] .== -1),:], dims=1)) .== 1))
+            end
         end
+    else 
+        lbs = 5000 .* ones(Int, size(problem.Aeq[:,sieve_to_betas_index(problem)], 2))
     end
     return lbs
 end
 
 function get_parameter_order(lbs)
-    assigned = []
-    unassigned = [1:length(lbs);]
-    while length(unassigned) > 0
-        revisit = []
-        for i in unassigned
-            if isnothing(lbs[i]) || count(x->x in lbs[i], assigned) == length(lbs[i])
-                push!(assigned, i)
-            else 
-                if any(x->i<x, lbs[i]) || any(x->x in lbs[i], revisit)
-                    push!(revisit, i)
-                else 
+    if !(all(lbs .== 5000))
+        assigned = []
+        unassigned = [1:length(lbs);]
+        while length(unassigned) > 0
+            revisit = []
+            for i in unassigned
+                if isnothing(lbs[i]) || count(x->x in lbs[i], assigned) == length(lbs[i])
                     push!(assigned, i)
-                end        
+                else 
+                    if any(x->i<x, lbs[i]) || any(x->x in lbs[i], revisit)
+                        push!(revisit, i)
+                    else 
+                        push!(assigned, i)
+                    end        
+                end
             end
+            unassigned = revisit
         end
-        unassigned = revisit
+    else 
+        assigned = collect(1:length(lbs));
     end
     return assigned
 end
 
 function reparameterization(betastar::Vector{T}, lbs::Vector, parameter_order::Vector) where T<:Real
-    nbeta = length(betastar)
-    buffer_beta = Zygote.Buffer(betastar); # Have to define a "Buffer" to make an editable object for Zygote
-    for i in parameter_order
-        if isnothing(lbs[i])
-            buffer_beta[i] = betastar[i]
-        else
-            wchlb::eltype(betastar) = findmax(buffer_beta[lbs[i]])[1]
-            buffer_beta[i] = wchlb + exp(betastar[i])
+    buffer_beta = similar(betastar); #Zygote.Buffer(betastar); # Have to define a "Buffer" to make an editable object for Zygote
+    if all(lbs .== 5000)
+        buffer_beta = betastar;
+    else
+        nbeta = length(betastar)
+        for i in parameter_order
+            if isnothing(lbs[i])
+                buffer_beta[i] = betastar[i]
+            else
+                wchlb::eltype(betastar) = findmax(buffer_beta[lbs[i]])[1]
+                buffer_beta[i] = wchlb + exp(betastar[i])
+            end
         end
+        # return copy(buffer_beta)
     end
-    # return copy(buffer_beta)
     return buffer_beta
 end
 
@@ -180,12 +192,16 @@ function reparameterization_draws(betastar_draws, lbs, parameter_order)
     nbeta = size(betastar_draws, 2)
     ndraws = size(betastar_draws, 1)
     beta_draws = zeros(ndraws,nbeta)
-    for r in 1:ndraws
-        for i in parameter_order
-            if isnothing(lbs[i])
-                beta_draws[r,i] = betastar_draws[r,i]
-            else
-                beta_draws[r,i] = findmax(beta_draws[r, lbs[i]])[1] + exp(betastar_draws[r,i])
+    if all(lbs .==5000)
+        beta_draws .= betastar_draws;
+    else
+        for r in 1:ndraws
+            for i in parameter_order
+                if isnothing(lbs[i])
+                    beta_draws[r,i] = betastar_draws[r,i]
+                else
+                    beta_draws[r,i] = findmax(beta_draws[r, lbs[i]])[1] + exp(betastar_draws[r,i])
+                end
             end
         end
     end
@@ -253,15 +269,15 @@ end
     
     gamma_length::Int = size(problem.Bvec[1],2);
 
-    gamma ~ MvNormal(gammabar,vgamma*diagm(ones(gamma_length-1)));
     betastar ~ MvNormal(betabar, diagm(vbeta))
+    gamma ~ MvNormal(gammabar,vgamma*diagm(ones(gamma_length-1)));
     
     # Apply reparameterization
     beta = reparameterization(betastar, lbs, parameter_order)
 
     # Format parameter vec so that gmm can use it
     all_params = map_to_sieve(beta, gamma, problem.exchange, nbetas, problem)
-
+    
     # Define objective function 
     if matrix_storage_dict == Dict()
         objective = x -> gmm(x, problem, weight_matrices)
@@ -272,19 +288,21 @@ end
         objective = x -> gmm_fast(x, problem, yZX, XZy, XX, problem.design_width, length(problem.Avec));
     end
 
-    if tempmats!=[]
+    if problem.constraints != [:exchangeability]
         J = length(problem.Xvec);
         elasts = elast_mat_zygote(all_params, problem, tempmats; at = prices, s = shares);
         reshaped_elasts = [elasts[i][j1,j2] for j1=1:J, j2 = 1:J, i = 1:size(problem.data,1)];
-
-        elasticity_check = run_elasticity_check(reshaped_elasts, problem.constraints)
+        elasticity_check = run_elasticity_check(reshaped_elasts, problem.constraints, problem.exchange)
 
         if elasticity_check[1]
             # Quasi-Likelihood
+            # print(".")
             Turing.@addlogprob! -0.5 * objective(all_params)
             return
         else
-            Turing.@addlogprob! (-0.5 * objective(all_params)- penalty)
+            # print("-")
+            # rate = cdf(Normal(0,1), -1 * penalty * d[:any].^2) * 2
+            Turing.@addlogprob! (-0.5 * objective(all_params) - penalty)
             return
         end
     else
@@ -337,7 +355,7 @@ function find_starting_point(problem, prior,
         elasts_i = [elasts_i[i][j1,j2] for j1=1:J, j2 = 1:J, i = 1:size(problem.data,1)];
         
         # Then check if constraints are satisfied
-        constraints_satisfied = run_elasticity_check(elasts_i, problem.constraints);
+        constraints_satisfied = run_elasticity_check(elasts_i, problem.constraints, problem.exchange);
 
         i+=1;
     end

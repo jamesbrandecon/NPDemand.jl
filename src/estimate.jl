@@ -172,7 +172,7 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
     n_samples::Int = 50_000,
     burn_in::Int = 5_000, 
     skip::Int = 5,
-    n_attempts = 500,
+    n_attempts = 0,
     penalty = Inf, 
     step::Union{Real, Symbol} = 0.01)
 
@@ -212,6 +212,8 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
     find_prices = findall(problem.index_vars .== "prices");
     price_index = find_prices[1];
 
+    problem.tempmats = calc_tempmats(problem);
+
     # Estimate the problem only with linear constraints if not using quasi-bayes
     if !quasi_bayes
         verbose && println("Estimating problem in JuMP without nonlinear constraints....")
@@ -238,8 +240,8 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
 
         if sampler ==[] 
             sampler = MH(
-                    :gamma => AdvancedMH.RandomWalkProposal(MvNormal(zeros(gamma_length-1), diagm(step*ones(gamma_length-1)))),
-                    :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), diagm(step*ones(sum(nbetas))))))
+                :gamma => AdvancedMH.RandomWalkProposal(MvNormal(zeros(gamma_length-1), diagm(step*ones(gamma_length-1)))),
+                :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), diagm(step*ones(sum(nbetas))))))
         end
         
         for j in 1:sum(nbetas)
@@ -260,14 +262,21 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
             "nbetas" => nbetas
         )
 
-        # Fina a starting point for sampling
-        verbose && println("Finding a valid starting point for sampler....")
-        tempmats = calc_tempmats(problem)
-        start, start_exit = find_starting_point(problem, prior, tempmats, weight_matrices, n_attempts = n_attempts);
-        if start_exit == "success"
-            println("Valid starting point found")
+        problem.tempmats = calc_tempmats(problem);
+        
+        # Find a starting point for sampling
+        if ((problem.results != []) & (n_attempts == 0))
+            println("Using existing minimizer as the initial point")
+            start = [problem.results.minimizer[NPDemand.sieve_to_betas_index(problem)]; problem.results.minimizer[problem.design_width+2:end]]
+            # start, start_exit = find_starting_point(problem, prior, tempmats, weight_matrices, n_attempts = 1);
         else
-            println("Did not find a valid starting point. Running the sampler anyway, but you may wish to increase `n_attempts` to find a better starting point.")
+            verbose && println("Finding a valid starting point for sampler....")
+            start, start_exit = find_starting_point(problem, prior, calc_tempmats(problem), weight_matrices, n_attempts = n_attempts);
+            if start_exit == "success"
+                println("Valid starting point found")
+            else
+                println("Did not find a valid starting point. Running the sampler anyway, but you may wish to increase `n_attempts` to find a better starting point.")
+            end
         end
 
         if step == :auto
@@ -285,17 +294,18 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
         # Sample 
         verbose && println("Beginning sampling....")
         chain = Turing.sample(
-                sample_quasibayes(problem, prior, tempmats, weight_matrices; 
+                sample_quasibayes(problem, prior, problem.tempmats, weight_matrices; 
                 penalty = penalty, matrix_storage_dict = matrix_storage_dict), 
-                sampler, n_samples, 
-                initial_params = start); 
+                sampler, n_samples 
+                # initial_params = start
+                ); 
 
         # Convert thh chain into the parameter sieve
         start_row = burn_in+1;
         betastardraws = hcat([chain["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
         betadraws = reparameterization_draws(betastardraws, lbs, parameter_order)
         gammadraws = hcat([chain["gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]
-
+        
         # thin the markov chain
         L = size(betastardraws,1);
         skip_inds = 1:skip:L
@@ -306,6 +316,6 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
         qpm = map_to_sieve(mean(betadraws, dims=1)', mean(gammadraws, dims=1)', problem.exchange, nbetas, problem)
 
         problem.results = NPD_JuMP_results(qpm);
-        problem.chain = chain;
+        problem.chain   = chain;
     end
 end

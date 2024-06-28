@@ -1,12 +1,21 @@
 function report_constraint_violations(problem;
-    verbose = true)
-    tempmats = calc_tempmats(problem)
+    verbose = true,
+    params = [], 
+    output = "dict")
+
     J = length(problem.Xvec)
-    jacobians = elast_mat_zygote(problem.results.minimizer, problem, tempmats; at = Matrix(problem.data[!,r"prices"]), s = Matrix(problem.data[!,r"shares"]));
+
+    if params == []
+        param_vec = problem.results.minimizer;
+    else 
+        param_vec = params;
+    end
+    jacobians = elast_mat_zygote(param_vec, problem, problem.tempmats; at = Matrix(problem.data[!,r"prices"]), s = Matrix(problem.data[!,r"shares"]));
     reshaped_jacobians = [jacobians[i][j1,j2] for j1=1:J, j2 = 1:J, i = 1:size(problem.data,1)];
 
     violations = Dict();
     all_satisfied = ones(Bool, size(problem.data,1));
+    
     # Monotonicity
     if :monotone in problem.constraints
         monotone_satisfied = [all(diag(reshaped_jacobians[:,:,i]) .<=0) for i in 1:size(reshaped_jacobians,3)];
@@ -15,7 +24,7 @@ function report_constraint_violations(problem;
         verbose && println("Fraction of violations of :monotonicity: $frac_monotone_violations")
         push!(violations, :monotone => frac_monotone_violations)
     end
-
+    
     # All substitutes
     if :all_substitutes in problem.constraints
         all_subs_satisfied = [check_all_subs(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
@@ -36,7 +45,7 @@ function report_constraint_violations(problem;
 
     # Substitutes within group
     if :subs_in_group in problem.constraints
-        subs_in_group_satisfied = [check_subs_in_group(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
+        subs_in_group_satisfied = [check_subs_in_group(reshaped_jacobians[:,:,i], problem.exchange) for i in 1:size(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& subs_in_group_satisfied;
         frac_subs_in_group_violations = round(1 - mean(subs_in_group_satisfied), digits = 2);
         verbose && println("Fraction of violations of :subs_in_group: $frac_subs_in_group_violations")
@@ -45,7 +54,7 @@ function report_constraint_violations(problem;
 
     # Substitutes across group
     if :subs_across_group in problem.constraints
-        subs_across_group_satisfied = [check_subs_across_group(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
+        subs_across_group_satisfied = [check_subs_across_group(reshaped_jacobians[:,:,i], problem.exchange) for i in 1:size(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& subs_across_group_satisfied;
         frac_subs_across_group_violations = round(1 - mean(subs_across_group_satisfied), digits = 2);
         verbose && println("Fraction of violations of :subs_across_group: $frac_subs_across_group_violations")
@@ -63,7 +72,7 @@ function report_constraint_violations(problem;
 
     # Complements within group
     if :complements_in_group in problem.constraints
-        complements_in_group_satisfied = [check_complements_in_group(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
+        complements_in_group_satisfied = [check_comps_in_group(reshaped_jacobians[:,:,i], problem.exchange) for i in 1:size(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& complements_in_group_satisfied;
         frac_complements_in_group_violations = round(1 - mean(complements_in_group_satisfied), digits = 2);
         verbose && println("Fraction of violations of :complements_in_group: $frac_complements_in_group_violations")
@@ -72,7 +81,7 @@ function report_constraint_violations(problem;
 
     # Complements across group
     if :complements_across_group in problem.constraints
-        complements_across_group_satisfied = [check_complements_across_group(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
+        complements_across_group_satisfied = [check_comps_across_group(reshaped_jacobians[:,:,i], problem.exchange) for i in 1:size(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& complements_across_group_satisfied;
         frac_complements_across_group_violations = round(1 - mean(complements_across_group_satisfied), digits = 2);
         verbose && println("Fraction of violations of :complements_across_group: $frac_complements_across_group_violations")
@@ -82,10 +91,14 @@ function report_constraint_violations(problem;
     any_violations = 1 - mean(all_satisfied);
     push!(violations, :any => round(any_violations, digits = 2))
     
-    return violations
+    if output == "dict"
+        return violations
+    else
+        return Float64::violations[:any]
+    end
 end
 
-function run_elasticity_check(elasts, constraints)
+function run_elasticity_check(elasts, constraints, exchange)
     elasticity_check = true;
 
     if :monotone in constraints
@@ -96,6 +109,12 @@ function run_elasticity_check(elasts, constraints)
     end
     if :diagonal_dominance_all in constraints
         elasticity_check = elasticity_check & (all([check_diagonal_dominance(elasts[:,:,i]) for i in 1:size(elasts,3)]));
+    end
+    if :subs_in_group in constraints 
+        elasticity_check = elasticity_check & all([check_subs_in_group(elasts[:,:,i], exchange) for i in 1:size(elasts,3)]);
+    end
+    if :complements_across_group in constraints 
+        elasticity_check = elasticity_check & all([check_comps_across_group(elasts[:,:,i], exchange) for i in 1:size(elasts,3)]);
     end
 
     return elasticity_check
@@ -126,8 +145,8 @@ function check_subs_in_group(elast_one_market, exchange)
     if length(exchange) ==1
         return check_all_subs(elast_one_market)
     else # two elements in exchange
-        elast_one_market_group1 = elast_one_market[exchange[1], exchange[1]];
-        elast_one_market_group2 = elast_one_market[exchange[2], exchange[2]];
+        elast_one_market_group1 = elast_one_market[exchange[1][1]:exchange[1][2], exchange[1][1]:exchange[1][2]];
+        elast_one_market_group2 = elast_one_market[exchange[2][1]:exchange[2][2], exchange[2][1]:exchange[2][2]];
         return check_all_subs(elast_one_market_group1) .& 
             check_all_subs(elast_one_market_group2)
     end
@@ -139,8 +158,9 @@ function check_subs_across_group(elast_one_market, exchange)
     catch
         error("Cannot use `across_group` constraints with only one exchangeable group")
     end 
-    elast_one_market_group1_2 = elast_one_market[exchange[1], setdiff(1:J, exchange[1])];
-    elast_one_market_group2_1 = elast_one_market[exchange[2], setdiff(1:J, exchange[2])];
+    J = maximum(vcat(exchange[1], exchange[2]))
+    elast_one_market_group1_2 = dropdims(elast_one_market[exchange[1], setdiff(1:J, exchange[1])], dims=1);
+    elast_one_market_group2_1 = dropdims(elast_one_market[exchange[2], setdiff(1:J, exchange[2])], dims=1);
 
     return check_all_subs(elast_one_market_group1_2) .& 
         check_all_subs(elast_one_market_group2_1)
@@ -159,10 +179,10 @@ function check_comps_in_group(elast_one_market, exchange)
     if length(exchange) ==1
         return check_all_complements(elast_one_market)
     else # two elements in exchange
-        elast_one_market_group1 = elast_one_market[exchange[1], exchange[1]];
-        elast_one_market_group2 = elast_one_market[exchange[2], exchange[2]];
+        elast_one_market_group1 = elast_one_market[exchange[1][1]:exchange[1][2], exchange[1][1]:exchange[1][2]];
+        elast_one_market_group2 = elast_one_market[exchange[2][1]:exchange[2][2], exchange[2][1]:exchange[2][2]];
         return check_all_complements(elast_one_market_group1) .& 
-            check_all_complements(elast_one_market_group2)
+               check_all_complements(elast_one_market_group2)
     end
 end
 
@@ -172,11 +192,12 @@ function check_comps_across_group(elast_one_market, exchange)
     catch
         error("Cannot use `across_group` constraints with only one exchangeable group")
     end 
-    elast_one_market_group1_2 = elast_one_market[exchange[1], setdiff(1:J, exchange[1])];
-    elast_one_market_group2_1 = elast_one_market[exchange[2], setdiff(1:J, exchange[2])];
+    J = maximum(vcat(exchange[1], exchange[2]))
+    elast_one_market_group1_2 = dropdims(elast_one_market[exchange[1], setdiff(1:J, exchange[1])], dims=1);
+    elast_one_market_group2_1 = dropdims(elast_one_market[exchange[2], setdiff(1:J, exchange[2])], dims=1);
 
-    return check_all_complements(elast_one_market_group1_2) .& 
-    check_all_complements(elast_one_market_group2_1)
+    return all(elast_one_market_group1_2 .<=0) .& 
+           all(elast_one_market_group2_1 .<=0)
 end
 
 
