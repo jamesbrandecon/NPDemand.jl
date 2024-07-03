@@ -60,7 +60,7 @@ function inner_elast_loop(dsids_i::Matrix{T}, J::Int, at::Vector{Float64}, svec:
     end
 end
 
-function elast_mat_zygote(θ::Array{T}, 
+function elast_mat_zygote(θ::AbstractArray{T}, 
     problem::NPDemand.NPDProblem,
     tempmat_storage::Matrix{Matrix{Float64}} = []; 
     at::Matrix = [], s::Matrix = [], 
@@ -170,7 +170,8 @@ function get_parameter_order(lbs)
 end
 
 function reparameterization(betastar::Vector{T}, lbs::Vector, parameter_order::Vector) where T<:Real
-    buffer_beta = similar(betastar); #Zygote.Buffer(betastar); # Have to define a "Buffer" to make an editable object for Zygote
+    # buffer_beta = similar(betastar); #
+    buffer_beta = Zygote.Buffer(betastar); # Have to define a "Buffer" to make an editable object for Zygote
     if all(lbs .== 5000)
         buffer_beta = betastar;
     else
@@ -185,7 +186,8 @@ function reparameterization(betastar::Vector{T}, lbs::Vector, parameter_order::V
         end
         # return copy(buffer_beta)
     end
-    return buffer_beta
+    # return buffer_beta
+    return copy(buffer_beta)
 end
 
 function reparameterization_draws(betastar_draws, lbs, parameter_order)
@@ -208,7 +210,7 @@ function reparameterization_draws(betastar_draws, lbs, parameter_order)
     return beta_draws
 end
 
-function map_to_sieve(beta, gamma, exchange, nbetas, problem)
+function map_to_sieve(beta::AbstractArray{T}, gamma::AbstractArray{T}, exchange::Vector{Matrix{Int64}}, nbetas::Vector{Int64}, problem::NPDemand.NPDProblem) where T
     @assert sum(nbetas) == length(beta)
     
     nbeta = sum(nbetas); # number of parameters in each unique sieve
@@ -223,13 +225,13 @@ function map_to_sieve(beta, gamma, exchange, nbetas, problem)
     ends_params = cumsum(nbetas);
 
     # Transform 
-    sieve_params = zeros(eltype(beta), problem.design_width);     
+    sieve_params = Zygote.Buffer(zeros(T, problem.design_width));     
     for j in 1:J
         which_group = findfirst(j .∈  exchange); # find the group corresponding to this product
         sieve_params[starts_sieve[j]:ends_sieve[j]] = beta[starts_params[which_group]:ends_params[which_group]]
     end
 
-    all_params = [sieve_params; 1.0; gamma];
+    all_params = [copy(sieve_params); 1.0; gamma];
     all_params = reshape(all_params, 1, length(all_params));
 
     return all_params
@@ -288,7 +290,7 @@ end
         objective = x -> gmm_fast(x, problem, yZX, XZy, XX, problem.design_width, length(problem.Avec));
     end
 
-    if problem.constraints != [:exchangeability]
+    if !((penalty == 0) | (problem.constraints == [:exchangeability]))
         J = length(problem.Xvec);
         elasts = elast_mat_zygote(all_params, problem, tempmats; at = prices, s = shares);
         reshaped_elasts = [elasts[i][j1,j2] for j1=1:J, j2 = 1:J, i = 1:size(problem.data,1)];

@@ -238,10 +238,12 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
         vbetastar       = 10;
         vbeta           = zeros(sum(nbetas))
 
-        if sampler ==[] 
+        if (sampler ==[]) | (sampler == "mh")
             sampler = MH(
                 :gamma => AdvancedMH.RandomWalkProposal(MvNormal(zeros(gamma_length-1), diagm(step*ones(gamma_length-1)))),
                 :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), diagm(step*ones(sum(nbetas))))))
+        elseif sampler == "hmc"
+            sampler = HMC(0.01, 3; adtype = AutoZygote())
         end
         
         for j in 1:sum(nbetas)
@@ -296,7 +298,7 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
         chain = Turing.sample(
                 sample_quasibayes(problem, prior, problem.tempmats, weight_matrices; 
                 penalty = penalty, matrix_storage_dict = matrix_storage_dict), 
-                sampler, n_samples 
+                sampler, n_samples
                 # initial_params = start
                 ); 
 
