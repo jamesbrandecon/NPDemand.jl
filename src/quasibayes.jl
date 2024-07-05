@@ -371,3 +371,120 @@ function find_starting_point(problem, prior,
     
     return param_out, exit_flag
 end
+
+function smc(problem::NPDemand.NPDProblem; 
+    grid_points::Int = 50, 
+    max_penalty::Real   = 5, 
+    ess_threshold::Real = 100, 
+    step_size::Real     = 0.1, 
+    skip::Int           = 5,
+    burn_in::Int        = 10_000)
+
+    # Define inputs to quasi-bayes sampling 
+    lbs             = NPDemand.get_lower_bounds(problem)
+    parameter_order = NPDemand.get_parameter_order(lbs)
+    nbetas          = NPDemand.get_nbetas(problem)
+    vbetastar       = 10;
+    vbeta           = zeros(sum(nbetas))
+    gamma_length    = size(problem.Bvec[1],2);
+
+    for j in 1:sum(nbetas)
+        if isnothing(lbs[j])
+            vbeta[j] = vbetastar
+        else 
+            vbeta[j] = sqrt(log(1 + vbetastar))
+        end
+    end
+
+    # 1. Run MCMC on unconstrained model
+    start_row = burn_in+1;
+    skiplen = skip;
+
+    particles = problem.chain;
+    nbetas = NPDemand.get_nbetas(problem);
+    nbeta = length(lbs)
+
+    report_constraint_violations(problem)
+    
+    betastardraws = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
+    betadraws = NPDemand.reparameterization_draws(betastardraws, lbs, parameter_order)
+    gammadraws = hcat([particles["gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]
+
+    # thin the markov chain
+    L = size(betastardraws,1);
+    skip_inds = 1:skiplen:L
+    betadraws = betadraws[skip_inds,:];
+    gammadraws = gammadraws[skip_inds,:];
+    betastardraws = betastardraws[skip_inds,:];
+    nparticles = size(betastardraws,1);
+
+    # Format parameter vec so that gmm can use it
+    thetas = [betastardraws gammadraws]
+    betas = NPDemand.reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
+    thetas_sieve = vcat([NPDemand.map_to_sieve(betas[i,:], gammadraws[i,:], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+    
+    # 2. Set initial weights
+    smc_weights = fill(1.0 / nparticles, nparticles)
+    penalty = range(0, max_penalty, length = grid_points);
+
+    violation_dict = report_constraint_violations(problem, params = mean(thetas_sieve, StatsBase.weights(smc_weights), dims = 1));
+    t = 1;
+
+    viol_store = [];
+    ess_store  = [];
+    while (t < length(penalty)) & (violation_dict[:any] > 0.01)
+        t = t+1
+        println("Iteration "*string(t)*"...\r")
+    
+        # 3.1 Calculate importance weights
+        new_weights = similar(smc_weights)
+        for i in axes(thetas,1)
+            particle_i = thetas[i,:]
+            betastar_i = particle_i[1:nbeta]
+            beta_i = NPDemand.reparameterization_draws(reshape(betastar_i,1,nbeta), lbs, parameter_order)
+            gamma_i = particle_i[(nbeta+1):end]
+            logprior_t = logprior_smc(beta_i, gamma_i, penalty[t], problem)
+            logprior_t_minus_1 = logprior_smc(beta_i, gamma_i, penalty[t-1], problem)        
+            prior_ratio = exp(logprior_t - logprior_t_minus_1)
+            new_weights[i] = smc_weights[i] * prior_ratio
+        end
+        
+        # 3.2 Normalize weights
+        smc_weights = new_weights ./ sum(new_weights)
+        
+        # 3.3 Check ESS and resample if necessary
+        ESS = 1 / sum(smc_weights.^2)
+        push!(ess_store, ESS)
+        if ESS < ess_threshold
+            println("ess below threshold")
+            indices = wsample(1:nparticles, smc_weights, nparticles)
+            thetas = thetas[indices,:]
+            smc_weights .= 1.0 / nparticles
+        end
+        
+        # 3.4 Perturb particles
+        thetas .= thetas + rand(step_size.*Normal(0,1), nparticles, nbeta + 1)
+        betas = NPDemand.reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
+        thetas_sieve = vcat([NPDemand.map_to_sieve(betas[i,:], thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+    
+        # Check constraints 
+        violation_dict = report_constraint_violations(problem, params = mean(thetas_sieve, StatsBase.weights(smc_weights), dims = 1));
+        push!(viol_store, violation_dict[:any])
+            
+        println("increasing penalty") 
+    end
+
+    return (; thetas, smc_weights, violations = viol_store, ess = ess_store)
+end
+
+function logprior_smc(particle_beta, particle_gamma, penalty, problem)
+    # Penalty
+    nbetas = NPDemand.get_nbetas(problem)
+    particle = NPDemand.map_to_sieve(particle_beta, particle_gamma, problem.exchange, nbetas, problem);
+    D = report_constraint_violations(problem, params = particle, verbose = false, output = "count");
+    
+    distance = D; 
+    penalized_prior = 1 * sum(log.(cdf.(Normal(0,1), -1 * penalty * distance)));
+
+    return penalized_prior
+end

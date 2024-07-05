@@ -238,12 +238,12 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
         vbetastar       = 10;
         vbeta           = zeros(sum(nbetas))
 
-        if (sampler ==[]) | (sampler == "mh")
+        if (sampler == "mh")
             sampler = MH(
                 :gamma => AdvancedMH.RandomWalkProposal(MvNormal(zeros(gamma_length-1), diagm(step*ones(gamma_length-1)))),
                 :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), diagm(step*ones(sum(nbetas))))))
-        elseif sampler == "hmc"
-            sampler = HMC(0.01, 3; adtype = AutoZygote())
+        elseif (sampler ==[]) | (sampler == "hmc")
+            sampler = HMC(0.01, 1; adtype = AutoZygote())
         end
         
         for j in 1:sum(nbetas)
@@ -271,6 +271,8 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
             println("Using existing minimizer as the initial point")
             start = [problem.results.minimizer[NPDemand.sieve_to_betas_index(problem)]; problem.results.minimizer[problem.design_width+2:end]]
             # start, start_exit = find_starting_point(problem, prior, tempmats, weight_matrices, n_attempts = 1);
+        elseif (n_attempts == 0)
+            start, start_exit = find_starting_point(problem, prior, calc_tempmats(problem), weight_matrices, n_attempts = 1);
         else
             verbose && println("Finding a valid starting point for sampler....")
             start, start_exit = find_starting_point(problem, prior, calc_tempmats(problem), weight_matrices, n_attempts = n_attempts);
@@ -298,8 +300,8 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
         chain = Turing.sample(
                 sample_quasibayes(problem, prior, problem.tempmats, weight_matrices; 
                 penalty = penalty, matrix_storage_dict = matrix_storage_dict), 
-                sampler, n_samples
-                # initial_params = start
+                sampler, n_samples,
+                initial_params = start
                 ); 
 
         # Convert thh chain into the parameter sieve
@@ -320,4 +322,34 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
         problem.results = NPD_JuMP_results(qpm);
         problem.chain   = chain;
     end
+end
+
+function smc!(problem::NPDemand.NPDProblem;
+    grid_points::Int = 50, 
+    max_penalty::Real   = 5, 
+    ess_threshold::Real = 100, 
+    step::Real     = 0.1, 
+    skip::Int           = 5,
+    burn_in::Int        = 10_000)
+
+    # Add smc_results to problem
+    problem.smc_results = NPDemand.smc(problem::NPDemand.NPDProblem; 
+        grid_points    = grid_points, 
+        max_penalty    = max_penalty, 
+        ess_threshold  = ess_threshold, 
+        step_size      = step, 
+        skip           = skip,
+        burn_in        = burn_in);
+    
+    # Calculate new posterior mean and replace problem results 
+    lbs             = NPDemand.get_lower_bounds(problem)
+    parameter_order = NPDemand.get_parameter_order(lbs)
+    nbetas          = NPDemand.get_nbetas(problem)
+    nbeta           = length(lbs)
+
+    nparticles = size(problem.smc_results.thetas,1);
+    
+    betas = NPDemand.reparameterization_draws(problem.smc_results.thetas[:,1:nbeta], lbs, parameter_order)
+    thetas_sieve = vcat([NPDemand.map_to_sieve(betas[i,:], problem.smc_results.thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+    problem.results.minimizer = mean(thetas_sieve, StatsBase.weights(problem.smc_results.smc_weights), dims = 1);
 end

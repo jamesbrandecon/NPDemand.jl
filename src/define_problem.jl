@@ -237,6 +237,7 @@ function define_problem(df::DataFrame; exchange::Vector = [],
                         [], 
                         [], 
                         [], 
+                        [], 
                         [])
 
     # if problem_has_nonlinear_constraints
@@ -299,6 +300,7 @@ mutable struct NPDProblem
     converged
     chain
     tempmats
+    smc_results
 end
 
 import Base.+
@@ -345,6 +347,7 @@ function Base.show(io::IO, problem::NPDProblem)
     FE = problem.FE;
     obj_xtol = problem.obj_xtol;
     obj_ftol = problem.obj_ftol;
+    estimated_TF = ((problem.results !=[]) | (problem.chain != []));
     
     println(io, "NPD Problem:")
     println(io, "- Number of choices: $(J)")
@@ -355,4 +358,5 @@ function Base.show(io::IO, problem::NPDProblem)
     println(io, "- Index Variables: $index_vars")
     println(io, "- Bernstein polynomials of order: $bO")
     println(io, "- (x_tol, f_tol): ($obj_xtol, $obj_ftol)")
+    println(io, "- Estimated: $estimated_TF")
 end

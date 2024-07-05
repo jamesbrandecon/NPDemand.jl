@@ -4,6 +4,8 @@ using StaticArrays, JuMP, Ipopt, OSQP
 using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, LineSearches, Combinatorics, Primes
 using ForwardDiff, Strided
 using ForwardDiff: GradientConfig, Chunk
+using StatsBase
+using StatsBase: weights
 
 using Zygote
 using Turing, AdvancedMH
@@ -33,6 +35,6 @@ include("constraint_checks.jl")
 
 export estimate!, define_problem, show, price_elasticities!, toDataFrame, simulate_logit, update_constraints!
 export bern, dbern, compute_demand_function!, summarize_elasticities, own_elasticities, are_constraints_satisfied
-export elasticity_cdf, report_constraint_violations
+export elasticity_cdf, report_constraint_violations, smc!
 
 end
