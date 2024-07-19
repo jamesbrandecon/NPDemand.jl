@@ -11,11 +11,10 @@ function list_constraints()
     :diagonal_dominance_group => "Same as diagonal_dominance_all, but only within exchangeable groups",
     :all_substitutes => "Impose that all products are substitutes. This constraint is imposed linearly",
     :exchangeability => "Impose that all products within provided groups (in `exchange`) are exchangeable",
-    :subs_in_group => "Impose that all products within provided groups (in `exchange`) are substitutes. This constraint is imposed nonlinearly",
-    :complements_in_group => "Impose that all products within provided groups (in `exchange`) are complements. This constraint is imposed nonlinearly",
-    :subs_across_group => "Impose that all products *across* provided groups (in `exchange`) are substitutes. No constraints are imposed within group. This constraint is imposed nonlinearly", 
-    :complements_across_group => "Impose that all products *across* provided groups (in `exchange`) are complements. No constraints are imposed within group. This constraint is imposed nonlinearly",
-    :all_substitutes_nonlinear => "Impose that all products are substitutes. This constraint is imposed nonlinearly"
+    :subs_in_group => "Impose that all products within provided groups (in `exchange`) are substitutes. This constraint is imposed only via quasi-bayes.",
+    :complements_in_group => "Impose that all products within provided groups (in `exchange`) are complements. This constraint is only imposed via quasi-bayes.",
+    :subs_across_group => "Impose that all products *across* provided groups (in `exchange`) are substitutes. No constraints are imposed within group. This constraint is only imposed via quasi-bayes.", 
+    :complements_across_group => "Impose that all products *across* provided groups (in `exchange`) are complements. No constraints are imposed within group. This constraint is only imposed via quasi-bayes."
    ) 
    return result
 end
@@ -238,34 +237,20 @@ function define_problem(df::DataFrame; exchange::Vector = [],
                         [], 
                         [], 
                         [], 
+                        [], 
                         [])
-
-    # if problem_has_nonlinear_constraints
-    #     verbose && println("Preparing inputs for nonlinear constraints....")
-    #     subset = subset_for_elast_const(problem, df; grid_size = grid_size);
-    #     elast_mats, elast_prices = make_elasticity_mat(problem, subset);
-    #     problem.elast_mats = elast_mats;
-    #     problem.elast_prices = elast_prices;
-    #     θ_packed =  pack_parameters(zeros(Float64, sum(size.(Xvec,2))), exchange, size.(Xvec,2))
-    #     if chunk_size ==[]
-    #         cfg = GradientConfig(nothing, θ_packed);
-    #     else
-    #         cfg = GradientConfig(nothing, θ_packed, Chunk{chunk_size}());
-    #     end
-    #     problem.cfg = cfg;
-    # end
-
     return problem
 end
 
 """
-    NPD_JuMP_results
+    NPD_parameters
 
-    Custom struct to store results that are derived from JuMP. NPDemand currently doesn't use anything from the results field of 
+    Custom struct to store estimated parameters specifically. NPDemand currently doesn't use anything from the results field of 
     NPDProblem other than results.minimizer, so this struct will preserve that functionality even when the results are not derived from Optim.
 """
-mutable struct NPD_JuMP_results 
+mutable struct NPD_parameters 
     minimizer
+    filtered_chain
 end
 
 mutable struct NPDProblem
@@ -301,6 +286,7 @@ mutable struct NPDProblem
     chain
     tempmats
     smc_results
+    sampling_details
 end
 
 import Base.+

@@ -4,7 +4,10 @@ function report_constraint_violations(problem;
     output = "dict")
 
     J = length(problem.Xvec)
-
+    if verbose && problem.chain !=[]
+        println("Evaluated at posterior mean:")
+    end
+    
     if params == []
         param_vec = problem.results.minimizer;
     else 
@@ -99,7 +102,7 @@ function report_constraint_violations(problem;
 
     any_violations = 1 - mean(all_satisfied);
     push!(violations, :any => round(any_violations, digits = 2))
-    
+
     if output == "dict"
         return violations
     elseif output == "count"

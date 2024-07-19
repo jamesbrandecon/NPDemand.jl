@@ -6,7 +6,7 @@ function estimate_fast!(problem::NPDProblem;
         linear_solver = linear_solver, 
         verbose = verbose);
         
-    problem.results = NPD_JuMP_results([β;γ]);
+    problem.results = NPD_parameters([β;γ], []);
 end
 
 function jmp_obj(npd_problem::NPDProblem; linear_solver = "Ipopt", verbose = true)
@@ -170,7 +170,7 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
     quasi_bayes = false,
     sampler = [], 
     n_samples::Int = 50_000,
-    burn_in::Int = 5_000, 
+    burn_in::Real = 0.25, 
     skip::Int = 5,
     n_attempts = 0,
     penalty = Inf, 
@@ -225,10 +225,12 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
     # Otherwise skip the linear solver and jump to MCMC
     if quasi_bayes 
         try 
-            @assert burn_in < n_samples 
+            @assert burn_in < 1 
         catch
-            error("burn_in must be less than n_samples")
+            error("`burn_in` denotes the fraction of samples to drap. Must be less than 1")
         end
+        
+        burn_in = Int(burn_in * n_samples);
         gamma_length = size(Bvec[1],2);
 
         # Define inputs to quasi-bayes sampling 
@@ -316,40 +318,50 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
         betadraws = betadraws[skip_inds,:];
         gammadraws = gammadraws[skip_inds,:];
 
-        # calculate elasticities at posterior mean
+        # calculate posterior mean parameters
         qpm = map_to_sieve(mean(betadraws, dims=1)', mean(gammadraws, dims=1)', problem.exchange, nbetas, problem)
 
-        problem.results = NPD_JuMP_results(qpm);
-        problem.chain   = chain;
+        problem.sampling_details = (; burn_in = burn_in, skip = skip, smc = false)
+        problem.results  = NPD_parameters(qpm, hcat(betadraws, gammadraws));
+        problem.chain    = chain;
     end
 end
 
 function smc!(problem::NPDemand.NPDProblem;
-    grid_points::Int = 50, 
+    grid_points::Int    = 50, 
     max_penalty::Real   = 5, 
     ess_threshold::Real = 100, 
-    step::Real     = 0.1, 
+    step::Real          = 0.1, 
     skip::Int           = 5,
-    burn_in::Int        = 10_000)
+    burn_in::Real       = 0.25, 
+    mh_steps            = 10)
+
+    burn_in_int = Int(burn_in * size(problem.chain,1));
 
     # Add smc_results to problem
-    problem.smc_results = NPDemand.smc(problem::NPDemand.NPDProblem; 
+    problem.smc_results = smc(problem::NPDemand.NPDProblem; 
         grid_points    = grid_points, 
         max_penalty    = max_penalty, 
         ess_threshold  = ess_threshold, 
         step_size      = step, 
         skip           = skip,
-        burn_in        = burn_in);
+        burn_in        = burn_in_int, 
+        mh_steps       = mh_steps);
     
     # Calculate new posterior mean and replace problem results 
-    lbs             = NPDemand.get_lower_bounds(problem)
-    parameter_order = NPDemand.get_parameter_order(lbs)
-    nbetas          = NPDemand.get_nbetas(problem)
+    lbs             = get_lower_bounds(problem)
+    parameter_order = get_parameter_order(lbs)
+    nbetas          = get_nbetas(problem)
     nbeta           = length(lbs)
 
-    nparticles = size(problem.smc_results.thetas,1);
+    nparticles      = size(problem.smc_results.thetas,1);
     
-    betas = NPDemand.reparameterization_draws(problem.smc_results.thetas[:,1:nbeta], lbs, parameter_order)
-    thetas_sieve = vcat([NPDemand.map_to_sieve(betas[i,:], problem.smc_results.thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
-    problem.results.minimizer = mean(thetas_sieve, StatsBase.weights(problem.smc_results.smc_weights), dims = 1);
+    betas           = reparameterization_draws(problem.smc_results.thetas[:,1:nbeta], lbs, parameter_order)
+    gammas          = problem.smc_results.thetas[:,(nbeta+1):end]        
+    thetas_sieve    = vcat([map_to_sieve(betas[i,:], problem.smc_results.thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+    
+    problem.results.minimizer       = mean(thetas_sieve, StatsBase.weights(problem.smc_results.smc_weights), dims = 1);
+    problem.results.filtered_chain  = hcat(betas, gammas)
+    problem.sampling_details        = (; burn_in = burn_in, 
+        skip = skip, smc = true);
 end

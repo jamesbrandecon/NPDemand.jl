@@ -373,12 +373,13 @@ function find_starting_point(problem, prior,
 end
 
 function smc(problem::NPDemand.NPDProblem; 
-    grid_points::Int = 50, 
+    grid_points::Int    = 50, 
     max_penalty::Real   = 5, 
     ess_threshold::Real = 100, 
     step_size::Real     = 0.1, 
     skip::Int           = 5,
-    burn_in::Int        = 10_000)
+    burn_in::Int        = 5000, 
+    mh_steps = 10)
 
     # Define inputs to quasi-bayes sampling 
     lbs             = NPDemand.get_lower_bounds(problem)
@@ -404,7 +405,7 @@ function smc(problem::NPDemand.NPDProblem;
     nbetas = NPDemand.get_nbetas(problem);
     nbeta = length(lbs)
 
-    report_constraint_violations(problem)
+    # report_constraint_violations(problem)
     
     betastardraws = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
     betadraws = NPDemand.reparameterization_draws(betastardraws, lbs, parameter_order)
@@ -427,14 +428,25 @@ function smc(problem::NPDemand.NPDProblem;
     smc_weights = fill(1.0 / nparticles, nparticles)
     penalty = range(0, max_penalty, length = grid_points);
 
-    violation_dict = report_constraint_violations(problem, params = mean(thetas_sieve, StatsBase.weights(smc_weights), dims = 1));
+    violation_dict = report_constraint_violations(problem, 
+            params = mean(thetas_sieve, StatsBase.weights(smc_weights), dims = 1))
+    # violation_dict_array = [
+    #     report_constraint_violations(problem, 
+    #         params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)
+    # ];
+    # violation_dict = Dict()
+    # for k in keys(violation_dict_array[1])
+    #     push!(violation_dict, k => mean([violation_dict_array[i][k] for i in axes(thetas_sieve,1)]));
+    # end
     t = 1;
+    
+    Sigma = cov(thetas);
 
     viol_store = [];
     ess_store  = [];
     while (t < length(penalty)) & (violation_dict[:any] > 0.01)
         t = t+1
-        println("Iteration "*string(t)*"...\r")
+        println("Iteration "*string(t-1)*"...\r")
     
         # 3.1 Calculate importance weights
         new_weights = similar(smc_weights)
@@ -462,23 +474,58 @@ function smc(problem::NPDemand.NPDProblem;
             smc_weights .= 1.0 / nparticles
         end
         
-        # 3.4 Perturb particles
-        thetas .= thetas + rand(step_size.*Normal(0,1), nparticles, nbeta + 1)
-        betas = NPDemand.reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
-        thetas_sieve = vcat([NPDemand.map_to_sieve(betas[i,:], thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+        # 3.4 Perturb particles via MH step
+        # n_accept = 0;
+        n_accept = zeros(nparticles);
+        for mh_iter in 1:mh_steps
+            for i in axes(thetas,1)
+                # proposal = thetas[i,:] + rand(step_size.*Normal(0,1), size(thetas[i,:]))
+                proposal = thetas[i,:] + rand(MvNormal(zeros(length(thetas[1,:])),step_size .* Sigma))
+
+                logprior_proposal   = logprior_smc(proposal[1:nbeta], proposal[(nbeta+1):end], penalty[t], problem)
+                logprior_theta      = logprior_smc(thetas[i,1:nbeta], thetas[i,(nbeta+1):end], penalty[t], problem)
+                
+                loglik_proposal     = loglikelihood(problem, proposal[1:nbeta], proposal[nbeta+1:end], nbetas)
+                loglik_theta        = loglikelihood(problem, thetas[i,1:nbeta], thetas[i,nbeta+1:end], nbetas)
+
+                # Calculate MH acceptance ratio
+                logratio = loglik_proposal + logprior_proposal - loglik_theta - logprior_theta
+                if rand() < exp(logratio)
+                    thetas[i,:] = proposal
+                    n_accept[i] += 1
+                end
+            end
+            println("mh iteration $mh_iter")
+        end
+        n_accept = n_accept ./ mh_steps
+        accept_rate = round(mean(n_accept), digits = 2);
+        println("Average acceptance rate: $(accept_rate)")
+        # println("Acceptance rate: "*string(n_accept/nparticles))
+
+        # thetas = thetas .+ rand(step_size.*Normal(0,1), nparticles, nbeta + 1)
+        # betas = NPDemand.reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
+        # thetas_sieve = vcat([NPDemand.map_to_sieve(betas[i,:], thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
     
         # Check constraints 
         violation_dict = report_constraint_violations(problem, params = mean(thetas_sieve, StatsBase.weights(smc_weights), dims = 1));
+        # violation_dict_array = [
+        # report_constraint_violations(problem, 
+        #     params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)
+        # ];
+        # violation_dict = Dict()
+        # for k in keys(violation_dict_array[1])
+        #     push!(violation_dict, k => mean([violation_dict_array[i][k] for i in axes(thetas_sieve,1)]));
+        # end
         push!(viol_store, violation_dict[:any])
-            
+        
+        display(violation_dict)
         println("increasing penalty") 
     end
 
     return (; thetas, smc_weights, violations = viol_store, ess = ess_store)
 end
 
-function logprior_smc(particle_beta, particle_gamma, penalty, problem)
-    # Penalty
+function logprior_smc(particle_beta::Array{T}, particle_gamma::Array{T}, penalty::Real, problem::NPDemand.NPDProblem) where T
     nbetas = NPDemand.get_nbetas(problem)
     particle = NPDemand.map_to_sieve(particle_beta, particle_gamma, problem.exchange, nbetas, problem);
     D = report_constraint_violations(problem, params = particle, verbose = false, output = "count");
@@ -487,4 +534,9 @@ function logprior_smc(particle_beta, particle_gamma, penalty, problem)
     penalized_prior = 1 * sum(log.(cdf.(Normal(0,1), -1 * penalty * distance)));
 
     return penalized_prior
+end
+
+function loglikelihood(problem::NPDemand.NPDProblem, particle_beta::Vector{T}, particle_gamma::Vector{T}, nbetas) where T
+    x = NPDemand.map_to_sieve(particle_beta, particle_gamma, problem.exchange, nbetas, problem);
+    return -0.5 * gmm(x, problem, problem.weight_matrices)
 end

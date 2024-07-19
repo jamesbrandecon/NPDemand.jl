@@ -12,7 +12,105 @@ Options:
 - `show_trace`: if `true`, Optim will print the trace for each iteration of the nonlinear solver. 
 -  `compute_own_elasticities`: NOT yet implemented-- if `true`, will also generate columns called `own_elast` which will include estimated own-price elasticities at all counterfactual points.
 """
-function compute_demand_function!(problem, df; max_iter = 1000, show_trace = false)
+function compute_demand_function!(problem, df; 
+    max_iter = 1000, 
+    show_trace = false, 
+    CI::Union{Vector{Any}, Real} = [], 
+    n_draws::Union{Vector{Any}, Int} = [])
+
+    println("Solving nonlinear problem for counterfactual market shares.....")
+    
+    if "xi0" ∉ names(df)
+        println("No columns named `xi' found. Setting residual demand shifters to zero")
+    else
+        println("Using provided residual demand shifters in counterfactual calculations")
+    end
+
+    if problem.chain ==[]
+        demand = compute_demand_function_inner(problem, df, max_iter = max_iter, show_trace = show_trace, β = problem.results.minimizer);
+        df[!,r"shares"] .= demand;
+    else
+        burn_in     = problem.sampling_details.burn_in;
+        skip        = problem.sampling_details.skip;
+        J           = length(problem.Xvec);
+        T           = size(problem.data,1);
+
+        demand      = zeros(size(df[!,r"shares"]))
+        demand_CI   = [];
+
+        if n_draws == []
+            n_draws = length(burn_in+1:skip:size(problem.chain,1))
+        end
+        try 
+            @assert ((n_draws > 0) & (n_draws <= length(burn_in+1:skip:size(problem.chain,1))))
+        catch 
+            error("`n_draws` must be greater than 0 and weakly less than the total number of draws in the final chain")
+        end
+        println("Using $n_draws quasi-Bayes estimates. This may take a few minutes....")
+        if CI == []
+            nbetas = get_nbetas(problem);
+            draw_order  = sample(1:size(problem.results.filtered_chain,1), n_draws, replace = false);
+
+            for i in 1:n_draws
+                print(".")
+                sample_i    = problem.results.filtered_chain[draw_order[i],:];
+                β_i = map_to_sieve(sample_i[1:sum(nbetas)], 
+                                sample_i[sum(nbetas)+1:end], 
+                                problem.exchange, 
+                                nbetas, 
+                                problem)
+                demand_i = compute_demand_function_inner(problem, df; 
+                max_iter = max_iter, 
+                show_trace = show_trace,
+                β = β_i)
+                demand = demand .+ demand_i;
+            end
+            demand .= demand ./ n_draws; # Calculate the mean posterior elasticities
+            df[!,r"shares"] .= demand; 
+        else
+            alpha = 1 - CI;
+
+            nbetas      = get_nbetas(problem);
+            draw_order  = sample(1:size(problem.results.filtered_chain,1), n_draws, replace = false);
+
+            for i in 1:n_draws
+                print(".")
+                sample_i    = problem.results.filtered_chain[draw_order[i],:];
+                β_i         = map_to_sieve(sample_i[1:sum(nbetas)], 
+                                sample_i[sum(nbetas)+1:end], 
+                                problem.exchange, 
+                                nbetas, 
+                                problem)
+                demand_i    = compute_demand_function_inner(problem, df, 
+                                max_iter = max_iter, 
+                                show_trace = show_trace, 
+                                β = β_i)
+                
+                demand      = demand .+ demand_i;
+                push!(demand_CI, demand_i);
+            end
+            
+            ub = [quantile(getindex.(demand_CI, t), 1-alpha/2) 
+                    for t in 1:size(df,1)
+                    ]
+            lb = [quantile(getindex.(demand_CI, t), alpha/2) 
+                    for t in 1:size(df,1)
+                    ]
+            demand .= demand ./ n_draws; # Calculate the mean posterior elasticities
+            df[!,r"shares"] .= demand;
+            
+            for i in 0:(J-1)
+                df[!,"shares$(i)_lb"] = lb
+                df[!,"shares$(i)_ub"] = ub
+            end
+        end
+    end
+end
+
+function compute_demand_function_inner(problem, df; 
+    max_iter = 1000, show_trace = false,
+    β = problem.results.minimizer)
+
     J = length(problem.Xvec);
     FE = problem.FE;
 
@@ -23,30 +121,9 @@ function compute_demand_function!(problem, df; max_iter = 1000, show_trace = fal
         error("Fewer than J columns provided for either prices or shares")
     end
 
-    find_prices = findall(problem.index_vars .== "prices");
-    price_index = find_prices[1];
-
     # Grab estimated parameters
-    β = problem.results.minimizer;
     θ = β[1:problem.design_width]
     γ = β[length(θ)+1:end]
-
-    # Normalize own-price coefficient
-    γ[price_index] = 1;
-
-    # Fixed-effect normalizations
-    for i ∈ problem.normalization
-        γ[i] =0; 
-    end
-
-    # Enforce equality constraints directly
-    for i∈eachindex(problem.mins)
-        θ[problem.mins[i]] = θ[problem.maxs[i]]
-    end
-    @assert minimum(problem.Aeq * θ .== 0)
-    if !isempty(problem.Aineq)
-        @assert maximum(problem.Aineq * θ .< problem.constraint_tol)
-    end
 
     # Reshape FEs into matrix of dummy variables
     FEmat = [];
@@ -71,15 +148,12 @@ function compute_demand_function!(problem, df; max_iter = 1000, show_trace = fal
     if "product" ∈ FE
         product_FEs = true;
     end
-
-    println("Beginning to solve for counterfactual market shares.....")
-    println("Assumes residual demand shifters set to zero")
     s_func(shares_search) = inner_demand_function(shares_search, df, θ, γ, problem, FEmat, product_FEs)
     ans = nlsolve(s_func, 1/(2*J) .* ones(J * size(df,1)), show_trace = show_trace, iterations = max_iter)
 
-    df[!,r"shares"] .= reshape(ans.zero, size(df,1),J)
+    # df[!,r"shares"] .= reshape(ans.zero, size(df,1),J)
+    reshape(ans.zero, size(df,1),J)
 end
-
 
 function inner_demand_function(shares_search, df, θ, γ, problem, FEmat, product_FEs)
     J = length(problem.Xvec);
@@ -93,7 +167,7 @@ function inner_demand_function(shares_search, df, θ, γ, problem, FEmat, produc
     
     df[!,r"shares"] .= shares_search;
 
-    Xvec, Avec, Bvec, syms, combos = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; inner = true);
+    Xvec, ~, Bvec, ~, ~ = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; inner = true);
 
     deltas = [];
     for j = 1:J 
@@ -103,6 +177,10 @@ function inner_demand_function(shares_search, df, θ, γ, problem, FEmat, produc
         else
             B = Bvec[j];
             deltas = hcat(deltas, B * γ);
+        end
+
+        if "xi$(j-1)" ∈ names(df)
+            deltas[:,j] = deltas[:,j] .+ df[!,"xi$(j-1)"];
         end
     end
 

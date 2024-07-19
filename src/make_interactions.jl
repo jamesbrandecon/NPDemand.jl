@@ -8,18 +8,20 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
 
     ncols = size(X,2);
     J = Int(ncols/(m+1));
-    input_string = ""
-    input_string2 = ""
-    G = [];
-    G2 = [];
+    # input_string = ""
+    # input_string2 = ""
     prime_vec = primes(1000);
     order_prime_factors = prime_vec[1:m+1]; 
     r = order_prime_factors;
-    for j = 1:J
-        # Make G[j] contain groups of (m+1) columns
-        push!(G, r)
-        push!(G2, (j-1)*(m+1)+1:j*(m+1))
-    end
+    # G = [];
+    # G2 = [];
+    # for j = 1:J
+    #     # Make G[j] contain groups of (m+1) columns
+    #     push!(G, r)
+    #     push!(G2, (j-1)*(m+1)+1:j*(m+1))
+    # end
+    G = [r for j = 1:J];
+    G2 = [(j-1)*(m+1)+1:j*(m+1) for j = 1:J];
     
     orders = collect(Iterators.product(G...));
     orders = reshape(orders, length(orders));
@@ -46,9 +48,9 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
     sym_vec = temp;
 
     # Apply remaining combos to symbolic vector
-    sym_combos = []
+    sym_combos = Array{String}(undef, maximum(size(combos)))
     for i ∈ eachindex(combos)
-        push!(sym_combos, prod(string.(sym_vec[combos[i]])))
+        sym_combos[i] = prod(string.(sym_vec[combos[i]]))
     end
 
     order_vec = reduce(hcat, orders)';
@@ -75,7 +77,7 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
         order_vec = reduce(hcat, orders)';
         
         @assert this_j ∉ ex
-            Threads.@threads for i ∈ eachindex(combos)
+            for i ∈ eachindex(combos)
                 combotemp = getindex.(findall((own_order .== own_order[i]) .&
                     (prod_order_in_group .== prod_order_in_group[i]) .& 
                     (prod_order_not_in_group .== prod_order_not_in_group[i])),1)
