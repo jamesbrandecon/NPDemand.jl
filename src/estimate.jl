@@ -361,8 +361,8 @@ function smc!(problem::NPDemand.NPDProblem;
     betas           = reparameterization_draws(problem.smc_results.thetas[:,1:nbeta], lbs, parameter_order)
     gammas          = problem.smc_results.thetas[:,(nbeta+1):end]        
     thetas_sieve    = vcat([map_to_sieve(betas[i,:], problem.smc_results.thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
-    
-    problem.results.minimizer       = mean(thetas_sieve, StatsBase.weights(problem.smc_results.smc_weights), dims = 1);
+
+    problem.results.minimizer       = mean(thetas_sieve, dims = 1);
     problem.results.filtered_chain  = hcat(betas, gammas)
     problem.sampling_details        = (; burn_in = burn_in, 
         skip = skip, smc = true, prior = problem.sampling_details.prior);

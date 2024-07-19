@@ -420,16 +420,16 @@ function smc(problem::NPDemand.NPDProblem;
     smc_weights     = fill(1.0 / nparticles, nparticles)
     penalty         = range(0, max_penalty, length = grid_points);
 
-    violation_dict = report_constraint_violations(problem, 
-            params = mean(thetas_sieve, StatsBase.weights(smc_weights), dims = 1))
-    # violation_dict_array = [
-    #     report_constraint_violations(problem, 
-    #         params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)
-    # ];
-    # violation_dict = Dict()
-    # for k in keys(violation_dict_array[1])
-    #     push!(violation_dict, k => mean([violation_dict_array[i][k] for i in axes(thetas_sieve,1)]));
-    # end
+    # violation_dict = report_constraint_violations(problem, 
+    #         params = mean(thetas_sieve, StatsBase.weights(smc_weights), dims = 1))
+    violation_dict_array = [
+        report_constraint_violations(problem, 
+            params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)
+    ];
+    violation_dict = Dict{Symbol, Float64}()
+    for k in keys(violation_dict_array[1])
+        push!(violation_dict, k => mean([violation_dict_array[i][k] for i in axes(thetas_sieve,1)]));
+    end
     t = 1;
 
     viol_store = [];
@@ -508,7 +508,7 @@ function smc(problem::NPDemand.NPDProblem;
         report_constraint_violations(problem, 
             params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)
         ];
-        violation_dict = Dict()
+        violation_dict = Dict{Symbol, Float64}()
         for k in keys(violation_dict_array[1])
             push!(violation_dict, k => 
                 round(
