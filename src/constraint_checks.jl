@@ -4,10 +4,7 @@ function report_constraint_violations(problem;
     output = "dict")
 
     J = length(problem.Xvec)
-    if verbose && problem.chain !=[]
-        println("Evaluated at posterior mean:")
-    end
-    
+
     if params == []
         param_vec = problem.results.minimizer;
     else 

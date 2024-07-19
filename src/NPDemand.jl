@@ -6,6 +6,7 @@ using ForwardDiff, Strided
 using ForwardDiff: GradientConfig, Chunk
 using StatsBase
 using StatsBase: weights
+using Random
 
 using Zygote
 using Turing, AdvancedMH

@@ -379,54 +379,46 @@ function smc(problem::NPDemand.NPDProblem;
     step_size::Real     = 0.1, 
     skip::Int           = 5,
     burn_in::Int        = 5000, 
-    mh_steps = 10)
+    mh_steps            = 10, 
+    seed                = 4132)
 
     # Define inputs to quasi-bayes sampling 
-    lbs             = NPDemand.get_lower_bounds(problem)
-    parameter_order = NPDemand.get_parameter_order(lbs)
-    nbetas          = NPDemand.get_nbetas(problem)
-    vbetastar       = 10;
-    vbeta           = zeros(sum(nbetas))
+    prior           = problem.sampling_details.prior;
+    lbs             = prior["lbs"]
+    parameter_order = prior["parameter_order"]
+    nbetas          = prior["nbetas"]
     gamma_length    = size(problem.Bvec[1],2);
 
-    for j in 1:sum(nbetas)
-        if isnothing(lbs[j])
-            vbeta[j] = vbetastar
-        else 
-            vbeta[j] = sqrt(log(1 + vbetastar))
-        end
-    end
-
     # 1. Run MCMC on unconstrained model
-    start_row = burn_in+1;
-    skiplen = skip;
+    start_row       = burn_in+1;
+    skiplen         = skip;
 
-    particles = problem.chain;
-    nbetas = NPDemand.get_nbetas(problem);
-    nbeta = length(lbs)
+    particles       = problem.chain;
+    nbetas          = NPDemand.get_nbetas(problem);
+    nbeta           = length(lbs)
 
     # report_constraint_violations(problem)
     
-    betastardraws = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
-    betadraws = NPDemand.reparameterization_draws(betastardraws, lbs, parameter_order)
-    gammadraws = hcat([particles["gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]
+    betastardraws   = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
+    betadraws       = NPDemand.reparameterization_draws(betastardraws, lbs, parameter_order)
+    gammadraws      = hcat([particles["gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]
 
     # thin the markov chain
-    L = size(betastardraws,1);
-    skip_inds = 1:skiplen:L
-    betadraws = betadraws[skip_inds,:];
-    gammadraws = gammadraws[skip_inds,:];
-    betastardraws = betastardraws[skip_inds,:];
-    nparticles = size(betastardraws,1);
+    L               = size(betastardraws,1);
+    skip_inds       = 1:skiplen:L
+    betadraws       = betadraws[skip_inds,:];
+    gammadraws      = gammadraws[skip_inds,:];
+    betastardraws   = betastardraws[skip_inds,:];
+    nparticles      = size(betastardraws,1);
 
     # Format parameter vec so that gmm can use it
-    thetas = [betastardraws gammadraws]
-    betas = NPDemand.reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
-    thetas_sieve = vcat([NPDemand.map_to_sieve(betas[i,:], gammadraws[i,:], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+    thetas          = [betastardraws gammadraws]
+    betas           = NPDemand.reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
+    thetas_sieve    = vcat([NPDemand.map_to_sieve(betas[i,:], gammadraws[i,:], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
     
     # 2. Set initial weights
-    smc_weights = fill(1.0 / nparticles, nparticles)
-    penalty = range(0, max_penalty, length = grid_points);
+    smc_weights     = fill(1.0 / nparticles, nparticles)
+    penalty         = range(0, max_penalty, length = grid_points);
 
     violation_dict = report_constraint_violations(problem, 
             params = mean(thetas_sieve, StatsBase.weights(smc_weights), dims = 1))
@@ -439,26 +431,30 @@ function smc(problem::NPDemand.NPDProblem;
     #     push!(violation_dict, k => mean([violation_dict_array[i][k] for i in axes(thetas_sieve,1)]));
     # end
     t = 1;
-    
-    Sigma = cov(thetas);
 
     viol_store = [];
     ess_store  = [];
+    Sigma = cov(thetas); # covariance matrix parameters, used to improve proposals
+    
+    Random.seed!(seed)
     while (t < length(penalty)) & (violation_dict[:any] > 0.01)
         t = t+1
-        println("Iteration "*string(t-1)*"...\r")
+        print("\n Iteration "*string(t-1)*"...\r")
     
         # 3.1 Calculate importance weights
         new_weights = similar(smc_weights)
         for i in axes(thetas,1)
-            particle_i = thetas[i,:]
-            betastar_i = particle_i[1:nbeta]
-            beta_i = NPDemand.reparameterization_draws(reshape(betastar_i,1,nbeta), lbs, parameter_order)
-            gamma_i = particle_i[(nbeta+1):end]
-            logprior_t = logprior_smc(beta_i, gamma_i, penalty[t], problem)
-            logprior_t_minus_1 = logprior_smc(beta_i, gamma_i, penalty[t-1], problem)        
-            prior_ratio = exp(logprior_t - logprior_t_minus_1)
-            new_weights[i] = smc_weights[i] * prior_ratio
+            particle_i          = thetas[i,:];
+            betastar_i          = particle_i[1:nbeta];
+
+            beta_i              = NPDemand.reparameterization_draws(reshape(betastar_i,1,nbeta), lbs, parameter_order);
+            gamma_i             = particle_i[(nbeta+1):end];
+
+            logprior_t          = logprior_smc(beta_i, gamma_i, penalty[t], problem);
+            logprior_t_minus_1  = logprior_smc(beta_i, gamma_i, penalty[t-1], problem);
+
+            prior_ratio         = exp(logprior_t - logprior_t_minus_1)
+            new_weights[i]      = smc_weights[i] * prior_ratio
         end
         
         # 3.2 Normalize weights
@@ -468,15 +464,15 @@ function smc(problem::NPDemand.NPDProblem;
         ESS = 1 / sum(smc_weights.^2)
         push!(ess_store, ESS)
         if ESS < ess_threshold
-            println("ess below threshold")
+            print("\n ESS below threshold -- Re-sampling")
             indices = wsample(1:nparticles, smc_weights, nparticles)
             thetas = thetas[indices,:]
             smc_weights .= 1.0 / nparticles
         end
         
-        # 3.4 Perturb particles via MH step
-        # n_accept = 0;
+        # 3.4 Perturb particles via MH step(s)
         n_accept = zeros(nparticles);
+        print("\n Metropolis-Hasting steps: ") 
         for mh_iter in 1:mh_steps
             for i in axes(thetas,1)
                 # proposal = thetas[i,:] + rand(step_size.*Normal(0,1), size(thetas[i,:]))
@@ -491,52 +487,81 @@ function smc(problem::NPDemand.NPDProblem;
                 # Calculate MH acceptance ratio
                 logratio = loglik_proposal + logprior_proposal - loglik_theta - logprior_theta
                 if rand() < exp(logratio)
-                    thetas[i,:] = proposal
+                    thetas[i,:]  = proposal
                     n_accept[i] += 1
                 end
             end
-            println("mh iteration $mh_iter")
+            print("$mh_iter..")
         end
         n_accept = n_accept ./ mh_steps
         accept_rate = round(mean(n_accept), digits = 2);
-        println("Average acceptance rate: $(accept_rate)")
+        println("\n Average MH acceptance rate: $(accept_rate)")
         # println("Acceptance rate: "*string(n_accept/nparticles))
 
         # thetas = thetas .+ rand(step_size.*Normal(0,1), nparticles, nbeta + 1)
-        # betas = NPDemand.reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
-        # thetas_sieve = vcat([NPDemand.map_to_sieve(betas[i,:], thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+        betas = NPDemand.reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
+        thetas_sieve = vcat([NPDemand.map_to_sieve(betas[i,:], thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
     
         # Check constraints 
-        violation_dict = report_constraint_violations(problem, params = mean(thetas_sieve, StatsBase.weights(smc_weights), dims = 1));
-        # violation_dict_array = [
-        # report_constraint_violations(problem, 
-        #     params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)
-        # ];
-        # violation_dict = Dict()
-        # for k in keys(violation_dict_array[1])
-        #     push!(violation_dict, k => mean([violation_dict_array[i][k] for i in axes(thetas_sieve,1)]));
-        # end
+        # violation_dict = report_constraint_violations(problem, params = mean(thetas_sieve, StatsBase.weights(smc_weights), dims = 1));
+        violation_dict_array = [
+        report_constraint_violations(problem, 
+            params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)
+        ];
+        violation_dict = Dict()
+        for k in keys(violation_dict_array[1])
+            push!(violation_dict, k => 
+                round(
+                    mean([violation_dict_array[i][k] for i in axes(thetas_sieve,1)]),
+                    digits = 3)
+            );
+        end
         push!(viol_store, violation_dict[:any])
         
         display(violation_dict)
-        println("increasing penalty") 
+        println("Increasing penalty") 
     end
 
-    return (; thetas, smc_weights, violations = viol_store, ess = ess_store)
+    return (; thetas, smc_weights, violations = viol_store, ess = ess_store);
 end
 
-function logprior_smc(particle_beta::Array{T}, particle_gamma::Array{T}, penalty::Real, problem::NPDemand.NPDProblem) where T
-    nbetas = NPDemand.get_nbetas(problem)
+function logprior_smc(particle_betastar::Array{T}, particle_gamma::Array{T}, penalty::Real, problem::NPDemand.NPDProblem) where T
+    prior   = problem.sampling_details.prior;
+    betabar = prior["betabar"]
+
+    betabar         = prior["betabar"]
+    gammabar        = prior["gammabar"]
+    vbeta           = prior["vbeta"]
+    vgamma          = prior["vgamma"]    
+    lbs             = prior["lbs"]
+    parameter_order = prior["parameter_order"]
+    nbetas          = prior["nbetas"]
+
+    # betastar ~ MvNormal(betabar, diagm(vbeta))
+    # gamma ~ MvNormal(gammabar, vgamma*diagm(ones(gamma_length-1)));
+    # @show size(problem.sampling_details.prior["betabar"]) size(particle_betastar)
+    # @show size(diagm(vbeta))
+    # @show logpdf(MvNormal(betabar, diagm(vbeta)), dropdims(particle_betastar, dims=1))
+    # @show logpdf(MvNormal(gammabar, vgamma*diagm(ones(size(particle_gamma,1)))), particle_gamma)
+    original_prior = logpdf(MvNormal(betabar, diagm(vbeta)), reshape(particle_betastar, length(particle_betastar))) + logpdf(MvNormal(gammabar, vgamma*diagm(ones(size(particle_gamma,1)))), particle_gamma)
+
+    particle_beta = NPDemand.reparameterization_draws(reshape(particle_betastar,1,sum(nbetas)), lbs, parameter_order);
     particle = NPDemand.map_to_sieve(particle_beta, particle_gamma, problem.exchange, nbetas, problem);
+
     D = report_constraint_violations(problem, params = particle, verbose = false, output = "count");
     
     distance = D; 
-    penalized_prior = 1 * sum(log.(cdf.(Normal(0,1), -1 * penalty * distance)));
+    penalty_prior = 1 * sum(log.(cdf.(Normal(0,1), -1 * penalty * distance)));
 
-    return penalized_prior
+    return penalty_prior + original_prior
 end
 
-function loglikelihood(problem::NPDemand.NPDProblem, particle_beta::Vector{T}, particle_gamma::Vector{T}, nbetas) where T
+function loglikelihood(problem::NPDemand.NPDProblem, particle_betastar::Vector{T}, particle_gamma::Vector{T}, nbetas) where T
+    nbetas = NPDemand.get_nbetas(problem)
+    lbs = NPDemand.get_lower_bounds(problem)
+    parameter_order = NPDemand.get_parameter_order(lbs)
+    particle_beta = NPDemand.reparameterization_draws(reshape(particle_betastar,1,sum(nbetas)), lbs, parameter_order);
+
     x = NPDemand.map_to_sieve(particle_beta, particle_gamma, problem.exchange, nbetas, problem);
     return -0.5 * gmm(x, problem, problem.weight_matrices)
 end

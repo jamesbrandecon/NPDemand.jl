@@ -321,7 +321,7 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
         # calculate posterior mean parameters
         qpm = map_to_sieve(mean(betadraws, dims=1)', mean(gammadraws, dims=1)', problem.exchange, nbetas, problem)
 
-        problem.sampling_details = (; burn_in = burn_in, skip = skip, smc = false)
+        problem.sampling_details = (; burn_in = burn_in, skip = skip, smc = false, prior = prior)
         problem.results  = NPD_parameters(qpm, hcat(betadraws, gammadraws));
         problem.chain    = chain;
     end
@@ -334,7 +334,8 @@ function smc!(problem::NPDemand.NPDProblem;
     step::Real          = 0.1, 
     skip::Int           = 5,
     burn_in::Real       = 0.25, 
-    mh_steps            = 10)
+    mh_steps            = 10,
+    seed                = 4132)
 
     burn_in_int = Int(burn_in * size(problem.chain,1));
 
@@ -346,7 +347,8 @@ function smc!(problem::NPDemand.NPDProblem;
         step_size      = step, 
         skip           = skip,
         burn_in        = burn_in_int, 
-        mh_steps       = mh_steps);
+        mh_steps       = mh_steps,
+        seed           = seed);
     
     # Calculate new posterior mean and replace problem results 
     lbs             = get_lower_bounds(problem)
@@ -363,5 +365,5 @@ function smc!(problem::NPDemand.NPDProblem;
     problem.results.minimizer       = mean(thetas_sieve, StatsBase.weights(problem.smc_results.smc_weights), dims = 1);
     problem.results.filtered_chain  = hcat(betas, gammas)
     problem.sampling_details        = (; burn_in = burn_in, 
-        skip = skip, smc = true);
+        skip = skip, smc = true, prior = problem.sampling_details.prior);
 end
