@@ -379,7 +379,8 @@ function smc(problem::NPDemand.NPDProblem;
     step_size::Real     = 0.1, 
     skip::Int           = 5,
     burn_in::Int        = 5000, 
-    mh_steps            = 10, 
+    mh_steps            = 10,
+    smc_method          = :grid, 
     seed                = 4132)
 
     # Define inputs to quasi-bayes sampling 
@@ -434,44 +435,52 @@ function smc(problem::NPDemand.NPDProblem;
 
     viol_store = [];
     ess_store  = [];
-    Sigma = cov(thetas); # covariance matrix parameters, used to improve proposals
+    penalty_vec = [];
     
     Random.seed!(seed)
-    while (t < length(penalty)) & (violation_dict[:any] > 0.01)
+    prev_penalty = 0;
+    new_penalty  = 1e-6;
+    penalty_list = geometric_grid(1e-3, Float64.(max_penalty), Int(grid_points));
+    
+    f_ess(p, current_thetas) = (1 / sum(get_importance_weights(current_thetas, smc_weights, prev_penalty, p[1], problem, nbeta, lbs, parameter_order).^2));
+
+    while (violation_dict[:any] > 0.01) #& (t < length(penalty))
         t = t+1
         print("\n Iteration "*string(t-1)*"...\r")
-    
-        # 3.1 Calculate importance weights
-        new_weights = similar(smc_weights)
-        for i in axes(thetas,1)
-            particle_i          = thetas[i,:];
-            betastar_i          = particle_i[1:nbeta];
-
-            beta_i              = NPDemand.reparameterization_draws(reshape(betastar_i,1,nbeta), lbs, parameter_order);
-            gamma_i             = particle_i[(nbeta+1):end];
-
-            logprior_t          = logprior_smc(beta_i, gamma_i, penalty[t], problem);
-            logprior_t_minus_1  = logprior_smc(beta_i, gamma_i, penalty[t-1], problem);
-
-            prior_ratio         = exp(logprior_t - logprior_t_minus_1)
-            new_weights[i]      = smc_weights[i] * prior_ratio
+        
+        if (smc_method == :adaptive) & (t > 2)
+            # println("\n Previous ESS: ", round(f_ess(prev_penalty, thetas), digits = 2))
+            # Solve for next step penalty
+            print("\n Optimizing penalty... \n")
+            new_penalty = NLsolve.nlsolve(x -> (ess_threshold - f_ess(x, thetas)), [prev_penalty], show_trace = true).zero[1]
+            # print("\n New penalty: $(round(new_penalty, digits = 4))")
+            
+            # Calculate normalized importance weights
+            smc_weights = get_importance_weights(thetas, smc_weights, prev_penalty, new_penalty, problem, nbeta, lbs, parameter_order)
+        else
+            new_penalty = penalty_list[t]
+            # Calculate normalized importance weights
+            smc_weights = get_importance_weights(thetas, smc_weights, prev_penalty, new_penalty, problem, nbeta, lbs, parameter_order)
+            ESS = f_ess([new_penalty], thetas)
+            push!(ess_store, ESS)
+            if ESS < ess_threshold
+                print("\n ESS below threshold -- Re-sampling")
+                indices = wsample(1:nparticles, smc_weights, nparticles)
+                thetas = thetas[indices,:]
+                smc_weights .= 1.0 / nparticles
+            end
         end
-        
-        # 3.2 Normalize weights
-        smc_weights = new_weights ./ sum(new_weights)
-        
-        # 3.3 Check ESS and resample if necessary
-        ESS = 1 / sum(smc_weights.^2)
-        push!(ess_store, ESS)
-        if ESS < ess_threshold
-            print("\n ESS below threshold -- Re-sampling")
-            indices = wsample(1:nparticles, smc_weights, nparticles)
-            thetas = thetas[indices,:]
-            smc_weights .= 1.0 / nparticles
-        end
-        
+
         # 3.4 Perturb particles via MH step(s)
         n_accept = zeros(nparticles);
+        Sigma = cov(thetas); # covariance matrix parameters, used to improve proposals
+        Sigma = Sigma .* 2.38^2 ./ size(Sigma,1); # scale covariance matrix
+        try 
+            cholesky(Sigma)
+        catch
+            @warn "Covariance matrix is not positive definite. Using identity matrix instead. You may wish to increase `grid_points`."
+            Sigma = diagm(ones(size(Sigma,1)))
+        end
         print("\n Metropolis-Hasting steps: ") 
         for mh_iter in 1:mh_steps
             for i in axes(thetas,1)
@@ -491,14 +500,13 @@ function smc(problem::NPDemand.NPDProblem;
                     n_accept[i] += 1
                 end
             end
-            print("$mh_iter..")
+            print("$(Int(mh_iter))..")
         end
         n_accept = n_accept ./ mh_steps
         accept_rate = round(mean(n_accept), digits = 2);
         println("\n Average MH acceptance rate: $(accept_rate)")
-        # println("Acceptance rate: "*string(n_accept/nparticles))
 
-        # thetas = thetas .+ rand(step_size.*Normal(0,1), nparticles, nbeta + 1)
+        # Reparameterize and reshape the vector to fit the sieve
         betas = NPDemand.reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
         thetas_sieve = vcat([NPDemand.map_to_sieve(betas[i,:], thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
     
@@ -518,12 +526,41 @@ function smc(problem::NPDemand.NPDProblem;
         end
         push!(viol_store, violation_dict[:any])
         
+        push!(penalty_vec, new_penalty)
+        prev_penalty = new_penalty;
+
         display(violation_dict)
         println("Increasing penalty") 
     end
 
-    return (; thetas, smc_weights, violations = viol_store, ess = ess_store);
+    return (; thetas, smc_weights, violations = viol_store, ess = ess_store, penalties = penalty_vec);
 end
+
+function get_importance_weights(thetas, smc_weights, penalty_prev, penalty_new, problem, nbeta, lbs, parameter_order)
+    new_weights = similar(smc_weights)
+    for i in axes(thetas,1)
+        particle_i          = thetas[i,:];
+        betastar_i          = particle_i[1:nbeta];
+
+        beta_i              = NPDemand.reparameterization_draws(reshape(betastar_i,1,nbeta), lbs, parameter_order);
+        gamma_i             = particle_i[(nbeta+1):end];
+
+        logprior_t          = logprior_smc(beta_i, gamma_i, penalty_new, problem);
+        logprior_t_minus_1  = logprior_smc(beta_i, gamma_i, penalty_prev, problem);
+
+        prior_ratio         = exp(logprior_t - logprior_t_minus_1)
+        new_weights[i]      = smc_weights[i] * prior_ratio
+    end
+    
+    return new_weights ./ sum(new_weights)
+end
+
+function geometric_grid(A::Float64, B::Float64, n::Int)
+    r = (B / A)^(1 / (n - 1))  # Common ratio for geometric progression
+    grid = [A * r^(i - 1) for i in 1:n]
+    return grid
+end
+
 
 function logprior_smc(particle_betastar::Array{T}, particle_gamma::Array{T}, penalty::Real, problem::NPDemand.NPDProblem) where T
     prior   = problem.sampling_details.prior;
@@ -537,31 +574,26 @@ function logprior_smc(particle_betastar::Array{T}, particle_gamma::Array{T}, pen
     parameter_order = prior["parameter_order"]
     nbetas          = prior["nbetas"]
 
-    # betastar ~ MvNormal(betabar, diagm(vbeta))
-    # gamma ~ MvNormal(gammabar, vgamma*diagm(ones(gamma_length-1)));
-    # @show size(problem.sampling_details.prior["betabar"]) size(particle_betastar)
-    # @show size(diagm(vbeta))
-    # @show logpdf(MvNormal(betabar, diagm(vbeta)), dropdims(particle_betastar, dims=1))
-    # @show logpdf(MvNormal(gammabar, vgamma*diagm(ones(size(particle_gamma,1)))), particle_gamma)
-    original_prior = logpdf(MvNormal(betabar, diagm(vbeta)), reshape(particle_betastar, length(particle_betastar))) + logpdf(MvNormal(gammabar, vgamma*diagm(ones(size(particle_gamma,1)))), particle_gamma)
+    original_prior  = logpdf(MvNormal(betabar, diagm(vbeta)), reshape(particle_betastar, length(particle_betastar))) + logpdf(MvNormal(gammabar, vgamma*diagm(ones(size(particle_gamma,1)))), particle_gamma)
 
-    particle_beta = NPDemand.reparameterization_draws(reshape(particle_betastar,1,sum(nbetas)), lbs, parameter_order);
-    particle = NPDemand.map_to_sieve(particle_beta, particle_gamma, problem.exchange, nbetas, problem);
+    particle_beta   = NPDemand.reparameterization_draws(reshape(particle_betastar,1,sum(nbetas)), lbs, parameter_order);
+    particle        = NPDemand.map_to_sieve(particle_beta, particle_gamma, problem.exchange, nbetas, problem);
 
-    D = report_constraint_violations(problem, params = particle, verbose = false, output = "count");
+    D               = report_constraint_violations(problem, params = particle, verbose = false, output = "count");
     
-    distance = D; 
-    penalty_prior = 1 * sum(log.(cdf.(Normal(0,1), -1 * penalty * distance)));
+    distance        = D; 
+    penalty_prior   = 1 * sum(log.(cdf.(Normal(0,1), -1 * penalty * distance)));
 
-    return penalty_prior + original_prior
+    return penalty_prior + original_prior # both are in log scale
 end
 
 function loglikelihood(problem::NPDemand.NPDProblem, particle_betastar::Vector{T}, particle_gamma::Vector{T}, nbetas) where T
-    nbetas = NPDemand.get_nbetas(problem)
-    lbs = NPDemand.get_lower_bounds(problem)
+    nbetas          = NPDemand.get_nbetas(problem)
+    lbs             = NPDemand.get_lower_bounds(problem)
     parameter_order = NPDemand.get_parameter_order(lbs)
-    particle_beta = NPDemand.reparameterization_draws(reshape(particle_betastar,1,sum(nbetas)), lbs, parameter_order);
+    particle_beta   = NPDemand.reparameterization_draws(reshape(particle_betastar,1,sum(nbetas)), lbs, parameter_order);
 
     x = NPDemand.map_to_sieve(particle_beta, particle_gamma, problem.exchange, nbetas, problem);
+   
     return -0.5 * gmm(x, problem, problem.weight_matrices)
 end

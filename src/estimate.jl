@@ -334,7 +334,7 @@ function smc!(problem::NPDemand.NPDProblem;
     step::Real          = 0.1, 
     skip::Int           = 5,
     burn_in::Real       = 0.25, 
-    mh_steps            = 10,
+    mh_steps            = max(5, floor(size(problem.results.filtered_chain, 2))/10),
     seed                = 4132)
 
     burn_in_int = Int(burn_in * size(problem.chain,1));
