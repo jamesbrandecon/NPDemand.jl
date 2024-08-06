@@ -335,7 +335,8 @@ function smc!(problem::NPDemand.NPDProblem;
     skip::Int           = 5,
     burn_in::Real       = 0.25, 
     mh_steps            = max(5, floor(size(problem.results.filtered_chain, 2))/10),
-    seed                = 4132)
+    seed                = 4132,
+    smc_method          = :grid)
 
     burn_in_int = Int(burn_in * size(problem.chain,1));
 
@@ -348,7 +349,8 @@ function smc!(problem::NPDemand.NPDProblem;
         skip           = skip,
         burn_in        = burn_in_int, 
         mh_steps       = mh_steps,
-        seed           = seed);
+        seed           = seed,
+        smc_method     = smc_method);
     
     # Calculate new posterior mean and replace problem results 
     lbs             = get_lower_bounds(problem)

@@ -51,7 +51,7 @@ end
 function inner_elast_loop(dsids_i::Matrix{T}, J::Int, at::Vector{Float64}, svec::Vector{Float64}; type::String = "jacobian") where T
     
     J_s = [dsids_i[j1,j2] for j1 in 1:J, j2 in 1:J]
-    temp = -1*inv(J_s);
+    temp = -1*pinv(J_s);
 
     if type == "jacobian"
         return temp 
@@ -440,11 +440,18 @@ function smc(problem::NPDemand.NPDProblem;
     Random.seed!(seed)
     prev_penalty = 0;
     new_penalty  = 1e-6;
-    penalty_list = geometric_grid(1e-3, Float64.(max_penalty), Int(grid_points));
+    x_pen = range(1e-3, Float64.(max_penalty), length = Int(grid_points)); 
+    if smc_method == :linear_grid
+        penalty_list = x_pen;
+    elseif smc_method == :logit_grid
+        penalty_list = maximum(x_pen) ./ (1 .+ exp.(-2 .*(x_pen .- median(x_pen))));
+    elseif smc_method == :geometric_grid
+        penalty_list = geometric_grid(1e-3, Float64.(max_penalty), Int(grid_points));
+    end
     
     f_ess(p, current_thetas) = (1 / sum(get_importance_weights(current_thetas, smc_weights, prev_penalty, p[1], problem, nbeta, lbs, parameter_order).^2));
 
-    while (violation_dict[:any] > 0.01) #& (t < length(penalty))
+    while (violation_dict[:any] > 0.01) & ((t < length(penalty)) | (smc_method == :adaptive))
         t = t+1
         print("\n Iteration "*string(t-1)*"...\r")
         
@@ -453,11 +460,17 @@ function smc(problem::NPDemand.NPDProblem;
             # Solve for next step penalty
             print("\n Optimizing penalty... \n")
             new_penalty = NLsolve.nlsolve(x -> (ess_threshold - f_ess(x, thetas)), [prev_penalty], show_trace = true).zero[1]
+            new_penalty = new_penalty < prev_penalty ? prev_penalty*1.01 : new_penalty
             # print("\n New penalty: $(round(new_penalty, digits = 4))")
             
             # Calculate normalized importance weights
             smc_weights = get_importance_weights(thetas, smc_weights, prev_penalty, new_penalty, problem, nbeta, lbs, parameter_order)
-        else
+
+            # Always resample under adaptive approach
+            indices = wsample(1:nparticles, smc_weights, nparticles)
+            thetas = thetas[indices,:]
+            smc_weights .= 1.0 / nparticles
+        elseif t>2
             new_penalty = penalty_list[t]
             # Calculate normalized importance weights
             smc_weights = get_importance_weights(thetas, smc_weights, prev_penalty, new_penalty, problem, nbeta, lbs, parameter_order)
@@ -470,6 +483,8 @@ function smc(problem::NPDemand.NPDProblem;
                 smc_weights .= 1.0 / nparticles
             end
         end
+        
+        push!(penalty_vec, new_penalty)
 
         # 3.4 Perturb particles via MH step(s)
         n_accept = zeros(nparticles);
@@ -487,8 +502,8 @@ function smc(problem::NPDemand.NPDProblem;
                 # proposal = thetas[i,:] + rand(step_size.*Normal(0,1), size(thetas[i,:]))
                 proposal = thetas[i,:] + rand(MvNormal(zeros(length(thetas[1,:])),step_size .* Sigma))
 
-                logprior_proposal   = logprior_smc(proposal[1:nbeta], proposal[(nbeta+1):end], penalty[t], problem)
-                logprior_theta      = logprior_smc(thetas[i,1:nbeta], thetas[i,(nbeta+1):end], penalty[t], problem)
+                logprior_proposal   = logprior_smc(proposal[1:nbeta], proposal[(nbeta+1):end], new_penalty, problem)
+                logprior_theta      = logprior_smc(thetas[i,1:nbeta], thetas[i,(nbeta+1):end], new_penalty, problem)
                 
                 loglik_proposal     = loglikelihood(problem, proposal[1:nbeta], proposal[nbeta+1:end], nbetas)
                 loglik_theta        = loglikelihood(problem, thetas[i,1:nbeta], thetas[i,nbeta+1:end], nbetas)
