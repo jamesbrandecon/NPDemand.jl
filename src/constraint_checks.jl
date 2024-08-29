@@ -19,9 +19,9 @@ function report_constraint_violations(problem;
 
     # Monotonicity
     if :monotone in problem.constraints
-        monotone_satisfied = [all(diag(reshaped_jacobians[:,:,i]) .<=0) for i in 1:size(reshaped_jacobians,3)];
+        monotone_satisfied = [all(diag(reshaped_jacobians[:,:,i]) .<=0) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& monotone_satisfied;
-        num_violated_per_market = num_violated_per_market .+ (1 .- Int.(monotone_satisfied));
+        num_violated_per_market .+= (1 .- monotone_satisfied);
         frac_monotone_violations = round(1 - mean(monotone_satisfied), digits = 2);
         verbose && println("Fraction of violations of :monotonicity: $frac_monotone_violations")
         push!(violations, :monotone => frac_monotone_violations)
@@ -29,9 +29,9 @@ function report_constraint_violations(problem;
     
     # All substitutes
     if :all_substitutes in problem.constraints
-        all_subs_satisfied = [check_all_subs(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
+        all_subs_satisfied = [check_all_subs(reshaped_jacobians[:,:,i]) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& all_subs_satisfied;
-        num_violated_per_market = num_violated_per_market .+ (1 .- Int.(all_subs_satisfied));
+        num_violated_per_market .+= (1 .- all_subs_satisfied);
         frac_all_subs_violations = round(1 - mean(all_subs_satisfied), digits = 2);
         verbose && println("Fraction of violations of :all_substitutes: $frac_all_subs_violations")
         push!(violations, :all_substitutes => frac_all_subs_violations)
@@ -39,9 +39,9 @@ function report_constraint_violations(problem;
 
     # Diagonal dominance
     if :diagonal_dominance_all in problem.constraints
-        diag_dom_satisfied = [check_diagonal_dominance(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
+        diag_dom_satisfied = [check_diagonal_dominance(reshaped_jacobians[:,:,i]) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& diag_dom_satisfied;
-        num_violated_per_market = num_violated_per_market .+ (1 .- Int.(diag_dom_satisfied));
+        num_violated_per_market .+= (1 .- diag_dom_satisfied);
         frac_diag_dom_violations = round(1 - mean(diag_dom_satisfied), digits = 2);
         verbose && println("Fraction of violations of :diagonal_dominance_all: $frac_diag_dom_violations")
         push!(violations, :diagonal_dominance_all => frac_diag_dom_violations)
@@ -49,9 +49,9 @@ function report_constraint_violations(problem;
 
     # Substitutes within group
     if :subs_in_group in problem.constraints
-        subs_in_group_satisfied = [check_subs_in_group(reshaped_jacobians[:,:,i], problem.exchange) for i in 1:size(reshaped_jacobians,3)];
+        subs_in_group_satisfied = [check_subs_in_group(reshaped_jacobians[:,:,i], problem.exchange) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& subs_in_group_satisfied;
-        num_violated_per_market = num_violated_per_market .+ (1 .- Int.(subs_in_group_satisfied))
+        num_violated_per_market .+= (1 .- subs_in_group_satisfied)
         frac_subs_in_group_violations = round(1 - mean(subs_in_group_satisfied), digits = 2);
         verbose && println("Fraction of violations of :subs_in_group: $frac_subs_in_group_violations")
         push!(violations, :subs_in_group => frac_subs_in_group_violations)
@@ -59,9 +59,9 @@ function report_constraint_violations(problem;
 
     # Substitutes across group
     if :subs_across_group in problem.constraints
-        subs_across_group_satisfied = [check_subs_across_group(reshaped_jacobians[:,:,i], problem.exchange) for i in 1:size(reshaped_jacobians,3)];
+        subs_across_group_satisfied = [check_subs_across_group(reshaped_jacobians[:,:,i], problem.exchange) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& subs_across_group_satisfied;
-        num_violated_per_market = num_violated_per_market .+ (1 .- Int.(subs_across_group_satisfied))
+        num_violated_per_market .+= (1 .- subs_across_group_satisfied)
         frac_subs_across_group_violations = round(1 - mean(subs_across_group_satisfied), digits = 2);
         verbose && println("Fraction of violations of :subs_across_group: $frac_subs_across_group_violations")
         push!(violations, :subs_across_group => frac_subs_across_group_violations)
@@ -69,9 +69,9 @@ function report_constraint_violations(problem;
 
     # All complements
     if :all_complements in problem.constraints
-        all_comps_satisfied = [check_all_complements(reshaped_jacobians[:,:,i]) for i in 1:size(reshaped_jacobians,3)];
+        all_comps_satisfied = [check_all_complements(reshaped_jacobians[:,:,i]) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& all_comps_satisfied;
-        num_violated_per_market = num_violated_per_market .+ (1 .- Int.(all_comps_satisfied))
+        num_violated_per_market .+= (1 .- all_comps_satisfied)
         frac_all_comps_violations = round(1 - mean(all_comps_satisfied), digits = 2);
         verbose && println("Fraction of violations of :all_complements: $frac_all_comps_violations")
         push!(violations, :all_complements => frac_all_comps_violations)
@@ -79,9 +79,9 @@ function report_constraint_violations(problem;
 
     # Complements within group
     if :complements_in_group in problem.constraints
-        complements_in_group_satisfied = [check_comps_in_group(reshaped_jacobians[:,:,i], problem.exchange) for i in 1:size(reshaped_jacobians,3)];
+        complements_in_group_satisfied = [check_comps_in_group(reshaped_jacobians[:,:,i], problem.exchange) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& complements_in_group_satisfied;
-        num_violated_per_market = num_violated_per_market .+ (1 .- Int.(complements_in_group_satisfied))
+        num_violated_per_market .+= (1 .- complements_in_group_satisfied)
         frac_complements_in_group_violations = round(1 - mean(complements_in_group_satisfied), digits = 2);
         verbose && println("Fraction of violations of :complements_in_group: $frac_complements_in_group_violations")
         push!(violations, :complements_in_group => frac_complements_in_group_violations)
@@ -89,9 +89,9 @@ function report_constraint_violations(problem;
 
     # Complements across group
     if :complements_across_group in problem.constraints
-        complements_across_group_satisfied = [check_comps_across_group(reshaped_jacobians[:,:,i], problem.exchange) for i in 1:size(reshaped_jacobians,3)];
+        complements_across_group_satisfied = [check_comps_across_group(reshaped_jacobians[:,:,i], problem.exchange) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& complements_across_group_satisfied;
-        num_violated_per_market = num_violated_per_market .+ (1 .- Int.(complements_across_group_satisfied))
+        num_violated_per_market .+= (1 .- complements_across_group_satisfied)
         frac_complements_across_group_violations = round(1 - mean(complements_across_group_satisfied), digits = 2);
         verbose && println("Fraction of violations of :complements_across_group: $frac_complements_across_group_violations")
         push!(violations, :complements_across_group => frac_complements_across_group_violations)
@@ -103,7 +103,7 @@ function report_constraint_violations(problem;
     if output == "dict"
         return violations
     elseif output == "count"
-        num_violated_per_market
+        return Int.(num_violated_per_market)
     else
         return Float64::violations[:any]
     end
@@ -112,20 +112,22 @@ end
 function run_elasticity_check(elasts, constraints, exchange)
     elasticity_check = true;
 
-    if :monotone in constraints
-        elasticity_check = all([all(elasts[i,i,:] .<=0) for i in 1:size(elasts,1)]);
-    end
-    if :all_substitutes in constraints
-        elasticity_check = elasticity_check & (all([check_all_subs(elasts[:,:,i]) for i in 1:size(elasts,3)]));
-    end
-    if :diagonal_dominance_all in constraints
-        elasticity_check = elasticity_check & (all([check_diagonal_dominance(elasts[:,:,i]) for i in 1:size(elasts,3)]));
-    end
-    if :subs_in_group in constraints 
-        elasticity_check = elasticity_check & all([check_subs_in_group(elasts[:,:,i], exchange) for i in 1:size(elasts,3)]);
-    end
-    if :complements_across_group in constraints 
-        elasticity_check = elasticity_check & all([check_comps_across_group(elasts[:,:,i], exchange) for i in 1:size(elasts,3)]);
+    @views begin
+        if :monotone in constraints
+            elasticity_check = all([all(elasts[i,i,:] .<=0) for i in axes(elasts,1)]);
+        end
+        if :all_substitutes in constraints
+            elasticity_check = elasticity_check & (all([check_all_subs(elasts[:,:,i]) for i in axes(elasts,3)]));
+        end
+        if :diagonal_dominance_all in constraints
+            elasticity_check = elasticity_check & (all([check_diagonal_dominance(elasts[:,:,i]) for i in axes(elasts,3)]));
+        end
+        if :subs_in_group in constraints 
+            elasticity_check = elasticity_check & all([check_subs_in_group(elasts[:,:,i], exchange) for i in axes(elasts,3)]);
+        end
+        if :complements_across_group in constraints 
+            elasticity_check = elasticity_check & all([check_comps_across_group(elasts[:,:,i], exchange) for i in axes(elasts,3)]);
+        end
     end
 
     return elasticity_check

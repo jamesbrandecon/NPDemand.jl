@@ -336,21 +336,31 @@ function smc!(problem::NPDemand.NPDProblem;
     burn_in::Real       = 0.25, 
     mh_steps            = max(5, floor(size(problem.results.filtered_chain, 2))/10),
     seed                = 4132,
-    smc_method          = :grid)
+    smc_method          = :adaptive,
+    max_iter            = 1000,
+    adaptive_tolerance  = false)
+
+    try 
+        @assert smc_method ∈ [:adaptive, :linear_grid, :geometric_grid, :logit_grid]
+    catch
+        error("`smc_method` must be one of [:adaptive, :linear_grid, :geometric_grid, :logit_grid]")
+    end
 
     burn_in_int = Int(burn_in * size(problem.chain,1));
 
     # Add smc_results to problem
     problem.smc_results = smc(problem::NPDemand.NPDProblem; 
-        grid_points    = grid_points, 
-        max_penalty    = max_penalty, 
-        ess_threshold  = ess_threshold, 
-        step_size      = step, 
-        skip           = skip,
-        burn_in        = burn_in_int, 
-        mh_steps       = mh_steps,
-        seed           = seed,
-        smc_method     = smc_method);
+        grid_points         = grid_points, 
+        max_penalty         = max_penalty, 
+        ess_threshold       = ess_threshold, 
+        step_size           = step, 
+        skip                = skip,
+        burn_in             = burn_in_int, 
+        mh_steps            = mh_steps,
+        seed                = seed,
+        smc_method          = smc_method, 
+        max_iter            = max_iter, 
+        adaptive_tolerance  = adaptive_tolerance);
     
     # Calculate new posterior mean and replace problem results 
     lbs             = get_lower_bounds(problem)

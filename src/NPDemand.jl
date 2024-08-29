@@ -10,6 +10,8 @@ using Random
 
 using Zygote
 using Turing, AdvancedMH
+using Roots: find_zero, Bisection
+using ProgressBars: ProgressBar
 
 include("simulate_logit.jl")
 include("toDataFrame.jl")
