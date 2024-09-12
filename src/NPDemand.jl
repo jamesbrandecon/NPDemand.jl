@@ -13,6 +13,8 @@ using Turing, AdvancedMH
 using Roots: find_zero, Bisection
 using ProgressBars: ProgressBar
 
+using Printf
+
 include("simulate_logit.jl")
 include("toDataFrame.jl")
 include("b.jl")

@@ -338,7 +338,8 @@ function smc!(problem::NPDemand.NPDProblem;
     seed                = 4132,
     smc_method          = :adaptive,
     max_iter            = 1000,
-    adaptive_tolerance  = false)
+    adaptive_tolerance  = false, 
+    max_violations      = 0.01)
 
     try 
         @assert smc_method ∈ [:adaptive, :linear_grid, :geometric_grid, :logit_grid]
@@ -360,7 +361,8 @@ function smc!(problem::NPDemand.NPDProblem;
         seed                = seed,
         smc_method          = smc_method, 
         max_iter            = max_iter, 
-        adaptive_tolerance  = adaptive_tolerance);
+        adaptive_tolerance  = adaptive_tolerance, 
+        max_violations      = max_violations);
     
     # Calculate new posterior mean and replace problem results 
     lbs             = get_lower_bounds(problem)

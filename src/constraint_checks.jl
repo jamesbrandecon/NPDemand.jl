@@ -2,6 +2,59 @@ function report_constraint_violations(problem;
     verbose = true,
     params = [], 
     output = "dict")
+    if (params ==[]) & (problem.chain == [])
+        param_vec = problem.results.minimizer;
+    elseif (params == []) 
+        start_row       = Int(problem.sampling_details.burn_in *size(problem.chain,1)) + 1;
+        skiplen         = problem.sampling_details.skip;
+        gamma_length    = size(problem.Bvec[1],2);
+
+        particles       = problem.chain;
+        nbetas          = NPDemand.get_nbetas(problem);
+        lbs             = NPDemand.get_lower_bounds(problem);
+        parameter_order = NPDemand.get_parameter_order(lbs);
+        nbeta           = length(lbs)
+        
+        betastardraws   = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
+        betadraws       = NPDemand.reparameterization_draws(betastardraws, lbs, parameter_order)
+        gammadraws      = hcat([particles["gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]
+
+        # thin the markov chain
+        L               = size(betastardraws,1);
+        skip_inds       = 1:skiplen:L
+        betadraws       = betadraws[skip_inds,:];
+        gammadraws      = gammadraws[skip_inds,:];
+        betastardraws   = betastardraws[skip_inds,:];
+        nparticles      = size(betastardraws,1);
+
+        # Format parameter vec 
+        thetas          = [betastardraws gammadraws]
+        betas           = reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
+        thetas_sieve    = vcat([map_to_sieve(betas[i,:], gammadraws[i,:], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+        param_vec       = thetas_sieve; # thinned chain
+    else 
+        param_vec = params;
+    end
+
+    if length(size(param_vec)) == 1
+        violations = report_constraint_violations_inner(problem, verbose = verbose, params = param_vec, output = output)
+    else 
+        violation_dict_array = [
+        report_constraint_violations_inner(problem, 
+            params = param_vec[i,:], verbose = false) for i in axes(param_vec,1)
+        ];
+        violations = Dict{Symbol, Float64}()
+        for k in keys(violation_dict_array[1])
+            push!(violations, k => mean([violation_dict_array[i][k] for i in axes(param_vec,1)]));
+        end
+    end
+    return violations
+end
+
+function report_constraint_violations_inner(problem;
+    verbose = true,
+    params = [], 
+    output = "dict")
 
     J = length(problem.Xvec)
 
@@ -99,11 +152,14 @@ function report_constraint_violations(problem;
 
     any_violations = 1 - mean(all_satisfied);
     push!(violations, :any => round(any_violations, digits = 2))
-
+    # GC.safepoint()
+    # GC.gc()
     if output == "dict"
         return violations
     elseif output == "count"
         return Int.(num_violated_per_market)
+    elseif output == "frac"
+        return num_violated_per_market/length(problem.constraints)
     else
         return Float64::violations[:any]
     end
