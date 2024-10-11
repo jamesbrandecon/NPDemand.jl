@@ -1,4 +1,3 @@
-
 """
     list_constraints()
 
@@ -59,16 +58,15 @@ function define_problem(df::DataFrame; exchange::Vector = [],
 
     # Check to make all constraints are valid
     for con ∈ constraints
-        if con ∉ [:monotone, :all_substitutes,
-            :all_substitutes_nonlinear, 
+        if con ∉ [:monotone, :all_substitutes, 
             :diagonal_dominance_group, :diagonal_dominance_all, 
             :exchangeability, :subs_in_group,
             :complements_across_group, :subs_across_group, 
-            :complements_in_group, :monotone_nonlinear]
+            :complements_in_group]
             error("Constraint $con not recognized. Valid constraints include: 
             :monotone, :all_substitutes, :diagonal_dominance_group, :diagonal_dominance_all, 
             :exchangeability, :subs_in_group, :complements_across_group, :subs_across_group,
-            :complements_in_group, :all_substitutes_nonlinear")
+            :complements_in_group")
         end
     end
 

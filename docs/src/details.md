@@ -37,7 +37,7 @@ Although one could make other reasonable choices for approximating $\sigma^{-1}_
 
 Whenever you run `define_problem`, we generate two Bernstein polynomials. The first is in market shares, and serves as the design matrix for the NPIV regression. The second is in the vector of instruments. 
 
-## Estimation
+## GMM Estimation
 The estimation problem takes the following form: 
 
 ```math
@@ -67,14 +67,6 @@ rely on a generic unconstrained optimizer (LBFGS in Optim.jl) to solve the probl
 exchangeability imposed, we first solve the problem under exchangeability alone (no other constraints). We then use the solution to the unconstrained problem as a starting point, and re-solve 
 the problem with all constraints included in penalty terms. We solve this constrained problem repeatedly, increasing the magnitude of the penalty parameter each time, until either the constraints 
 are satisfied or the number of iterations surpasses the value of `max_outer_iterations` provided in the problem definition. 
-
-## Constraints
-One of the goals of our package was to build a structure that would allow for both linear and nonlinear constraints to be incorporated into nonparametric demand estimation. As a result, we do not rely on CVX (Convex.jl) or other linear solvers to solve our problem, even though with the appropriate constraints the problem we solve is well-behaved. Instead, for linear constraints, we solve the problem via LBFGS with analytic gradients (for both the objective function and gradients), and for nonlinear constraints we use Julia's autodiff capabilities 
-
-1. Solve the unconstrained problem
-    a. Note: the `:exchangeability` constraint is imposed in the construction of the `NPDProblem`, so the "unconstrained" step when `:exchangeability` is specified  
-2. Re-solve the problem with a penalty term which is quadratic in the distance to the constrained feasible space 
-3. Repeat (2), increasing the magnitude of the penalty term, until the constraints are satisfied. 
 
 ## Fixed Effects
 Fixed effects are estimated as parameters, not absorbed from the data. So, be careful including fixed effects with too many values, as this may both slow down the optimization and require more memory.

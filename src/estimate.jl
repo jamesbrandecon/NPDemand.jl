@@ -147,9 +147,6 @@ end
 To enforce constraints, we either minimize the minimum distance objective function directly using Convex.jl or estimate the problem via the quasi-bayes approach introduced in the NPDemand paper. 
 
 General options: 
-- `max_inner_iterations`: controls the number of inner iterations for each call to the optimizer via Optim.jl
-- `max_outer_iterations`: controls the number of total calls to Optim, i.e., the number of times the penalty enforcing the constraints will increase before exiting
-- `show_trace`: if `true`, Optim will print the trace for each outer iteration. 
 - `verbose`: if `false`, will reduce the amount of updates printed during estimation
 - `linear_solver`: controls the solver to use in JuMP. Options: Ipopt or OSQP
 
@@ -162,9 +159,7 @@ Options for Quasi-Bayes methods:
 - `penalty` (default Inf): controls extent to which constraints are enforced. Default (Inf) is to strictly enforce them. Smaller numbers penalize violations less, and zero will only enforce the constraints linearly
 - `step`: step size for Metropolis-Hastings or HMC sampler
 """
-function estimate!(problem::NPDProblem; max_inner_iterations = 10000, 
-    max_outer_iterations = 100, 
-    show_trace = false, 
+function estimate!(problem::NPDProblem;
     verbose = true,
     linear_solver = "Ipopt", 
     quasi_bayes = false,
@@ -327,6 +322,28 @@ function estimate!(problem::NPDProblem; max_inner_iterations = 10000,
     end
 end
 
+"""
+smc!(problem::NPDemand.NPDProblem;
+        grid_points::Int    = 50, 
+        max_penalty::Real   = 5, 
+        ess_threshold::Real = 100, 
+        step::Real          = 0.1, 
+        skip::Int           = 5,
+        burn_in::Real       = 0.25, 
+        mh_steps            = max(5, floor(size(problem.results.filtered_chain, 2))/10),
+        seed                = 4132,
+        smc_method          = :adaptive,
+        max_iter            = 1000,
+        adaptive_tolerance  = false, 
+        max_violations      = 0.01)
+
+This function runs sequentially constrained Monte Carlo (SMC) on the problem. The function will overwrite the results in the problem object with the resulting chain.
+SMC requires a grid, which can either be chosen adaptively (`smc_method`=:adaptive) or pre-specified. A pre-specified grid can be chosen to be :linear, :geometric, or :logit, and the size of the grid is set via `grid_points`.
+
+For harder or slower problems, it may be necessary to increase the number of Metropolis-Hastings steps per iteration (`mh_steps`), the number of iterations (`max_iter`), or the maximum allowed fraction markets with violations (`max_violations`). 
+
+`burn_in` and `skip` control the number of samples to drop and the thinning of the chain, respectively.
+"""
 function smc!(problem::NPDemand.NPDProblem;
     grid_points::Int    = 50, 
     max_penalty::Real   = 5, 

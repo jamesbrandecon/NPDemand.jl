@@ -1,4 +1,39 @@
 ultra = true
+
+function gmm_fast(x::Matrix{T}, problem::NPDemand.NPDProblem, 
+    yZX::Vector{LinearAlgebra.Adjoint{Float64, Vector{Float64}}},
+    XZy::Vector{Vector{Float64}},
+    XX::Vector{Matrix{Float64}},
+    design_width::Int,
+    J::Int) where T<:Real
+
+    @views γ2 = x[design_width+2:end]; 
+    indexes = vcat(0,cumsum(size.(problem.Xvec,2)));
+    out = zero(eltype(x));
+    for i in 1:J
+        @views θi = [x[indexes[i]+1:indexes[i+1]];γ2];
+        out += -1 * yZX[i] * θi - θi' * XZy[i] + θi' * XX[i] * θi
+    end
+    return out[1]
+end
+
+function gmm(x::Matrix{T}, problem::NPDemand.NPDProblem, bigA::Vector{Matrix{Float64}}) where T<:Real
+    design_width::Int64 = problem.design_width;
+    Bvec::Vector{Matrix{Float64}} = problem.Bvec;
+    Xvec::Vector{Matrix{Float64}} = problem.Xvec;
+    Avec::Vector{Matrix{Float64}} = problem.Avec;
+    J::Int = length(Avec);
+    @views β = x[1:design_width];
+    @views γ = x[design_width+1:end];
+
+    indexes = vcat(0,cumsum(size.(Xvec,2)));
+    out = zero(T);
+    for i in 1:J
+        out += convert(T, (Bvec[i]*γ - Xvec[i] * β[(indexes[i]+1:indexes[i+1])])'*bigA[i]*(Bvec[i] * γ - Xvec[i] * β[indexes[i]+1:indexes[i+1]]))
+    end
+    return out
+end
+
 function md_obj(β::AbstractVector; df = [], exchange = [], X = [], B = [], A = [],
     m1=[], m2=[], m3=[], m4=[], m5=[], m6=[], m7=[], m8=[], m9=[], DWD=[], WX = [], WB = [],
     Aineq = [], Aeq = [], design_width = 1, mins = [], maxs = [], normalization = [], 
