@@ -2,19 +2,20 @@ function report_constraint_violations(problem;
     verbose = true,
     params = [], 
     output = "dict")
+
+    nbetas          = NPDemand.get_nbetas(problem);
+    lbs             = NPDemand.get_lower_bounds(problem);
+    parameter_order = NPDemand.get_parameter_order(lbs);
+    nbeta           = length(lbs);
+
     if (params ==[]) & (problem.chain == [])
         param_vec = problem.results.minimizer;
-    elseif (params == []) 
+    elseif (params == []) & (problem.sampling_details.smc == false)
         start_row       = Int(problem.sampling_details.burn_in *size(problem.chain,1)) + 1;
         skiplen         = problem.sampling_details.skip;
         gamma_length    = size(problem.Bvec[1],2);
 
-        particles       = problem.chain;
-        nbetas          = NPDemand.get_nbetas(problem);
-        lbs             = NPDemand.get_lower_bounds(problem);
-        parameter_order = NPDemand.get_parameter_order(lbs);
-        nbeta           = length(lbs)
-        
+        particles       = problem.chain;    
         betastardraws   = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
         betadraws       = NPDemand.reparameterization_draws(betastardraws, lbs, parameter_order)
         gammadraws      = hcat([particles["gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]
@@ -32,7 +33,13 @@ function report_constraint_violations(problem;
         betas           = reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
         thetas_sieve    = vcat([map_to_sieve(betas[i,:], gammadraws[i,:], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
         param_vec       = thetas_sieve; # thinned chain
-    else 
+    elseif problem.sampling_details.smc == true
+        particles       = problem.results.filtered_chain;
+        betas           = particles[:,1:nbeta];
+        gammadraws      = particles[:,nbeta+1:end];
+        thetas_sieve    = vcat([map_to_sieve(betas[i,:], gammadraws[i,:], problem.exchange, nbetas, problem) for i in 1:size(particles,1)]...)
+        param_vec       = thetas_sieve; # thinned chain
+    else  
         param_vec = params;
     end
 

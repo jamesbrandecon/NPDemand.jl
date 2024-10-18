@@ -395,7 +395,7 @@ function smc(problem::NPDemand.NPDProblem;
     # violation_dict = report_constraint_violations(problem, 
     #         params = mean(thetas_sieve, StatsBase.weights(smc_weights), dims = 1))
     violation_dict_array = [
-        report_constraint_violations(problem, 
+        report_constraint_violations_inner(problem, 
             params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)
     ];
     violation_dict = Dict{Symbol, Float64}()
