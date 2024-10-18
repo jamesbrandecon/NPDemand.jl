@@ -572,7 +572,7 @@ function smc(problem::NPDemand.NPDProblem;
         println(@sprintf("| %-30s | %.2f   |", "Average MH Acceptance rate", accept_rate))
         println("| Violations                     |        |")
         for (key, value) in violation_dict
-            println(@sprintf("| %-30s | %.3s  |", key, value))
+            println(@sprintf("| %-30s | %.3f  |", key, value))
         end
     end
 
