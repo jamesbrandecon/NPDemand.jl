@@ -8,7 +8,11 @@ makedocs(
     modules = [NPDemand],
     pages = [
         "index.md",
-        "Implementation Details" => "details.md",
+        "Implementation Details" => [
+            "Setup and GMM" => "details.md",
+            "Priors and Sampling Approach" => "priors.md",
+            "Constraints and SMC" => "constraints.md"
+        ],
         "Usage" => "usage.md",
         "Post-Estimation" => "postestimation.md",
         "Function Documentation" => "functions.md"
