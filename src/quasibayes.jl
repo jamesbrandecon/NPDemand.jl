@@ -567,7 +567,7 @@ function smc(problem::NPDemand.NPDProblem;
         println("|--------------------------------|--------|")
         println("| Iteration results              |        |")
         println("|--------------------------------|--------|")
-        println(@sprintf("| %-30s | %.2f   |", "Current Penalty", new_penalty))
+        println(@sprintf("| %-30s | %.4   |", "Current Penalty", new_penalty))
         println(@sprintf("| %-30s | %.2f |", "ESS", Int(floor(ess))))
         println(@sprintf("| %-30s | %.2f   |", "Average MH Acceptance rate", accept_rate))
         println("| Violations                     |        |")
