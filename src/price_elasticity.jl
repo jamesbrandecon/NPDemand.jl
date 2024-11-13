@@ -28,10 +28,14 @@ function price_elasticities!(problem;
         T       = size(problem.data,1);
 
         elast_CI = [];
+        if n_draws == []
+            n_draws = size(problem.results.filtered_chain,1)
+        end
+
         if CI == []
             elast   = [zeros(J,J) for i in 1:T];
             nbetas = get_nbetas(problem);
-            for i in 1:size(problem.results.filtered_chain,1)
+            for i in 1:n_draws
                 sample_i = problem.results.filtered_chain[i,:];
                 β_i = map_to_sieve(sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
@@ -41,14 +45,11 @@ function price_elasticities!(problem;
                 elast_i = price_elasticities_inner(problem, β = β_i)
                 elast = elast .+ elast_i;
             end
-            elast .= elast ./ T; # Calculate the mean posterior elasticities
+            elast .= elast ./ ndraws; # Calculate the mean posterior elasticities
             problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast)
         else
             elast   = [zeros(J,J) for i in 1:T];
             alpha = 1 - CI;
-            if n_draws == []
-                n_draws = size(problem.results.filtered_chain,1)
-            end
             try 
                 @assert ((n_draws > 0) & (n_draws <= size(problem.results.filtered_chain,1)))
             catch 
