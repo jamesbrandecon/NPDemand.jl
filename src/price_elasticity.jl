@@ -45,7 +45,7 @@ function price_elasticities!(problem;
                 elast_i = price_elasticities_inner(problem, β = β_i)
                 elast = elast .+ elast_i;
             end
-            elast .= elast ./ ndraws; # Calculate the mean posterior elasticities
+            elast .= elast ./ n_draws; # Calculate the mean posterior elasticities
             problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast)
         else
             elast   = [zeros(J,J) for i in 1:T];
