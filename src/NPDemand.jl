@@ -40,6 +40,6 @@ include("constraint_checks.jl")
 
 export estimate!, define_problem, show, price_elasticities!, toDataFrame, simulate_logit, update_constraints!
 export bern, dbern, compute_demand_function!, summarize_elasticities, own_elasticities, are_constraints_satisfied
-export elasticity_cdf, report_constraint_violations, smc!
+export elasticity_quantiles, report_constraint_violations, smc!
 
 end
