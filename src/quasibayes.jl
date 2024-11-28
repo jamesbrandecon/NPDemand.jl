@@ -429,11 +429,12 @@ function smc(problem::NPDemand.NPDProblem;
     gamma_Σ = Matrix(gamma_dist.Σ);
     logprior_t_minus_1 = zeros(nparticles);
 
+    failure_count = 0;
     while (violation_dict[:any] > max_violations) & (prev_penalty < max_penalty) & (t < max_iter)
         t = t+1
         print("\n Iteration "*string(t-1)*"...\r")
 
-        if (smc_method == :adaptive) & (mod(t,2) == 0)
+        if (smc_method == :adaptive) #& (mod(t,2) == 0)
             # Solve for next step penalty
             print("\n Optimizing penalty... \r")
             # try 
@@ -448,9 +449,6 @@ function smc(problem::NPDemand.NPDProblem;
                     try 
                         new_penalty = find_zero(x -> f_ess(x, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold, logprior_t_minus_1=logprior_t_minus_1), (prev_penalty, min(custom_ub, max_penalty)), Bisection(); xatol = xatol, verbose = false)
                         new_penalty = new_penalty - xatol;
-                        # @show f_ess(new_penalty, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold, logprior_t_minus_1=logprior_t_minus_1)
-                        # @show f_ess(new_penalty-xatol, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold, logprior_t_minus_1=logprior_t_minus_1)
-                        # @show f_ess(new_penalty-(3*xatol), thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold, logprior_t_minus_1=logprior_t_minus_1)
                     catch 
                         new_penalty = custom_ub;
                     end
@@ -466,22 +464,30 @@ function smc(problem::NPDemand.NPDProblem;
         else
             new_penalty = penalty_list[t]
         end
-
-        # print("\n New penalty = "*string(round(new_penalty, digits=4))*"\r")
         
         # Calculate normalized importance weights
         log_smc_weights, ~ = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, new_penalty, problem)
-        # @show mean(isnan.(log_smc_weights)) mean(isinf.(log_smc_weights))
-        # @show f_ess(new_penalty, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold)
 
         smc_weights .= exp.(log_smc_weights .- maximum(log_smc_weights))
         smc_weights .= smc_weights ./ sum(smc_weights)
         ess = 1 / sum(smc_weights.^2)
         push!(ess_store, ess)
-        # print("\n Ess = "*string(round(ess))*"\n")
 
         # Always resample under adaptive approach
-        indices = wsample(1:nparticles, smc_weights, nparticles)
+        indices = 1:nparticles;
+        try 
+            indices = wsample(1:nparticles, smc_weights, nparticles)
+        catch
+            failure_count +=1;
+            if failure_count == 1
+                @warn "Resampling failed. Running new MH steps without resampling..."
+                indices = 1:nparticles;
+            else
+                @warn "Resampling failed twice. Exiting..."
+                continue
+            end
+        end
+
         thetas = thetas[indices,:]
         thetas_sieve = thetas_sieve[indices,:]
         smc_weights .= 1.0 / nparticles
@@ -568,7 +574,11 @@ function smc(problem::NPDemand.NPDProblem;
         println("| Iteration results              |        |")
         println("|--------------------------------|--------|")
         println(@sprintf("| %-30s | %.4f   |", "Current Penalty", new_penalty))
-        println(@sprintf("| %-30s | %.2f |", "ESS", Int(floor(ess))))
+        if !(isnan(ess) | isinf(ess))
+            println(@sprintf("| %-30s | %.2f |", "ESS", Int(floor(ess))))
+        else
+            println(@sprintf("| %-30s | %.2f |", "ESS", NaN))
+        end
         println(@sprintf("| %-30s | %.2f   |", "Average MH Acceptance rate", accept_rate))
         println("| Violations                     |        |")
         for (key, value) in violation_dict
