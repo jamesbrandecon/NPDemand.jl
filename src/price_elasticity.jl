@@ -207,7 +207,7 @@ Convenience function for summarizing price elasticities. `problem` should be a s
 `stat` should be in ["mean", "median", "quantile"], and if `stat`=="quantile", the option `q` should include the quantile of interest (e.g., 0.75 for the 75th percentile price elasticities).
 """
 function summarize_elasticities(problem, which_elasticities::String, stat::String; 
-    q = [], integrate = true, n_draws::Int = 100, CI::Real = 0.95)
+    q = [], integrate = false, n_draws::Int = 100, CI::Real = 0.95)
 
     # Add input checks
     if stat ∉ ["mean", "quantile"]; error("stat must be in ['mean', 'quantile']"); end
