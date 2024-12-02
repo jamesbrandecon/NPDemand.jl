@@ -1,4 +1,5 @@
 # Function documentation
+## Problem construction and manipulation
 ```@docs
 define_problem
 ```
@@ -8,9 +9,19 @@ update_constraints!
 ```
 
 ```@docs
+NPDemand.list_constraints
+```
+
+## Estimation
+```@docs
 estimate!
 ```
 
+```@docs
+smc!
+```
+
+## Post-estimation tools
 ```@docs
 price_elasticities!
 ```
@@ -20,23 +31,16 @@ compute_demand_function!
 ```
 
 ```@docs
-smc!
+summarize_elasticities
 ```
 
+## Back-end functions
 ```@docs
-summarize_elasticities
+NPDemand.NPD_parameters
 ```
 
 ```@docs
 simulate_logit
-```
-
-```@docs
-NPDemand.list_constraints
-```
-
-```@docs
-NPDemand.NPD_parameters
 ```
 
 ```@docs

@@ -1,7 +1,7 @@
 """
-    price_elasticities!(problem::NPDProblem;
-         CI = [], 
-         n_draws = [])
+    price_elasticities!(problem; 
+        CI::Union{Vector{Any}, Real} = [], 
+        n_draws::Union{Vector{Any}, Int} = [])
 
 Takes the solved `problem` as first argument, a `DataFrame` as the second argument, and evaluates all price elasticities in-sample. 
 Currently does not calculate out-of-sample price elasticities. For this, use the function `compute_demand_function!`. 

@@ -323,7 +323,7 @@ function estimate!(problem::NPDProblem;
 end
 
 """
-smc!(problem::NPDemand.NPDProblem;
+    smc!(problem::NPDemand.NPDProblem;
         grid_points::Int    = 50, 
         max_penalty::Real   = 5, 
         ess_threshold::Real = 100, 
@@ -356,7 +356,8 @@ function smc!(problem::NPDemand.NPDProblem;
     smc_method          = :adaptive,
     max_iter            = 1000,
     adaptive_tolerance  = false, 
-    max_violations      = 0.01)
+    max_violations      = 0.01,
+    extra_mh_loops      = 0)
 
     try 
         @assert smc_method ∈ [:adaptive, :linear_grid, :geometric_grid, :logit_grid]
@@ -365,6 +366,7 @@ function smc!(problem::NPDemand.NPDProblem;
     end
 
     burn_in_int = Int(burn_in * size(problem.chain,1));
+    modulo_num = Int(1 + extra_mh_loops);
 
     # Add smc_results to problem
     problem.smc_results = smc(problem::NPDemand.NPDProblem; 
@@ -379,7 +381,8 @@ function smc!(problem::NPDemand.NPDProblem;
         smc_method          = smc_method, 
         max_iter            = max_iter, 
         adaptive_tolerance  = adaptive_tolerance, 
-        max_violations      = max_violations);
+        max_violations      = max_violations, 
+        modulo_num          = modulo_num);
     
     # Calculate new posterior mean and replace problem results 
     lbs             = get_lower_bounds(problem)

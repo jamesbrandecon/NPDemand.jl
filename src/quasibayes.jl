@@ -225,7 +225,7 @@ end
     weight_matrices::Vector{Matrix{Float64}}=[],
     prices::Matrix{Float64} = Matrix(problem.data[!,r"prices"]), 
     shares::Matrix{Float64} = Matrix(problem.data[:, r"shares"]); 
-    penalty = 1_000,
+    penalty = 0,
     matrix_storage_dict = Dict())
     
     # prior
@@ -271,7 +271,6 @@ end
             return
         else
             # print("-")
-            # rate = cdf(Normal(0,1), -1 * penalty * d[:any].^2) * 2
             Turing.@addlogprob! (-0.5 * objective(all_params) - penalty)
             return
         end
@@ -352,7 +351,8 @@ function smc(problem::NPDemand.NPDProblem;
     seed                = 4132, 
     max_iter            = 1000, 
     adaptive_tolerance  = false, 
-    max_violations      = 0.01)
+    max_violations      = 0.01,
+    modulo_num          = 1)
 
     # Define inputs to quasi-bayes sampling 
     prior           = problem.sampling_details.prior;
@@ -368,8 +368,6 @@ function smc(problem::NPDemand.NPDProblem;
     particles       = problem.chain;
     nbetas          = NPDemand.get_nbetas(problem);
     nbeta           = length(lbs)
-
-    # report_constraint_violations(problem)
     
     betastardraws   = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
     betadraws       = NPDemand.reparameterization_draws(betastardraws, lbs, parameter_order)
@@ -434,7 +432,7 @@ function smc(problem::NPDemand.NPDProblem;
         t = t+1
         print("\n Iteration "*string(t-1)*"...\r")
 
-        if (smc_method == :adaptive) #& (mod(t,2) == 0)
+        if (smc_method == :adaptive) & (mod(t,modulo_num) == 0)
             # Solve for next step penalty
             print("\n Optimizing penalty... \r")
             # try 

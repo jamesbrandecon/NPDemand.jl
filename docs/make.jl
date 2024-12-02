@@ -10,10 +10,13 @@ makedocs(
         "index.md",
         "Implementation Details" => [
             "Setup and GMM" => "details.md",
-            "Priors and Sampling Approach" => "priors.md",
+            "Quasibayes: Priors and Sampling" => "priors.md",
             "Constraints and SMC" => "constraints.md"
         ],
-        "Usage" => "usage.md",
+        "Usage" => [
+            "Basic Usage (GMM)" => "usage.md",
+            "Using Quasi-Bayes Tools" => "quasibayes_usage.md"
+        ],
         "Post-Estimation" => "postestimation.md",
         "Function Documentation" => "functions.md"
         # "Subsection" => [
