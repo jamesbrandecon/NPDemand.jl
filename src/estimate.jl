@@ -225,6 +225,7 @@ function estimate!(problem::NPDProblem;
             error("`burn_in` denotes the fraction of samples to drap. Must be less than 1")
         end
         
+        burn_in_fraction = burn_in;
         burn_in = Int(burn_in * n_samples);
         gamma_length = size(Bvec[1],2);
 
@@ -316,7 +317,7 @@ function estimate!(problem::NPDProblem;
         # calculate posterior mean parameters
         qpm = map_to_sieve(mean(betadraws, dims=1)', mean(gammadraws, dims=1)', problem.exchange, nbetas, problem)
 
-        problem.sampling_details = (; burn_in = burn_in, skip = skip, smc = false, prior = prior)
+        problem.sampling_details = (; burn_in = burn_in_fraction, skip = skip, smc = false, prior = prior)
         problem.results  = NPD_parameters(qpm, hcat(betadraws, gammadraws));
         problem.chain    = chain;
     end
