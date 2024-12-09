@@ -25,10 +25,8 @@ npd_problem = define_problem(df;
                             index_vars = index_vars, 
                             constraints = constraints,
                             bO = bO,
-                            FE = ["dummyFE", "product"],
-                            constraint_tol = constraint_tol,
-                            obj_xtol = obj_xtol,
-                            obj_ftol = obj_ftol);
+                            FE = ["dummyFE", "product"]
+                            );
 show(npd_problem)
 
 # Estimate problem and plot comparison of estimated and true own-price elasticities

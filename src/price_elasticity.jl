@@ -35,7 +35,7 @@ function price_elasticities!(problem;
         if CI == []
             elast   = [zeros(J,J) for i in 1:T];
             nbetas = get_nbetas(problem);
-            for i in 1:n_draws
+            for i in ProgressBar(1:n_draws)
                 sample_i = problem.results.filtered_chain[i,:];
                 β_i = map_to_sieve(sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
@@ -58,7 +58,7 @@ function price_elasticities!(problem;
             nbetas      = get_nbetas(problem);
             # draw_order  = sample(1:size(problem.results.filtered_chain,1), n_draws, replace = false);
 
-            for i in 1:n_draws
+            for i in ProgressBar(1:n_draws)
                 sample_i    = problem.results.filtered_chain[i,:];
                 β_i         = map_to_sieve(sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
@@ -170,7 +170,7 @@ function price_elasticities_inner(npd_problem; β = npd_problem.results.minimize
     all_elast_mat = Vector{Matrix}(undef, length(dsids[1,1,:]));
     temp = [];
 
-    for ii = 1:length(dsids[1,1,:])
+    for ii in axes(dsids,3) # 1:length(dsids[1,1,:])
         J_s = zeros(J,J);
         for j1 = 1:J
             for j2 = 1:J
