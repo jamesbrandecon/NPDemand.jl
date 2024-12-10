@@ -215,7 +215,7 @@ function check_subs_across_group(elast_one_market, exchange)
     catch
         error("Cannot use `across_group` constraints with only one exchangeable group")
     end 
-    J = maximum(vcat(exchange[1], exchange[2]))
+    J = maximum(union(exchange[1], exchange[2]))
     elast_one_market_group1_2 = dropdims(elast_one_market[exchange[1], setdiff(1:J, exchange[1])], dims=1);
     elast_one_market_group2_1 = dropdims(elast_one_market[exchange[2], setdiff(1:J, exchange[2])], dims=1);
 
@@ -249,7 +249,7 @@ function check_comps_across_group(elast_one_market, exchange)
     catch
         error("Cannot use `across_group` constraints with only one exchangeable group")
     end 
-    J = maximum(vcat(exchange[1], exchange[2]))
+    J = maximum(union(exchange[1], exchange[2]))
     elast_one_market_group1_2 = dropdims(elast_one_market[exchange[1], setdiff(1:J, exchange[1])], dims=1);
     elast_one_market_group2_1 = dropdims(elast_one_market[exchange[2], setdiff(1:J, exchange[2])], dims=1);
 
