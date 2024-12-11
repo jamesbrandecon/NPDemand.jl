@@ -2,7 +2,9 @@
 
 [![](https://img.shields.io/badge/docs-stable-blue.svg)](https://jamesbrandecon.github.io/NPDemand.jl/dev/)
 
-This package has been significantly re-designed as part of a work in progress with Giovanni Compiani and Adam Smith. I have removed the functionality for variable/model selection, but have significantly increased the performance of the package and improved the simplicity of use. The old code has been saved in the `copy_old_code` branch, if for some reason that code is useful for you.
+NPDemand is a package for estimating multi-product demand nonparametrically under various economic constraints. Is has been developed by and for Brand and Smith (2024). 
+
+<!-- This package has been significantly re-designed as part of a work in progress with Giovanni Compiani and Adam Smith. I have removed the functionality for variable/model selection, but have significantly increased the performance of the package and improved the simplicity of use. The old code has been saved in the `copy_old_code` branch, if for some reason that code is useful for you. -->
 
 Please let me know if you have any suggestions for the package or find any bugs.
 

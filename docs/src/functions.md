@@ -27,6 +27,14 @@ price_elasticities!
 ```
 
 ```@docs
+elasticity_quantiles
+```
+
+```@docs
+report_constraint_violations
+```
+
+```@docs
 compute_demand_function!
 ```
 

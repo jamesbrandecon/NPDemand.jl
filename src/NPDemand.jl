@@ -24,11 +24,9 @@ include("dbern.jl")
 include("prep_matrices.jl")
 include("define_problem.jl")
 include("objective_functions.jl")
-# include("prep_inner_matrices.jl")
 include("make_interactions.jl")
 include("make_constraint.jl")
 include("add_constraint.jl")
-# include("inner_elasticity.jl")
 include("price_elasticity.jl")
 include("estimate.jl")
 include("compute_demand_function.jl")
@@ -40,6 +38,6 @@ include("constraint_checks.jl")
 
 export estimate!, define_problem, show, price_elasticities!, toDataFrame, simulate_logit, update_constraints!
 export bern, dbern, compute_demand_function!, summarize_elasticities, own_elasticities, are_constraints_satisfied
-export elasticity_quantiles, report_constraint_violations, smc!
+export elasticity_quantiles, report_constraint_violations, smc!, list_constraints
 
 end

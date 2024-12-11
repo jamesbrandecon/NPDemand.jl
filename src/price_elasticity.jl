@@ -201,10 +201,19 @@ end
 
 
 """
-    summarize_elasticities(problem::NPDProblem, stat::String; q = [])
+    summarize_elasticities(problem::NPDProblem, which_elasticities::String, stat::String; 
+        q = [],
+        integrate = false,
+        n_draws::Int = 100,
+        CI::Real = 0.95)
 
 Convenience function for summarizing price elasticities. `problem` should be a solved `NPDProblem` after running `price_elasticities!`. 
-`stat` should be in ["mean", "median", "quantile"], and if `stat`=="quantile", the option `q` should include the quantile of interest (e.g., 0.75 for the 75th percentile price elasticities).
+`stat` should be in ["mean", "quantile"], and if `stat`=="quantile", the option `q` should include the quantile of interest (e.g., 0.75 for the 75th percentile price elasticities).
+
+When a problem has been estimated via quasi-Bayesian methods, the function can integrate over the posterior distribution of the parameters to provide a posterior distribution of the summarized value. 
+`n_draws` controls the number of draws from the posterior to use in the integration, and `CI` controls the with of the credible interval to use in the integration (0.95 for a 95% credible interval).
+
+Output is a NamedTuple: (;Statistic, Posterior_Mean, Posterior_Median, Posterior_CI)
 """
 function summarize_elasticities(problem, which_elasticities::String, stat::String; 
     q = [], integrate = false, n_draws::Int = 100, CI::Real = 0.95)
@@ -356,6 +365,15 @@ function summarize_elasticities(problem, which_elasticities::String, stat::Strin
     return output
 end
 
+""" 
+    elasticity_quantiles(problem::NPDProblem, ind1::Int, ind2::Int; 
+        quantiles = collect(0.01:0.01:0.99),
+        n_draws::Int = 100)
+
+Convenience function for calculating quantiles of price elasticities. `problem` should be a solved `NPDProblem` after running `price_elasticities!`.
+`ind1` and `ind2` are the indices of the products for which you want to calculate the quantiles. E.g., ind1=1, ind2=1 returns quantiles of the own-price elasticity for product 1. 
+The user can control the set of quantiles to return and the number of draws (`n_draws`) to use in the posterior integration.
+"""
 function elasticity_quantiles(problem::NPDProblem, ind1::Int, ind2::Int; 
     quantiles = collect(0.01:0.01:0.99),
     n_draws::Int = 100)

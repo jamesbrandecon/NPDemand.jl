@@ -31,8 +31,6 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
     - Note: All fixed effects are estimated as parameters by the minimizer, so be careful adding fixed effects for variables that take many values.
 - `bO`: Order of the univariate Bernstein polynomials in market shares. Default is 2.
 - `constraint_tol`: Tolerance specifying tightness of constraints
-- `obj_xtol`: Tolerance specifying x_tol in Optim.Options()
-- `obj_ftol`: Tolerance specifying f_tol in Optim.Options()
 - `chunk_size`: Controls chunk size in ForwardDiff.Gradient autodiff calculation for nonlinear constraints. Only used if :subs\\_in\\_group specified. 
 - `constraints`: A list of symbols of accepted constraints. Currently supported constraints are: 
     - :monotone  
@@ -45,9 +43,9 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
 function define_problem(df::DataFrame; exchange::Vector = [], 
     index_vars = ["prices"], price_iv = [], FE = [], 
     constraints = [], bO = 2, 
-    obj_xtol = 1e-5, obj_ftol = 1e-5, 
-    constraint_tol = 1e-5, normalization=[], 
-    chunk_size = [], grid_size = [], verbose = false)
+    obj_xtol = 1e-5, obj_ftol = 1e-5, constraint_tol = 1e-5, # these inputs are no longer used 
+    normalization=[], 
+    verbose = false)
     
     find_prices = findall(index_vars .== "prices")[1];
 
@@ -112,20 +110,24 @@ function define_problem(df::DataFrame; exchange::Vector = [],
         error("NPDemand currently only supports models with two or fewer exchangeable groups in `exchange`")
     end
 
+    # Check that exchange is only specified if exchangeability is in constraints
     E1 = (:exchangeability ∈ constraints);
     E2 = (exchange!=[])
     if (E1!=E2)
         error("Keyword `exchange` should be specified (only) if :exchangeability is in `constraints` vector")
     end
 
+    # If user provides a 0-indexed exchange vector, convert to 1-indexed
+    if 0 ∈ union(exchange...)
+        for i in eachindex(exchange)
+            exchange[i] = exchange[i] .- 1;
+        end
+    end
+
+    # Check that price_iv is a vector of strings or symbols
     if (price_iv !=[]) & !(typeof(price_iv) <: Vector)
         error("Keyword `price_iv` should be a Vector of Symbols or Strings indicating column names in `df`")
     end
-
-    # Nonlinear constraint grid size check: 
-    # if ((grid_size == []) & (problem_has_nonlinear_constraints)) | ((grid_size != []) & (!problem_has_nonlinear_constraints))
-    #     error("Specify grid_size if and only if the problem has nonlinear constraints")
-    # end
 
     # Confirm that shares are numbered as expected: 
     J = size(df[!,r"shares"],2);
@@ -159,7 +161,6 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     # Reshape FEs into matrix of dummy variables
     FEmat = [];
     if FE!=[]
-        FEvec = [];
         FEmat = [];
         verbose && println("Reshaping fixed-effects into dummy variables....")
         for f ∈ FE
@@ -202,7 +203,7 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     elast_mats = Matrix[];
     elast_prices = Matrix[];
 
-    weight_matrices = bigA = [Avec[i]*pinv(Avec[i]'*Avec[i])*Avec[i]' for i in 1:length(Xvec)]; 
+    weight_matrices = [Avec[i]*pinv(Avec[i]'*Avec[i])*Avec[i]' for i in 1:length(Xvec)]; 
 
     problem = NPDProblem(df,
                         [], 
@@ -243,8 +244,9 @@ end
 """
     NPD_parameters
 
-    Custom struct to store estimated parameters specifically. NPDemand currently doesn't use anything from the results field of 
-    NPDProblem other than results.minimizer, so this struct will preserve that functionality even when the results are not derived from Optim.
+    Custom struct to store estimated parameters specifically. This can be used to replace the candidate parameters in an NPDProblem struct. The two key fields 
+    are `minimizer` and `filtered_chain`. The `minimizer` field stores the estimated parameters, while the `filtered_chain` field stores the Markov chain for quasi-Bayes
+    methods, after filtering out burn-in and thinning but before reformatting into the full parameter sieve.
 """
 mutable struct NPD_parameters 
     minimizer
@@ -308,14 +310,6 @@ function update_constraints!(problem::NPDProblem, new_constraints::Vector{Symbol
         # problem.Aeq = Aeq; # don't update equality matrix because exchangeability unchanged
         problem.maxs = maxs;
         problem.mins = mins;
-
-        # if :subs_in_group ∈ new_constraints
-        #     verbose && println("Preparing inputs for nonlinear constraints....")
-        #     subset = subset_for_elast_const(problem, problem.data; grid_size=2);
-        #     elast_mats, elast_prices = make_elasticity_mat(problem, subset);
-        #     problem.elast_mats = elast_mats;
-        #     problem.elast_prices = elast_prices;
-        # end
         problem.constraints = new_constraints;
     end
 end

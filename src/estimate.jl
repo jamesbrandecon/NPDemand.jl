@@ -140,24 +140,35 @@ function make_conmat(problem)
     return conmat
 end
 
+
 """
-    estimate!(problem::NPDProblem; max_iterations = 10000, show_trace = false, chunk_size = Int[])
+    estimate!(problem::NPDProblem;
+        verbose = true,
+        linear_solver = "Ipopt", 
+        quasi_bayes = false,
+        sampler = [], 
+        n_samples::Int = 50_000,
+        burn_in::Real = 0.25, 
+        skip::Int = 5,
+        n_attempts = 0,
+        penalty = Inf, 
+        step::Union{Real, Symbol} = 0.01)
 
-`estimate!` solves `problem` subject to provided constraints, and replaces `problem.results` with the resulting parameter vector.
-To enforce constraints, we either minimize the minimum distance objective function directly using Convex.jl or estimate the problem via the quasi-bayes approach introduced in the NPDemand paper. 
+Estimates the problem using the specified parameters.
 
-General options: 
-- `verbose`: if `false`, will reduce the amount of updates printed during estimation
-- `linear_solver`: controls the solver to use in JuMP. Options: Ipopt or OSQP
+## Arguments
+- `problem::NPDProblem`: The problem to be estimated.
+- `verbose::Bool`: Whether to print verbose output. Default is `true`.
+- `linear_solver::String`: The linear solver to use. Must be either "Ipopt" or "OSQP". Default is "Ipopt".
+- `quasi_bayes::Bool`: Whether to use quasi-bayes sampling. Default is `false`.
+- `sampler`: The sampler to use for quasi-bayes sampling. Default is an empty array.
+- `n_samples::Int`: The number of samples to draw. Default is 50,000.
+- `burn_in::Real`: The fraction of samples to drop as burn-in. Must be less than 1. Default is 0.25.
+- `skip::Int`: The number of samples to skip between saved samples. Default is 5.
+- `n_attempts`: The number of attempts to find a valid starting point for the sampler. Default is 0.
+- `penalty`: The penalty value for the objective function. Default is `Inf`.
+- `step::Union{Real, Symbol}`: The step size for the sampler. Can be a real number or the symbol `:auto` to automatically calculate the step size. Default is 0.01.
 
-Options for Quasi-Bayes methods: 
-- `quasi_bayes`: if `true`, will use quasi-bayes methods to estimate the problem
-- `n_samples`: the number of samples in the chain
-- `burn_in`: number of samples to drop prior to calculating the posterior mean
-- `skip` (default 5): thins the chain to only include one in every `skip` samples
-- `n_attempts`: number of samples from the prior used to find a starting point for the sampler 
-- `penalty` (default Inf): controls extent to which constraints are enforced. Default (Inf) is to strictly enforce them. Smaller numbers penalize violations less, and zero will only enforce the constraints linearly
-- `step`: step size for Metropolis-Hastings or HMC sampler
 """
 function estimate!(problem::NPDProblem;
     verbose = true,
@@ -268,7 +279,6 @@ function estimate!(problem::NPDProblem;
         if ((problem.results != []) & (n_attempts == 0))
             println("Using existing minimizer as the initial point")
             start = [problem.results.minimizer[NPDemand.sieve_to_betas_index(problem)]; problem.results.minimizer[problem.design_width+2:end]]
-            # start, start_exit = find_starting_point(problem, prior, tempmats, weight_matrices, n_attempts = 1);
         elseif (n_attempts == 0)
             start, start_exit = find_starting_point(problem, prior, calc_tempmats(problem), weight_matrices, n_attempts = 1);
         else
@@ -338,10 +348,28 @@ end
         adaptive_tolerance  = false, 
         max_violations      = 0.01)
 
-This function runs sequentially constrained Monte Carlo (SMC) on the problem. The function will overwrite the results in the problem object with the resulting chain.
-SMC requires a grid, which can either be chosen adaptively (`smc_method`=:adaptive) or pre-specified. A pre-specified grid can be chosen to be :linear, :geometric, or :logit, and the size of the grid is set via `grid_points`.
+Run sequentially constrained Monte Carlo (SMC) on the problem.
 
-For harder or slower problems, it may be necessary to increase the number of Metropolis-Hastings steps per iteration (`mh_steps`), the number of iterations (`max_iter`), or the maximum allowed fraction markets with violations (`max_violations`). 
+# Arguments
+- `problem::NPDemand.NPDProblem`: The problem object on which SMC will be run.
+
+# Optional Arguments
+- `grid_points::Int`: The number of grid points for the SMC grid. Default is 50.
+- `max_penalty::Real`: The maximum penalty value for the SMC algorithm. Default is 5.
+- `ess_threshold::Real`: The effective sample size threshold for the SMC algorithm. Default is 100.
+- `step::Real`: The step size for the SMC algorithm. Default is 0.1.
+- `skip::Int`: The thinning factor for the SMC chain. Default is 5.
+- `burn_in::Real`: The fraction of samples to be discarded as burn-in. Default is 0.25.
+- `mh_steps`: The number of Metropolis-Hastings steps per iteration. Default is calculated based on the size of the filtered chain.
+- `seed`: The random seed for the SMC algorithm. Default is 4132.
+- `smc_method`: The method for choosing the SMC grid. Default is :adaptive.
+- `max_iter`: The maximum number of iterations for the SMC algorithm. Default is 1000.
+- `adaptive_tolerance`: Whether to use adaptive tolerance for the SMC algorithm. Default is false.
+- `max_violations`: The maximum allowed fraction of markets with violations. Default is 0.01.
+
+The function will overwrite the results in the problem object with the resulting chain.
+
+For harder or slower problems, it may be necessary to increase the number of Metropolis-Hastings steps per iteration (`mh_steps`), the number of iterations (`max_iter`), or the maximum allowed fraction markets with violations (`max_violations`).
 
 `burn_in` and `skip` control the number of samples to drop and the thinning of the chain, respectively.
 """

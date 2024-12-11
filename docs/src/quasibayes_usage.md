@@ -23,15 +23,11 @@ HMC(0.01,
      adtype = Turing.AutoForwardDiff(chunksize = 1000))
 ```
 !!! warning 
-Although AutoZygote is an often-recommended alternative to AutoForwardDiff, it will not work in the current package due to choices we've made internally. 
+    Although AutoZygote is an often-recommended alternative to AutoForwardDiff, it will not work in the current package due to choices we've made internally. 
 
 After this has been run, the problem stores two key objects. One is the original chain (without any burn-in or thinning) in `problem.chain`, and the other is a "filtered" chain (*with* burn-in and thinning) in `problem.results.filtered_chain`. Post-estimation tools will use the filtered chain for calculating price elasticities and counterfactuals. 
 
-## Nonlinearly imposed constraints 
-### Dogmatic priors 
-In order to impose our so-called "dogmatic" priors, in which we penalize the objective function by a fixed penalty when constraints are not satisfied, the user need only add a `penalty` keyword argument to `estimate!`. 
-
-### SMC
+## Nonlinearly imposed constraints (SMC)
 In order to use SMC, you must `estimate!` a problem first, with `quasibayes` set to `true`. Then, you can use the following command: 
 ```julia
  smc!(problem, 

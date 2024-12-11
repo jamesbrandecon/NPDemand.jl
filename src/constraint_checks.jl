@@ -1,3 +1,30 @@
+"""
+    report_constraint_violations(problem;
+        verbose = true,
+        params = [],
+        output = "dict",
+        n_draws::Int = 0)
+
+This function reports the constraint violations for a given problem.
+
+## Arguments
+- `problem`: The problem for which constraint violations need to be reported.
+- `verbose`: A boolean indicating whether to print verbose output. Default is `true`.
+- `params`: An optional parameter vector. If not provided, the function uses the GMM result if there's no chain, or the filtered chain if available. Default is `[]`.
+- `output`: The output format for the violations. Default is `"dict"`.
+- `n_draws`: The number of draws to use from the filtered chain. Default is `0`.
+
+## Returns
+- `violations`: A dictionary or a single violation value, depending on the `output` parameter.
+
+## Example output: 
+```julia
+Dict{Symbol, Float64} with 8 entries:
+  :monotone               => 0.0
+  :all_substitutes        => 0.0
+  :diagonal_dominance_all => 0.0
+```
+"""
 function report_constraint_violations(problem;
     verbose = true,
     params = [], 
