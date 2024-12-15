@@ -70,11 +70,11 @@ function price_elasticities!(problem;
                 push!(elast_CI, elast_i);
             end
             ub = [
-                [quantile(getindex.(getindex.(elast_CI, t),j,j), 1-alpha/2) for j = 1:J, j = 1:J] 
+                [quantile(getindex.(getindex.(elast_CI, t),j1,j2), 1-alpha/2) for j1 = 1:J, j2 = 1:J] 
                 for t in 1:T
                     ]
             lb = [
-                [quantile(getindex.(getindex.(elast_CI, t),j,j), alpha/2) for j = 1:J, j = 1:J] 
+                [quantile(getindex.(getindex.(elast_CI, t),j1,j2), alpha/2) for j1 = 1:J, j2 = 1:J] 
                 for t in 1:T
                     ]
             elast .= elast ./ n_draws; # Calculate the mean posterior elasticities

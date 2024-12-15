@@ -160,8 +160,10 @@ function define_problem(df::DataFrame; exchange::Vector = [],
 
     # Reshape FEs into matrix of dummy variables
     FEmat = [];
+    fe_param_mapping = Dict{Int, NamedTuple}(); # Map the index in the FE mat which corresponds to a given FE name and value
     if FE!=[]
         FEmat = [];
+        column_counter = 1;
         verbose && println("Reshaping fixed-effects into dummy variables....")
         for f ∈ FE
             if f != "product"
@@ -173,6 +175,8 @@ function define_problem(df::DataFrame; exchange::Vector = [],
                     else
                         FEmat = hcat(FEmat, reshape((df[!,f] .== fi), size(df,1),1))
                     end
+                    fe_param_mapping[column_counter] = (name = f, value = fi)
+                    column_counter += 1
                 end
             end
         end
@@ -180,7 +184,16 @@ function define_problem(df::DataFrame; exchange::Vector = [],
 
     product_FEs = false;
     if "product" ∈ FE
-        product_FEs = true;
+        product_FEs = true        
+        for j = 1:J
+            which_group = findall(j .∈ exchange)[1];
+            first_product_in_group = exchange[which_group][1];
+
+            if j !=first_product_in_group # dropping last product's FE for location normalization
+                fe_param_mapping[column_counter] = (name = "product", value = j)    
+                column_counter += 1
+            end
+        end
     end
     
     verbose && println("Making Bernstein polynomials....")
@@ -197,7 +210,6 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     end
     
     verbose && println("Reformulating problem....")
-    # matrices = prep_inner_matrices(Xvec, Avec, Bvec; verbose = false);
 
     design_width = sum(size.(Xvec,2));
     elast_mats = Matrix[];
@@ -220,6 +232,7 @@ function define_problem(df::DataFrame; exchange::Vector = [],
                         mins,
                         maxs, 
                         FE,
+                        fe_param_mapping,
                         normalization,
                         exchange,
                         design_width,
@@ -269,6 +282,7 @@ mutable struct NPDProblem
     mins 
     maxs
     FE 
+    fe_param_mapping
     normalization
     exchange 
     design_width 

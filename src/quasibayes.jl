@@ -759,3 +759,30 @@ function loglikelihood(problem::NPDemand.NPDProblem, particle_betastar::Vector{T
    
     return -0.5 * gmm(x, problem, problem.weight_matrices)
 end
+
+
+function fe_posteriors(problem; FE::Union{Array, String} = [])
+    if FE==[] 
+        error("Please provide name of FE (the `FE` keyword argument)")
+    end
+    if (problem.chain ==[])
+        error("No Markov chain found in the problem")
+    end
+
+    coef_names = [problem.fe_param_mapping[i].name for i in 1:length(problem.fe_param_mapping)]
+    coefs_for_this_fe = findall(coef_names .== FE)
+    all_gammas = problem.results.filtered_chain[:,end-size(problem.Bvec[1],2)+1:end];
+    num_index_vars = length(problem.index_vars);
+    
+    df_fe = DataFrame()
+    for (~, i) in enumerate(coefs_for_this_fe)
+        val = problem.fe_param_mapping[i].value
+        column_name = "Value$val"
+        if i ==1 
+            df_fe[!, column_name] = all_gammas[:, num_index_vars + i]
+        else 
+            df_fe[!, column_name] = all_gammas[:, num_index_vars + i]
+        end
+    end
+    return df_fe
+end

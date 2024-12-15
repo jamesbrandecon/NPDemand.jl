@@ -16,7 +16,9 @@ function compute_demand_function!(problem, df;
     max_iter = 1000, 
     show_trace = false, 
     CI::Union{Vector{Any}, Real} = [], 
-    n_draws::Union{Vector{Any}, Int} = [])
+    n_draws::Union{Vector{Any}, Int} = [], 
+    average_over::Vector{String} = [],
+    drop_failed_solves = true)
 
     println("Solving nonlinear problem for counterfactual market shares.....")
     
@@ -27,7 +29,16 @@ function compute_demand_function!(problem, df;
     end
 
     if problem.chain ==[]
-        demand = compute_demand_function_inner(problem, df, max_iter = max_iter, show_trace = show_trace, β = problem.results.minimizer);
+        inverted = compute_demand_function_inner(problem, df, 
+            max_iter = max_iter, 
+            show_trace = show_trace, 
+            β = problem.results.minimizer,
+            average_over = average_over)
+        
+        demand = inverted.solved_zero;
+        if inverted.f_converged == false
+            @warn("Nonlinear solver did not converge. Re-run with view_trace = true to check for convergence issues")
+        end
         df[!,r"shares"] .= demand;
     else
         burn_in     = problem.sampling_details.burn_in;
@@ -37,6 +48,7 @@ function compute_demand_function!(problem, df;
 
         demand      = zeros(size(df[!,r"shares"]))
         demand_CI   = [];
+        converged_vec = [];
 
         if n_draws == []
             n_draws = length(burn_in+1:skip:size(problem.chain,1))
@@ -51,19 +63,27 @@ function compute_demand_function!(problem, df;
             nbetas = get_nbetas(problem);
             draw_order  = sample(1:size(problem.results.filtered_chain,1), n_draws, replace = false);
 
-            for i in 1:n_draws
-                print(".")
+            for i in ProgressBar(1:n_draws)
+                # print(".")
                 sample_i    = problem.results.filtered_chain[draw_order[i],:];
                 β_i = map_to_sieve(sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
                                 problem.exchange, 
                                 nbetas, 
                                 problem)
-                demand_i = compute_demand_function_inner(problem, df; 
-                max_iter = max_iter, 
-                show_trace = show_trace,
-                β = β_i)
-                demand = demand .+ demand_i;
+                inverted = compute_demand_function_inner(problem, df; 
+                    max_iter = max_iter, 
+                    show_trace = show_trace,
+                    β = β_i,
+                    average_over = average_over);
+                
+                demand_i    = inverted.solved_zero;
+                converged_i = inverted.f_converged;
+
+                if (converged_i) || (drop_failed_solves == false)
+                    demand  = demand .+ demand_i;
+                end
+                push!(converged_vec, converged_i);
             end
             demand .= demand ./ n_draws; # Calculate the mean posterior elasticities
             df[!,r"shares"] .= demand; 
@@ -73,30 +93,50 @@ function compute_demand_function!(problem, df;
             nbetas      = get_nbetas(problem);
             draw_order  = sample(1:size(problem.results.filtered_chain,1), n_draws, replace = false);
 
-            for i in 1:n_draws
-                print(".")
+            for i in ProgressBar(1:n_draws)
+                # print(".")
                 sample_i    = problem.results.filtered_chain[draw_order[i],:];
                 β_i         = map_to_sieve(sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
                                 problem.exchange, 
                                 nbetas, 
                                 problem)
-                demand_i    = compute_demand_function_inner(problem, df, 
+                inverted    = compute_demand_function_inner(problem, df, 
                                 max_iter = max_iter, 
                                 show_trace = show_trace, 
-                                β = β_i)
+                                β = β_i,
+                                average_over = average_over)
                 
-                demand      = demand .+ demand_i;
+                demand_i    = inverted.solved_zero;
+                converged_i = inverted.f_converged;
+
+                if (converged_i) || (drop_failed_solves == false)
+                    demand  = demand .+ demand_i;
+                end
+
                 push!(demand_CI, demand_i);
+                push!(converged_vec, converged_i);
+            end
+
+            # Report share of non-converged draws if greater than 0
+            if sum(converged_vec) < n_draws
+                println("$(n_draws - sum(converged_vec)) of $n_draws failed to converge")
             end
             
-            ub = [quantile(getindex.(demand_CI, t), 1-alpha/2) 
+            if drop_failed_solves == true
+                indexes = findall(converged_vec .== true)
+            else
+                indexes = 1:n_draws
+            end
+
+            ub = [quantile(getindex.(demand_CI[indexes], t), 1-alpha/2) 
                     for t in 1:size(df,1)
                     ]
-            lb = [quantile(getindex.(demand_CI, t), alpha/2) 
+            lb = [quantile(getindex.(demand_CI[indexes], t), alpha/2) 
                     for t in 1:size(df,1)
                     ]
-            demand .= demand ./ n_draws; # Calculate the mean posterior elasticities
+            
+            demand .= demand ./ length(demand_CI[indexes]); # Calculate the mean posterior elasticities
             df[!,r"shares"] .= demand;
             
             for i in 0:(J-1)
@@ -109,7 +149,8 @@ end
 
 function compute_demand_function_inner(problem, df; 
     max_iter = 1000, show_trace = false,
-    β = problem.results.minimizer)
+    β = problem.results.minimizer, 
+    average_over::Vector{String} = [])
 
     J = length(problem.Xvec);
     FE = problem.FE;
@@ -125,24 +166,45 @@ function compute_demand_function_inner(problem, df;
     θ = β[1:problem.design_width]
     γ = β[length(θ)+1:end]
 
-    # Reshape FEs into matrix of dummy variables
-    FEmat = [];
-    if FE!=[]
-        FEmat = [];
-        for f ∈ FE
-            if f != "product"
-                unique_vals = unique(df[!,f]);
-                unique_vals = unique_vals[1:end-1]; # Drop one category per FE dimension
-                for fi ∈ unique_vals
-                    if (f==FE[1]) & (fi==unique_vals[1])
-                        FEmat = reshape((df[!,f] .== fi), size(df,1),1)
-                    else
-                        FEmat = hcat(FEmat, reshape((df[!,f] .== fi), size(df,1),1))
-                    end
-                end
-            end
+
+    # Make a matrix which can be substituted in lieu of original FEmat
+    # All zeros, then replace the selected FE columns/values with 1s
+    gamma_length = length(γ);
+    num_product_fes = "product" ∈ FE ? J - length(problem.exchange) : 0;
+    FEmat = zeros(size(df,1), gamma_length - length(problem.index_vars) - num_product_fes);
+
+    if average_over !=[] # if the user provides any FEs to average over
+        try 
+            @assert "product" ∉ average_over 
+        catch 
+            error("Cannot average over product FEs")
         end
-    end    
+
+        # Average over the elements of γ corresponding to each FE in average_over, 
+        # replacing the first column with the average
+        # and all others with zeros
+        for fe_name in average_over
+            # find the elements of γ corresponding to this FE
+            inds = findall([problem.fe_param_mapping[i].name for i in eachindex(problem.fe_param_mapping)] .== fe_name);
+
+            # We'll pack the average value of these elements into this index and replace all others with zero
+            # (zeros are just in case indexing somewhere else is messed up)
+            first_element = inds[1]; 
+
+            γ[first_element] = mean(γ[inds]);
+            γ[setdiff(inds, first_element)] .= 0;
+
+            # Then we'll replace the corresponding column in FEmat with 1s to assign the average
+            FEmat[:,first_element] .= 1;
+        end
+    else
+        # If not averaging, then we need to construct a matrix that will line up with γ
+        for i in axes(FEmat, 2)
+            name = problem.fe_param_mapping[i].name;
+            value = problem.fe_param_mapping[i].value;
+            FEmat[:,i] = (df[!,name] .== value);
+        end  
+    end
     
     product_FEs = false;
     if "product" ∈ FE
@@ -151,8 +213,11 @@ function compute_demand_function_inner(problem, df;
     s_func(shares_search) = inner_demand_function(shares_search, df, θ, γ, problem, FEmat, product_FEs)
     ans = nlsolve(s_func, 1/(2*J) .* ones(J * size(df,1)), show_trace = show_trace, iterations = max_iter)
 
-    # df[!,r"shares"] .= reshape(ans.zero, size(df,1),J)
-    reshape(ans.zero, size(df,1),J)
+    return (; solved_zero = reshape(ans.zero, size(df,1), J), 
+            f_converged = ans.f_converged,
+            x_converged = ans.x_converged,
+            iterations = ans.iterations)
+
 end
 
 function inner_demand_function(shares_search, df, θ, γ, problem, FEmat, product_FEs)
@@ -165,8 +230,8 @@ function inner_demand_function(shares_search, df, θ, γ, problem, FEmat, produc
     
     shares_search = reshape(shares_search, Int(N),J);
     
+    # Compute sieves using the candidate shares
     df[!,r"shares"] .= shares_search;
-
     Xvec, ~, Bvec, ~, ~ = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; inner = true);
 
     deltas = [];

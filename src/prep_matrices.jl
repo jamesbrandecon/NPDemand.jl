@@ -34,6 +34,8 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
 
     # --------------------------------------------
     # Prep for design matrix and constraints
+    # Order: index vars, then all FEs other than product FEs, then product FEs
+    # --------------------------------------------
     B = []; 
     prod_FE_counter = 1;
     for j = 0:J-1
@@ -85,8 +87,6 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
         
         perm = collect(1:J);
         perm[first_product_in_group] = xj; perm[xj] = first_product_in_group;
-        # perm_s = copy(s);
-        # perm_s[:,first_product_in_group] = s[:,xj]; perm_s[:,xj] = s[:,first_product_in_group];
         
         # Market shares
         for j = 1:1:J
@@ -108,7 +108,6 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
         end
         A_xj = A_xj[:, 2:end]
         A_xj, sym_combos, combos = make_interactions(A_xj, exchange, bO, xj, perm);
-        # full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, bO, first_product_in_group, perm);
             
         # Add index vars as IV
         for k ∈ eachindex(index_vars) 
