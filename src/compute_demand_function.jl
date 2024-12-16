@@ -128,20 +128,24 @@ function compute_demand_function!(problem, df;
             else
                 indexes = 1:n_draws
             end
-
-            ub = [quantile(getindex.(demand_CI[indexes], t), 1-alpha/2) 
+            
+            ub = [
+                [quantile(getindex.(demand_CI[indexes], t, j), 1 - alpha/2) 
                     for t in 1:size(df,1)
-                    ]
-            lb = [quantile(getindex.(demand_CI[indexes], t), alpha/2) 
+                    ] for j in 1:J
+            ]
+            lb = [
+                [quantile(getindex.(demand_CI[indexes], t, j), alpha/2) 
                     for t in 1:size(df,1)
-                    ]
+                    ] for j in 1:J
+            ]
             
             demand .= demand ./ length(demand_CI[indexes]); # Calculate the mean posterior elasticities
             df[!,r"shares"] .= demand;
             
             for i in 0:(J-1)
-                df[!,"shares$(i)_lb"] = lb
-                df[!,"shares$(i)_ub"] = ub
+                df[!,"shares$(i)_lb"] = lb[i+1]
+                df[!,"shares$(i)_ub"] = ub[i+1]
             end
         end
     end
