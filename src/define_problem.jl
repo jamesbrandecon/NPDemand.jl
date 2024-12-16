@@ -364,7 +364,7 @@ function make_param_mapping(problem::NPDProblem)
         column_counter = 1;
         for f ∈ FE
             if f != "product"
-                unique_vals = unique(df[!,f]);
+                unique_vals = sort(unique(df[!,f]));
                 unique_vals = unique_vals[1:end-1]; # Drop one category per FE dimension
                 for fi ∈ unique_vals
                     if (f==FE[1]) & (fi==unique_vals[1])
@@ -392,5 +392,13 @@ function make_param_mapping(problem::NPDProblem)
             end
         end
     end
-    return fe_param_mapping
+
+    # Now re-sort the Dict to make it be in the desired order 
+    # sorted_keys = sort(collect(keys(fe_param_mapping)));
+    # fe_param_mapping_sorted = Dict{Int, NamedTuple}();
+    # for k in sorted_keys
+    #     fe_param_mapping_sorted[k] = fe_param_mapping[k];
+    # end
+
+    return sort(fe_param_mapping)
 end
