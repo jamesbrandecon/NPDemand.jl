@@ -232,7 +232,6 @@ function define_problem(df::DataFrame; exchange::Vector = [],
                         mins,
                         maxs, 
                         FE,
-                        fe_param_mapping,
                         normalization,
                         exchange,
                         design_width,
@@ -282,7 +281,6 @@ mutable struct NPDProblem
     mins 
     maxs
     FE 
-    fe_param_mapping
     normalization
     exchange 
     design_width 
