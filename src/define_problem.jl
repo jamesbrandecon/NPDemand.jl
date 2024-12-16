@@ -352,3 +352,47 @@ function Base.show(io::IO, problem::NPDProblem)
     println(io, "- (x_tol, f_tol): ($obj_xtol, $obj_ftol)")
     println(io, "- Estimated: $estimated_TF")
 end
+
+function make_param_mapping(problem::NPDProblem)
+    FEmat = [];
+    fe_param_mapping = Dict{Int, NamedTuple}(); # Map the index in the FE mat which corresponds to a given FE name and value
+    FE = problem.FE;
+    df = problem.data;
+    exchange = problem.exchange;
+    J = length(problem.Xvec);
+
+    if FE!=[]
+        FEmat = [];
+        column_counter = 1;
+        for f ∈ FE
+            if f != "product"
+                unique_vals = unique(df[!,f]);
+                unique_vals = unique_vals[1:end-1]; # Drop one category per FE dimension
+                for fi ∈ unique_vals
+                    if (f==FE[1]) & (fi==unique_vals[1])
+                        FEmat = reshape((df[!,f] .== fi), size(df,1),1)
+                    else
+                        FEmat = hcat(FEmat, reshape((df[!,f] .== fi), size(df,1),1))
+                    end
+                    fe_param_mapping[column_counter] = (name = f, value = fi)
+                    column_counter += 1
+                end
+            end
+        end
+    end
+
+    product_FEs = false;
+    if "product" ∈ FE
+        product_FEs = true        
+        for j = 1:J  
+            which_group = findall(j .∈ exchange)[1];  
+            first_product_in_group = exchange[which_group][1]; 
+
+            if j !=first_product_in_group # dropping last product's FE for location normalization
+                fe_param_mapping[column_counter] = (name = "product", value = j)    
+                column_counter += 1
+            end
+        end
+    end
+    return fe_param_mapping
+end

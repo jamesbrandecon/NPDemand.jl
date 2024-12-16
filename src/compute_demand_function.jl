@@ -166,6 +166,13 @@ function compute_demand_function_inner(problem, df;
     θ = β[1:problem.design_width]
     γ = β[length(θ)+1:end]
 
+    # Temporary catch for older saved problems that don't have a fe_param_mapping field
+    fe_param_mapping = [];  
+    try 
+        fe_param_mapping = problem.fe_param_mapping;
+    catch
+        fe_param_mapping = make_param_mapping(problem);
+    end
 
     # Make a matrix which can be substituted in lieu of original FEmat
     # All zeros, then replace the selected FE columns/values with 1s
@@ -185,7 +192,7 @@ function compute_demand_function_inner(problem, df;
         # and all others with zeros
         for fe_name in average_over
             # find the elements of γ corresponding to this FE
-            inds = findall([problem.fe_param_mapping[i].name for i in eachindex(problem.fe_param_mapping)] .== fe_name);
+            inds = findall([fe_param_mapping[i].name for i in eachindex(fe_param_mapping)] .== fe_name);
 
             # We'll pack the average value of these elements into this index and replace all others with zero
             # (zeros are just in case indexing somewhere else is messed up)
@@ -200,8 +207,8 @@ function compute_demand_function_inner(problem, df;
     else
         # If not averaging, then we need to construct a matrix that will line up with γ
         for i in axes(FEmat, 2)
-            name = problem.fe_param_mapping[i].name;
-            value = problem.fe_param_mapping[i].value;
+            name = fe_param_mapping[i].name;
+            value = fe_param_mapping[i].value;
             FEmat[:,i] = (df[!,name] .== value);
         end  
     end
