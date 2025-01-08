@@ -37,7 +37,7 @@ function report_constraint_violations(problem;
 
     if (params ==[]) & (problem.chain == [])
         param_vec = problem.results.minimizer; # if there's no chain, use the GMM result
-    elseif (problem.sampling_details.smc == true)
+    elseif (problem.results.filtered_chain != [])
         particles       = problem.results.filtered_chain;
         if (n_draws > 0)
             draw_subset = sample(1:size(particles,1), n_draws, replace = false);
