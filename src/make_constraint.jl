@@ -16,7 +16,6 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     order_vec = [];
     for j = 1:J
         sym_combos = combo_vec[j]
-        # @show sym_combos[1:5]
         orders = -1 .* ones(size(sym_combos,1), J)
         for i ∈ eachindex(sym_combos)
             inds = getindex.(collect.(findall("_", sym_combos[i])),1) .+1
@@ -34,8 +33,15 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
         end
         push!(order_vec, orders)
     end
-    # @show order_vec[1][1:5,:] order_vec[2][1:5,:]
-    # @show combo_vec[1][1:5,:] combo_vec[2][1:5,:]
+    
+    # Under exchangeability, we are re-ordering one too many times
+    # Need to set orders to the order of the first product in the group
+    for e in exchange 
+        store_order = order_vec[e[1]];
+        for j in e
+            order_vec[j] = order_vec[e[1]]
+        end
+    end
     
     # Initialize constraint matrices 
     Aineq = zeros(1, sum(lengths));
@@ -103,16 +109,20 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
                     init_ind = 0;
                 end
                 # Loop over all products in demand function
+                orders = order_vec[inv_j];
                 for j_loop = 1:J
                     other_orders = setdiff(collect(1:J), j_loop)
-                    orders = order_vec[j_loop];
                     for i ∈ eachindex(orders[:,1])
-                        rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,inv_j] .== orders[i,inv_j]+1));
+                        rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
+                                (orders[:,j_loop] .== orders[i,j_loop]+1));
                         rows = getindex.(rows, 1);
-                        try
+                        if length(rows) >= 1
                             rows = rows[1];
+                            try 
                             Aineq = add_constraint(Aineq, init_ind + i, init_ind + rows);
-                        catch
+                            catch 
+                                @show i init_ind rows size(orders) j_loop
+                            end
                         end
                     end
                 end
@@ -126,11 +136,12 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
                     init_ind = 0;
                 end
                 # Loop over all products in demand function
+                orders = order_vec[inv_j];
                 for j_loop = 1:J
                     other_orders = setdiff(collect(1:J), j_loop)
-                    orders = order_vec[j_loop];
                     for i ∈ eachindex(orders[:,1])
-                        rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& (orders[:,inv_j] .== orders[i,inv_j]+1));
+                        rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
+                            (orders[:,j_loop] .== orders[i,j_loop]+1));
                         rows = getindex.(rows, 1);
                         try
                             rows = rows[1];
@@ -146,6 +157,9 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     # diagonal dominance 
         # currently only within group
     if :diagonal_dominance_group ∈ constraints
+        if (J==2) & length(exchange)==1
+            error("With two products and one exchangeable group, use diagonal_dominance_all instead of diagonal_dominance_group")
+        end
         for e ∈ eachindex(exchange)
             inv_j = first_in_exchange[e]
             others_in_group = setdiff(exchange[e], inv_j)
@@ -157,14 +171,14 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             orders = order_vec[inv_j];
             for i = 1:lengths[inv_j]
                 # for j ∈ setdiff(collect(1:J), inv_j)
-                for j ∈ setdiff(e, inv_j)
+                for j ∈ setdiff(exchange[e], inv_j)
                     other_orders = setdiff(collect(1:J), [inv_j, j])
                     row1 = findfirst(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
                     (orders[:,inv_j] .== orders[i,inv_j]+1) .& (orders[:,j] .== orders[i,j]));
                     row2 = findfirst(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
                     (orders[:,inv_j] .== orders[i,inv_j]) .& (orders[:,j] .== orders[i,j]-1));
                 
-                    if (row1 !=nothing) & (row2 !=nothing)
+                    if (!isnothing(row1)) & (!isnothing(row2))
                         row1 = getindex(row1,1);
                         row2 = getindex(row2,1);
                         Aineq = add_constraint(Aineq, init_ind + row2, init_ind + row1);
@@ -175,8 +189,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     end
 
     if :diagonal_dominance_all ∈ constraints
-        for e ∈ eachindex(exchange)
-            inv_j = first_in_exchange[e]
+        for inv_j ∈ first_in_exchange
             orders = order_vec[inv_j];
             if inv_j >1
                 init_ind = sum(lengths[1:inv_j-1])
@@ -187,20 +200,17 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
                 for j ∈ setdiff(collect(1:J), inv_j)
                     other_orders = setdiff(collect(1:J), [inv_j, j])
                     if J > 2
-                        # rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
-                        # (orders[:,inv_j] .== orders[i,inv_j]+1) .& (orders[:,j] .== orders[i,j]-1));
                         row1 = findfirst(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
                         (orders[:,inv_j] .== orders[i,inv_j]+1) .& (orders[:,j] .== orders[i,j]));
+                        # JMB should orders[i,j] + 1 at the END of this line be plus or minus 1?
                         row2 = findfirst(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .& 
-                        (orders[:,inv_j] .== orders[i,inv_j]) .& (orders[:,j] .== orders[i,j]+1));
+                        (orders[:,inv_j] .== orders[i,inv_j]) .& (orders[:,j] .== orders[i,j]-1));
                     else
                         row1 = findfirst((orders[:,inv_j] .== orders[i,inv_j]+1) .& (orders[:,j] .== orders[i,j]));
                         row2 = findfirst((orders[:,inv_j] .== orders[i,inv_j]) .& (orders[:,j] .== orders[i,j]+1));
-                    end
-                    # rows = getindex.(rows, 1);
-                    # rows = rows[1];
-                
-                    if (row1 !=nothing) & (row2 !=nothing)
+                    end 
+
+                    if (!isnothing(row1)) & (!isnothing(row2))
                         row1 = getindex(row1,1);
                         row2 = getindex(row2,1);
                         Aineq = add_constraint(Aineq, init_ind + row2, init_ind + row1);
@@ -229,7 +239,14 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     end
     # @show size(Aineq)
 
+    # ------------------------
+    # Clean up 
     Aineq = Aineq[2:end,:];
+    Aineq = Matrix(hcat(unique(eachrow(Aineq))...)') # Drop redundant inequality constraints
+    if size(Aineq,2)==0
+        Aineq = [];
+    end
+
     Aeq = Aeq[2:end,:];
 
     mins = dropdims(getindex.(argmin(Aeq, dims=2),2), dims=2);

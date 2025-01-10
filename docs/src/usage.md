@@ -1,4 +1,4 @@
-# Usage  
+# Basic Usage  
 Having described the some of the estimation details, we now describe how to use the package.
 
 ### Defining Problems
@@ -10,8 +10,6 @@ The first step to estimating demand is to define the problem. The `define_proble
 - `bO`: an integer indicating the order of Bernstein polynomials to be used in the demand system. The default value is 2, and larger values will result in (significantly) more parameters.
 - `FE`: a list of strings, where each string corresponds to a column in `df` that contains fixed effects to be included in the demand system.
 - `constraint_tol`: the tolerance for the constraint satisfaction problem.
-- `obj_xtol`: the tolerance for the unconstrained optimization problem.
-- `obj_ftol`: the tolerance for the unconstrained optimization problem.
 
 
 #### Constraints 
@@ -29,39 +27,39 @@ All of these constraints are linear except for the last.
 Here is an example of a problem definition using many of the options described above: 
 ```julia
 bO = 2; 
-exchange = [[1 2], [3 4]]
+exchange = [[1 2], [3 4]] # the first and second products are exchangeable, as are the third and fourth
 index_vars = ["prices", "x"]
-constraint_tol = 1e-10;
-obj_xtol = 1e-5;
-obj_ftol = 1e-5;
 
-constraints = [:exchangeability, :diagonal_dominance_all, :monotone, :subs_in_group]; 
+constraints = [:exchangeability, :diagonal_dominance_all, :monotone]; 
 npd_problem = define_problem(df;  
                             exchange = exchange,
                             index_vars = index_vars, 
                             constraints = constraints,
                             bO = bO,
-                            FE = [],
-                            constraint_tol = constraint_tol,
-                            obj_xtol = obj_xtol, 
-                            grid_size = 2,
-                            obj_ftol = obj_ftol); 
+                            FE = []); 
 ```
-After running this command, `npd_problem` is now of type `NPDemand.NPDProblem`. The problem contains many components that would be difficult for users to read and understand, 
-so for ease of use we have included a `show` method for `NPDemand.NPDProblem` which prints out the core components of the problem definition. 
+After running this command, `npd_problem` is now of type `NPDemand.NPDProblem`. The problem contains many components that would be difficult for users to read and understand, so for ease of use we include a `show` method for `NPDemand.NPDProblem` which prints out the core components of the problem definition. 
 
 ```julia
 @show npd_problem;
 ```
 
 ### One-line estimation: estimate! 
-Estimation of a defined problem can be done via a call to the `NPDemand.estimate!` function, as shown here: 
+Estimation of a defined problem can be done via a call to the `NPDemand.estimate!` function: 
 ```julia 
-estimate!(npd_problem, max_outer_iterations = 10, show_trace = false, verbose = true)
+estimate!(npd_problem)
 ``` 
-The key options and inputs to this function are as follows: 
-    - `npd_problem`: the problem to be estimated, of type `NPDemand.NPDProblem`.
-    - `max_outer_iterations`: the maximum number of iterations to be used in the outer loop (the loop over which the penalty which enforces constraints is increased) of the estimation procedure. 
-    - `max_inner_iterations`: the maximum number of iterations to be used in the inner optimizer. This should be set to a large number. 
-    - `verbose`: a boolean indicating whether to print the steps of estimation, including any pre-processing and the number of iterations of the outer loop. The default value is true.
-    - `show_trace`: a boolean indicating whether to print the trace of the inner loop of the estimation procedure. The default value is true.
+
+### Price elasticities
+Similarly, we can then calculate all price elasticities between products in all markets via
+
+```julia
+price_elasticities!(problem)
+```
+
+We can also quickly summarize the median of each element of the elasticity matrix: 
+```julia
+summarize_elasticities(problem, "matrix", "quantile", q = 0.5)
+```
+
+More details are included in the Advanced Usage and Functions pages. 

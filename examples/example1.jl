@@ -25,16 +25,12 @@ npd_problem = define_problem(df;
                             index_vars = index_vars, 
                             constraints = constraints,
                             bO = bO,
-                            FE = ["dummyFE", "product"],
-                            constraint_tol = constraint_tol,
-                            obj_xtol = obj_xtol,
-                            obj_ftol = obj_ftol);
+                            FE = ["dummyFE", "product"]
+                            );
 show(npd_problem)
 
 # Estimate problem and plot comparison of estimated and true own-price elasticities
-estimate!(npd_problem, 
-    max_outer_iterations = 20000, # max number of times to solve problem while iteratively increasing penalties
-    max_inner_iterations = 2000) # max number of iterations within each run of the objective function
+estimate!(npd_problem) 
 
 price_elasticities!(npd_problem);
 true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
