@@ -29,11 +29,11 @@ $$\pi(\theta^*) \propto \bar{\pi}(\theta^*)\mathbf{1}_\mathcal{C}(\theta),$$
 
 where $\mathcal{C}$ denotes the region of parameter space in which all of the desired constraints are satisfied in the data. With this prior, we then have to sample from a quasi-posterior of the form
 
-$$ \pi(\theta^*|\text{data})\propto e^{\ell_n(g^{-1}(\theta^*))} \bar{\pi}(\theta^*)\mathbf{1}_\mathcal{C}(\theta) $$ 
+$$\pi(\theta^*|\text{data})\propto e^{l_n(g^{-1}(\theta^*))} \bar{\pi}(\theta^*)\mathbf{1}_\mathcal{C}(\theta)$$ 
 
 We do this in two steps. First, we sample from the simpler prior described in the previous subsection, and then we run a "Sequentially Constrained Monte Carlo" (SMC) algorithm in order to sample from this more complex prior. We describe SMC on its own page in the documentation. 
 
 ## Sampling
-By default, for our prior with linear constraints above, the `estimate` function uses the Metropolis-Hastings sampling from [Turing.jl](https://turinglang.org/) with proposal step sizes controlled by the `step` keyword. After importing Turing, NPDemand can also take in custom samplers from Turing.jl, including Hamiltonian Monte Carlo (HMC) and No U-Turn Samplers (NUTS) with auto-differentiation through [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl). 
+By default, for our prior with linear constraints above, the `estimate` function uses Random Walk Metropolis-Hastings sampling from [Turing.jl](https://turinglang.org/) with proposal step sizes controlled by the `step` keyword. After importing Turing, NPDemand can also take in custom samplers from Turing.jl, including Hamiltonian Monte Carlo (HMC) and No U-Turn Samplers (NUTS) with auto-differentiation through [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl). 
 
 For SMC (implemented in the `smc!` function), the user can stil control the step size via `step`, but we have only implemented Metropolis-Hastings sampling to-date. 

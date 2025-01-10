@@ -20,7 +20,8 @@ function price_elasticities!(problem;
 
     if problem.chain ==[]
         elast = price_elasticities_inner(problem);
-        problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast)
+        problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast.all_elast_mat)
+        problem.all_jacobians    = elast.Jmat
     else
         burn_in = problem.sampling_details.burn_in;
         skip    = problem.sampling_details.skip;
@@ -34,6 +35,7 @@ function price_elasticities!(problem;
 
         if CI == []
             elast   = [zeros(J,J) for i in 1:T];
+            jacob   = [zeros(J,J) for i in 1:T];
             nbetas = get_nbetas(problem);
             for i in ProgressBar(1:n_draws)
                 sample_i = problem.results.filtered_chain[i,:];
@@ -43,12 +45,16 @@ function price_elasticities!(problem;
                                 nbetas, 
                                 problem)
                 elast_i = price_elasticities_inner(problem, β = β_i)
-                elast = elast .+ elast_i;
+                elast = elast .+ elast_i.all_elast_mat;
+                jacob = jacob .+ elast_i.Jmat;
             end
             elast .= elast ./ n_draws; # Calculate the mean posterior elasticities
+            jacob .= jacob ./ n_draws;
             problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast)
+            problem.all_jacobians    = jacob
         else
             elast   = [zeros(J,J) for i in 1:T];
+            jacob   = [zeros(J,J) for i in 1:T];
             alpha = 1 - CI;
             try 
                 @assert ((n_draws > 0) & (n_draws <= size(problem.results.filtered_chain,1)))
@@ -56,7 +62,6 @@ function price_elasticities!(problem;
                 error("`n_draws` must be greater than 0 and weakly less than the total number of draws in the final chain")
             end
             nbetas      = get_nbetas(problem);
-            # draw_order  = sample(1:size(problem.results.filtered_chain,1), n_draws, replace = false);
 
             for i in ProgressBar(1:n_draws)
                 sample_i    = problem.results.filtered_chain[i,:];
@@ -66,7 +71,8 @@ function price_elasticities!(problem;
                                 nbetas, 
                                 problem)
                 elast_i     = price_elasticities_inner(problem, β = β_i)
-                elast       = elast + elast_i;
+                elast       = elast + elast_i.all_elast_mat;
+                jacob       = jacob + elast_i.Jmat;
                 push!(elast_CI, elast_i);
             end
             ub = [
@@ -78,11 +84,13 @@ function price_elasticities!(problem;
                 for t in 1:T
                     ]
             elast .= elast ./ n_draws; # Calculate the mean posterior elasticities
+            jacob .= jacob ./ n_draws;
             problem.all_elasticities = DataFrame(
                 market_ids = problem.data.market_ids, 
                 all_elasticities = elast, 
                 ub = ub, 
                 lb = lb)
+            problem.all_jacobians    = jacob
         end
     end
 end
@@ -184,10 +192,9 @@ function price_elasticities_inner(npd_problem; β = npd_problem.results.minimize
         end
         
         # push!(Jmat, temp)
-        Jmat[ii] = temp;
+        Jmat[ii] = J_s;
     
         # Market vector of prices/shares
-        ps = at[ii,:]./s[ii,:];
         ps_mat = zeros(J,J)
         for j1 = 1:J, j2 = 1:J 
             ps_mat[j1,j2] = at[ii,j2]/s[ii,j1];
@@ -196,7 +203,7 @@ function price_elasticities_inner(npd_problem; β = npd_problem.results.minimize
         all_elast_mat[ii] = temp .* ps_mat;
     end
 
-    all_elast_mat
+    (;all_elast_mat, Jmat)
 end
 
 

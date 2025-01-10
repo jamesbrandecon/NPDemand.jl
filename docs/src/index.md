@@ -4,7 +4,7 @@
 CurrentModule = NPDemand
 ```
 
-Documentation for NPDemand.jl, a package for nonparametric demand estimation. This version of the package will be introduced formally and used by (in-progress) Brand and Smith (2024).  
+Documentation for NPDemand.jl, a package for nonparametric demand estimation. This version of the package will be introduced formally and used by (in-progress) Brand and Smith (2025).  
 
 ## Package Framework 
 This package is meant to make the estimation of price elasticities as easy, and as close to `reg y x, r`, as possible. There are three necessary steps: 
