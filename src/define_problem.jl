@@ -118,9 +118,9 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     end
 
     # If user provides a 0-indexed exchange vector, convert to 1-indexed
-    if 0 ∈ union(exchange...)
+    if (exchange !=[]) && (0 ∈ union(exchange...))
         for i in eachindex(exchange)
-            exchange[i] = exchange[i] .- 1;
+            exchange[i] = exchange[i] .+ 1;
         end
     end
 

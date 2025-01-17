@@ -12,7 +12,7 @@ own = own_elasticities(npd_problem) # Extract own-price elasticities
 # Summaries of elasticities
 summarize_elasticities(npd_problem, "median")
 summarize_elasticities(npd_problem, "mean")
-summarize_elasticities(npd_problem, "quantile"; q = 0.3) # 30th percentile
+summarize_elasticities(npd_problem, "quantile"; q = 0.3, CI = 0.95) # 30th percentile, with 95% credible intervals
 ```
 
 ## Estimated Demand Functions
@@ -30,6 +30,8 @@ Here is an example of how to use this function to compute the demand function, v
 # Create a new DataFrame which can be filled in with estimated demand functions
 alt_price_df = DataFrame(); # Initialize dataframe 
 alt_price_df.prices1 = 1.1 .* ones(10); alt_price_df.prices2 .= 1.1; alt_price_df.prices3 .= 1.1;
+
+# Specify prices for product 0 (the first product) as a range
 alt_price_df.prices0 .= collect(range(0.7,1.3, length=10));
 for j = 0:3
     alt_price_df[!,"shares$j"] .=0; # shares set to zero to initialize the fields-- compute_demand_function will ignore and replace these values

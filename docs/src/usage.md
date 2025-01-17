@@ -9,17 +9,16 @@ The first step to estimating demand is to define the problem. The `define_proble
 - `constraints`: a list of symbols, where each symbol corresponds to a constraint to be imposed on the demand system.
 - `bO`: an integer indicating the order of Bernstein polynomials to be used in the demand system. The default value is 2, and larger values will result in (significantly) more parameters.
 - `FE`: a list of strings, where each string corresponds to a column in `df` that contains fixed effects to be included in the demand system.
-- `constraint_tol`: the tolerance for the constraint satisfaction problem.
 
 
 #### Constraints 
 So far, we have implemented the following constraints: 
 - `:exchangeability`: Products given by `exchange` are exchangeable, meaning that product identities do not affect demand. Product fixed effects can stil be estimated
 - `:monotone`: All demand functions are monotonic in their own index 
-- `:diagonal\_dominance\_all`: All demand functions are diagonally dominant
-- `:diagonal\_dominance\_group`: All demand functions are diagonally dominant within exchangeable groups
+- `:diagonal_dominance_all`: All demand functions are diagonally dominant
+- `:diagonal_dominance_group`: All demand functions are diagonally dominant within exchangeable groups
 - `:all_substitutes`: All inverse demand functions are increasing in all indexes, which is a necessary condition for all products to be substitutes
-- `:subs\_in\_group`: Cross-price elasticities of demand are positive for every pair of goods within an exchangeable group. No restrictions on the Jacobian are made across groups
+- `:subs_in_group`: Cross-price elasticities of demand are positive for every pair of goods within an exchangeable group. No restrictions on the Jacobian are made across groups
 
 All of these constraints are linear except for the last. 
 
@@ -61,5 +60,3 @@ We can also quickly summarize the median of each element of the elasticity matri
 ```julia
 summarize_elasticities(problem, "matrix", "quantile", q = 0.5)
 ```
-
-More details are included in the Advanced Usage and Functions pages. 
