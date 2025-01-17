@@ -27,6 +27,9 @@ HMC(0.01,
 
 After this has been run, the problem stores two key objects. One is the original chain (without any burn-in or thinning) in `problem.chain`, and the other is a "filtered" chain (*with* burn-in and thinning) in `problem.results.filtered_chain`. Post-estimation tools will use the filtered chain for calculating price elasticities and counterfactuals. 
 
+!!! note
+    The user can also input `sampler = "mh"` or `sampler = "hmc"` to use these samplers with options that have worked well for us during development and testing. 
+
 ## Nonlinearly imposed constraints (SMC)
 In order to use SMC, you must `estimate!` a problem first, with `quasibayes` set to `true`. Then, you can use the following command: 
 ```julia

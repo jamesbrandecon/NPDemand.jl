@@ -151,7 +151,7 @@ end
         burn_in::Real = 0.25, 
         skip::Int = 5,
         n_attempts = 0,
-        penalty = Inf, 
+        penalty = 0, 
         step::Union{Real, Symbol} = 0.01)
 
 Estimates the problem using the specified parameters.
@@ -166,7 +166,7 @@ Estimates the problem using the specified parameters.
 - `burn_in::Real`: The fraction of samples to drop as burn-in. Must be less than 1. Default is 0.25.
 - `skip::Int`: The number of samples to skip between saved samples. Default is 5.
 - `n_attempts`: The number of attempts to find a valid starting point for the sampler. Default is 0.
-- `penalty`: The penalty value for the objective function. Default is `Inf`.
+- `penalty`: The penalty value for the objective function. Default is 0.
 - `step::Union{Real, Symbol}`: The step size for the sampler. Can be a real number or the symbol `:auto` to automatically calculate the step size. Default is 0.01.
 
 """
@@ -179,7 +179,7 @@ function estimate!(problem::NPDProblem;
     burn_in::Real = 0.25, 
     skip::Int = 5,
     n_attempts = 0,
-    penalty = Inf, 
+    penalty = 0, 
     step::Union{Real, Symbol} = 0.01)
 
     try 
@@ -252,7 +252,7 @@ function estimate!(problem::NPDProblem;
                 :gamma => AdvancedMH.RandomWalkProposal(MvNormal(zeros(gamma_length-1), diagm(step*ones(gamma_length-1)))),
                 :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), diagm(step*ones(sum(nbetas))))))
         elseif (sampler ==[]) | (sampler == "hmc")
-            sampler = HMC(0.01, 1; adtype = AutoZygote())
+            sampler = HMC(0.01, 1; adtype = AutoForwardDiff())
         end
         
         for j in 1:sum(nbetas)
@@ -362,7 +362,7 @@ Run sequentially constrained Monte Carlo (SMC) on the problem.
 - `burn_in::Real`: The fraction of samples to be discarded as burn-in. Default is 0.25.
 - `mh_steps`: The number of Metropolis-Hastings steps per iteration. Default is calculated based on the size of the filtered chain.
 - `seed`: The random seed for the SMC algorithm. Default is 4132.
-- `smc_method`: The method for choosing the SMC grid. Default is :adaptive.
+- `smc_method`: The method for choosing the SMC grid. Default is :adaptive. Other options are [:linear\\_grid, :geometric\\_grid, and :logit\\_grid], which specify grids of each form between zero and the maximum penalty.
 - `max_iter`: The maximum number of iterations for the SMC algorithm. Default is 1000.
 - `adaptive_tolerance`: Whether to use adaptive tolerance for the SMC algorithm. Default is false.
 - `max_violations`: The maximum allowed fraction of markets with violations. Default is 0.01.

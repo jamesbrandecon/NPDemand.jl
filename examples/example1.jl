@@ -14,6 +14,8 @@ df = toDataFrame(s,p,z,x);
 # Specify estimation/model parameters
 bO = 2; 
 exchange = [[1 2], [3 4]]
+# Note: exchangability can be either 0-indexed or 1-indexed. This also works:
+# exchange = [[0 1], [2 3]]; 
 index_vars = ["prices", "x"]
 constraint_tol = 1e-5;
 obj_xtol = 1e-5;
