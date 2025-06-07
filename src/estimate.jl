@@ -180,7 +180,17 @@ function estimate!(problem::NPDProblem;
     skip::Int = 5,
     n_attempts = 0,
     penalty = 0, 
-    step::Union{Real, Symbol} = 0.01)
+    step::Union{Real, Symbol} = 0.01, 
+    approximation_details = Dict(
+        :order => 1, 
+        :max_interaction => 2,
+        :sieve_type => "bernstein"
+    )
+    )
+
+    sieve_type = approximation_details[:sieve_type]
+    order = approximation_details[:order]
+    max_interaction = approximation_details[:max_interaction]
 
     try 
         @assert (step isa Real) | (step == :auto)
@@ -218,8 +228,6 @@ function estimate!(problem::NPDProblem;
     find_prices = findall(problem.index_vars .== "prices");
     price_index = find_prices[1];
 
-    problem.tempmats = calc_tempmats(problem);
-
     # Estimate the problem only with linear constraints if not using quasi-bayes
     if !quasi_bayes
         verbose && println("Estimating problem in JuMP without nonlinear constraints....")
@@ -241,9 +249,9 @@ function estimate!(problem::NPDProblem;
         gamma_length = size(Bvec[1],2);
 
         # Define inputs to quasi-bayes sampling 
-        lbs             = get_lower_bounds(problem)
-        parameter_order = get_parameter_order(lbs)
         nbetas          = get_nbetas(problem)
+        lbs             = sieve_type == "bernstein" ? get_lower_bounds(problem) : []
+        parameter_order = lbs == []                 ? get_parameter_order(lbs)  : 1:sum(nbetas)
         vbetastar       = 10;
         vbeta           = zeros(sum(nbetas))
 
@@ -255,12 +263,16 @@ function estimate!(problem::NPDProblem;
             sampler = HMC(0.01, 1; adtype = AutoForwardDiff())
         end
         
-        for j in 1:sum(nbetas)
-            if isnothing(lbs[j])
-                vbeta[j] = vbetastar
-            else 
-                vbeta[j] = sqrt(log(1 + vbetastar))
+        if sieve_type == "bernstein" 
+            for j in 1:sum(nbetas)
+                if isnothing(lbs[j])
+                    vbeta[j] = vbetastar
+                else 
+                    vbeta[j] = sqrt(log(1 + vbetastar))
+                end
             end
+        else 
+            vbeta .= vbetastar
         end
         
         prior = Dict(
@@ -273,17 +285,17 @@ function estimate!(problem::NPDProblem;
             "nbetas" => nbetas
         )
 
-        problem.tempmats = calc_tempmats(problem);
+        # problem.tempmats = calc_tempmats(problem); # this already happens above
         
         # Find a starting point for sampling
         if ((problem.results != []) & (n_attempts == 0))
             println("Using existing minimizer as the initial point")
             start = [problem.results.minimizer[NPDemand.sieve_to_betas_index(problem)]; problem.results.minimizer[problem.design_width+2:end]]
         elseif (n_attempts == 0)
-            start, start_exit = find_starting_point(problem, prior, calc_tempmats(problem), weight_matrices, n_attempts = 1);
+            start, start_exit = find_starting_point(problem, prior, problem.tempmats, weight_matrices, n_attempts = 1);
         else
             verbose && println("Finding a valid starting point for sampler....")
-            start, start_exit = find_starting_point(problem, prior, calc_tempmats(problem), weight_matrices, n_attempts = n_attempts);
+            start, start_exit = find_starting_point(problem, prior, problem.tempmats, weight_matrices, n_attempts = n_attempts);
             if start_exit == "success"
                 println("Valid starting point found")
             else
@@ -309,7 +321,8 @@ function estimate!(problem::NPDProblem;
                 sample_quasibayes(problem, prior, problem.tempmats, weight_matrices; 
                 penalty = penalty, matrix_storage_dict = matrix_storage_dict), 
                 sampler, n_samples,
-                initial_params = start
+                initial_params = start, 
+                sieve_type = sieve_type
                 ); 
 
         # Convert thh chain into the parameter sieve
@@ -386,7 +399,13 @@ function smc!(problem::NPDemand.NPDProblem;
     max_iter            = 1000,
     adaptive_tolerance  = false, 
     max_violations      = 0.01,
-    extra_mh_loops      = 0)
+    extra_mh_loops      = 0, 
+    approximation_details = Dict(
+        :order => 1, 
+        :max_interaction => 2,
+        :sieve_type => "bernstein"
+    )
+    )
 
     try 
         @assert smc_method ∈ [:adaptive, :linear_grid, :geometric_grid, :logit_grid]
@@ -396,6 +415,7 @@ function smc!(problem::NPDemand.NPDProblem;
 
     burn_in_int = Int(burn_in * size(problem.chain,1));
     modulo_num = Int(1 + extra_mh_loops);
+    sieve_type = approximation_details[:sieve_type]
 
     # Add smc_results to problem
     problem.smc_results = smc(problem::NPDemand.NPDProblem; 
@@ -411,13 +431,15 @@ function smc!(problem::NPDemand.NPDProblem;
         max_iter            = max_iter, 
         adaptive_tolerance  = adaptive_tolerance, 
         max_violations      = max_violations, 
-        modulo_num          = modulo_num);
+        modulo_num          = modulo_num, 
+        approximation_details = approximation_details
+        );
     
     # Calculate new posterior mean and replace problem results 
-    lbs             = get_lower_bounds(problem)
-    parameter_order = get_parameter_order(lbs)
+    lbs             = sieve_type == "bernstein" ? get_lower_bounds(problem) : []
+    parameter_order = sieve_type == "bernstein" ? get_parameter_order(lbs) : 1:sum(get_nbetas(problem))
     nbetas          = get_nbetas(problem)
-    nbeta           = length(lbs)
+    nbeta           = sum(nbetas)
 
     nparticles      = size(problem.smc_results.thetas,1);
     

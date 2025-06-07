@@ -29,11 +29,18 @@ function report_constraint_violations(problem;
     verbose = true,
     params = [], 
     output = "dict", 
-    n_draws::Int = 0)
+    n_draws::Int = 0, 
+    approximation_details = Dict(
+        "sieve_type" => "bernstein", 
+        "order" => 2, 
+        "max_interaction" => 1)
+        )
 
+    sieve_type      = approximation_details[:sieve_type];
     nbetas          = NPDemand.get_nbetas(problem);
-    lbs             = NPDemand.get_lower_bounds(problem);
-    nbeta           = length(lbs);
+    lbs             = sieve_type == "bernstein" ? NPDemand.get_lower_bounds(problem) : [];
+    nbeta           = sum(nbetas);
+    
 
     if (params ==[]) & (problem.chain == [])
         param_vec = problem.results.minimizer; # if there's no chain, use the GMM result
@@ -45,7 +52,12 @@ function report_constraint_violations(problem;
         end
         betas           = particles[:,1:nbeta];
         gammadraws      = particles[:,nbeta+1:end];
-        thetas_sieve    = vcat([map_to_sieve(betas[i,:], gammadraws[i,:], problem.exchange, nbetas, problem) for i in 1:size(particles,1)]...)
+        thetas_sieve    = vcat([map_to_sieve(
+                                    betas[i,:], 
+                                    gammadraws[i,:], 
+                                    problem.exchange, 
+                                    nbetas, 
+                                    problem) for i in 1:size(particles,1)]...)
         param_vec       = thetas_sieve; # (possibly) limited set of draws from thinned chain
     else  
         param_vec = params; # otherwise, use whatever is passed in by the user

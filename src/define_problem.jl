@@ -43,9 +43,19 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
 function define_problem(df::DataFrame; exchange::Vector = [], 
     index_vars = ["prices"], price_iv = [], FE = [], 
     constraints = [], bO = 2, 
-    obj_xtol = 1e-5, obj_ftol = 1e-5, constraint_tol = 1e-5, # these inputs are no longer used 
+    obj_xtol = 1e-5, obj_ftol = 1e-5, 
+    constraint_tol = 1e-5, # these inputs are no longer used 
     normalization=[], 
-    verbose = false)
+    verbose = false, 
+    sieve_type = "polynomial", approximation_details = Dict())
+    
+    if approximation_details != Dict()
+        bO    = approximation_details[:order]
+        order = approximation_details[:order]
+         
+        max_interaction = approximation_details[:max_interaction]
+        sieve_type = approximation_details[:sieve_type]
+    end
     
     find_prices = findall(index_vars .== "prices")[1];
 
@@ -105,7 +115,7 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     end
 
     try 
-        @assert length(exchange) <=2
+        @assert (length(exchange) <=2) | (sieve_type == "polynomial")
     catch 
         error("NPDemand currently only supports models with two or fewer exchangeable groups in `exchange`")
     end
@@ -196,13 +206,26 @@ function define_problem(df::DataFrame; exchange::Vector = [],
         end
     end
     
-    verbose && println("Making Bernstein polynomials....")
-    Xvec, Avec, Bvec, syms, combos = prep_matrices(df, exchange, index_vars, FEmat, product_FEs, bO; price_iv = price_iv, verbose = verbose);
+    verbose && println("Making polynomial approximations....")
+    Xvec, Avec, Bvec, syms, combos = prep_matrices(
+        df, exchange, index_vars, FEmat, product_FEs, bO; 
+        price_iv = price_iv, verbose = verbose, 
+        approximation_details = approximation_details);
     
-    if constraints !=[]
+    if constraints !=[] && sieve_type == "bernstein"
         verbose && println("Making linear constraint matrices....")
         Aineq, Aeq, maxs, mins = make_constraint(df, constraints, exchange, syms);
-    else
+    # elseif constraints !=[] && sieve_type == "polynomial"
+    #     # verbose && println("Making linear constraint matrices....")
+    #     Aeq = [];
+    #     # for exchange_ind = 1:length(exchange)
+    #     #     for prod_ind in exchange[exchange_ind]
+                
+    #     #     end
+    #     # end
+    #     # vcat!(
+    #     #     Aeq, 
+    else 
         Aineq = [];
         Aeq = [];
         mins = []; 
@@ -250,6 +273,12 @@ function define_problem(df::DataFrame; exchange::Vector = [],
                         [], 
                         [], 
                         [])
+
+    verbose && println("Constructing helper matrices for elasticities...")
+    problem.tempmats = calc_tempmats(
+        problem; 
+        approximation_details = approximation_details);
+    verbose && println("Done constructing problem.")
     return problem
 end
 

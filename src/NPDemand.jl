@@ -1,7 +1,9 @@
 module NPDemand
 
 using StaticArrays, JuMP, Ipopt, OSQP
-using LinearAlgebra, Statistics, Optim, Compat, NLopt, NLsolve, DataFrames, LineSearches, Combinatorics, Primes
+using LinearAlgebra, Statistics, Optim 
+using Compat, NLopt, NLsolve, DataFrames
+using LineSearches, Combinatorics, Primes
 using ForwardDiff, Strided
 using ForwardDiff: GradientConfig, Chunk
 using StatsBase
@@ -17,10 +19,11 @@ using Printf
 
 include("simulate_logit.jl")
 include("toDataFrame.jl")
-include("b.jl")
-include("bern.jl")
-include("db.jl")
-include("dbern.jl")
+# include("b.jl")
+# include("bern.jl")
+# include("db.jl")
+# include("dbern.jl")
+include("sieve_functions.jl")
 include("prep_matrices.jl")
 include("define_problem.jl")
 include("objective_functions.jl")
@@ -32,7 +35,6 @@ include("estimate.jl")
 include("compute_demand_function.jl")
 include("quasibayes.jl")
 include("constraint_checks.jl")
-
 
 # include("solve_s_nested_flexible.jl")
 

@@ -1,38 +1,48 @@
-function calc_tempmats(problem::NPDProblem)
+function calc_tempmats(problem::NPDProblem;
+    approximation_details::Dict{Symbol, Any} = Dict(), recipe = nothing)
+
     J = length(problem.Xvec);
 
-    s        = problem.data[:, r"shares"];
+    s        = Matrix(problem.data[:, r"shares"]);
     exchange = problem.exchange;
     bO       = problem.bO;
     bernO    = convert.(Integer, bO);
     
     tempmats = Matrix{Float64}[]
     perm_s   = zeros(size(s));
+    nbetas   = size.(problem.Xvec,2);
+
+    if isnothing(recipe)
+        recipes = [ begin
+            ex2 = length(exchange)==J ? [] : adjust_exchange(exchange, j1)
+            build_poly_recipe(J;
+                order           = approximation_details[:order],
+                max_interaction = approximation_details[:max_interaction],
+                exchange        = ex2)
+          end for j1 in minimum.(exchange)]
+      end
 
     for j1 = 1:J
-        which_group = findall(j1 .∈ exchange)[1];
-        first_product_in_group = exchange[which_group][1];
-
-        perm = collect(1:J);
-        perm[first_product_in_group] = j1; perm[j1] = first_product_in_group;
-    
-        perm_s .= s;
-        perm_s[:,first_product_in_group] = s[:,j1]; perm_s[:,j1] = s[:,first_product_in_group];
-                
+        which_group = findfirst(j1 .∈  exchange); # find the group corresponding to this product
+        first_product_in_group = minimum(exchange[which_group]);
+        _, permuted_shares, permutations = get_params_one_equation(j1; 
+            exchange = exchange, 
+            s = s, 
+            θ = 1:problem.design_width, # not needed --providing a dummy vector
+            nbetas = nbetas)
+        
         for j2 = 1:J 
-            tempmat_s = zeros(size(s,1),1)
-            for j_loop = 1:1:J
-                stemp = perm_s[:,j_loop]; # j_loop = 1 -> stemp == perm_s[:,1] = s[:,2];
-                # j1=3, j2=4. j_loop = 4 -> stemp = perm_s[:,4] = s[:,4]
-                if j2 == perm[j_loop] # j2==2, perm[1] ==2, so s[:,2] added as derivative 
-                    tempmat_s = [tempmat_s dbern(stemp, bernO)];
-                else 
-                    tempmat_s = [tempmat_s bern(stemp, bernO)];
-                end
-            end
-            tempmat_s = tempmat_s[:,2:end]
-            tempmat_s, ~, ~ = NPDemand.make_interactions(tempmat_s, exchange, bernO, j1, perm);
-            push!(tempmats, tempmat_s);
+            # println("Calculating tempmat for j1 = ", j1, " and j2 = ", j2)
+            tempmat_s = calc_derivative_sieve(permutations[j1], permutations[j2];
+                exchange          = isempty(exchange) ? [] : adjust_exchange(exchange, first_product_in_group),
+                shares            = permuted_shares,             
+                permuted_shares   = permuted_shares,
+                perm              = permutations,
+                bernO             = bernO,
+                sieve_type        = approximation_details[:sieve_type],
+                recipe            = recipes[which_group]
+                )
+            push!(tempmats, tempmat_s)
         end
     end
     # Take transpose of temp_storage so that it's correct for future use
@@ -68,11 +78,10 @@ function elast_mat_zygote(θ::AbstractArray{T},
     indexes     = [0;cumsum(size.(problem.Xvec,2))];
     temp_length = size(problem.data,1); #length(dsids[1,1,:]);
 
-    # @views begin
-        dsids_raw = [tempmat_storage[j1, j2] * θ[indexes[j1]+1:indexes[j1+1]] for j1 in 1:J, j2 in 1:J]
-        dsids = [dsids_raw[j1, j2][i] for j1 in 1:J, j2 in 1:J, i in 1:length(dsids_raw[1, 1])]
-        all_elast_mat = [inner_elast_loop(dsids[:, :, ii], J, at[ii, :], s[ii, :]; type = type) for ii in 1:temp_length]
-    # end
+    dsids_raw     = [tempmat_storage[j1, j2] * θ[indexes[j1]+1:indexes[j1+1]] for j1 in 1:J, j2 in 1:J]
+    dsids         = [dsids_raw[j1, j2][i] for j1 in 1:J, j2 in 1:J, i in 1:length(dsids_raw[1, 1])]
+    all_elast_mat = [inner_elast_loop(dsids[:, :, ii], J, at[ii, :], s[ii, :]; type = type) for ii in 1:temp_length]
+
     return all_elast_mat
 end
 
@@ -160,7 +169,7 @@ function reparameterization_draws(betastar_draws, lbs, parameter_order)
     nbeta = size(betastar_draws, 2)
     ndraws = size(betastar_draws, 1)
     beta_draws = zeros(eltype(betastar_draws), ndraws,nbeta)
-    if all(lbs .==5000)
+    if all(lbs .==5000) | (lbs == [])
         beta_draws .= betastar_draws;
     else
         for r in 1:ndraws
@@ -176,33 +185,54 @@ function reparameterization_draws(betastar_draws, lbs, parameter_order)
     return beta_draws
 end
 
-function map_to_sieve(beta::AbstractArray{T}, gamma::AbstractArray{T}, exchange::Vector{Matrix{Int64}}, nbetas::Vector{Int64}, problem::NPDemand.NPDProblem) where T
-    # @assert sum(nbetas) == length(beta)
+function map_to_sieve(beta::AbstractArray{T}, gamma::AbstractArray{T}, exchange::Vector, 
+    nbetas::Vector{Int64}, problem::NPDemand.NPDProblem; sieve_type = "bernstein") where T
     
-    nbeta = sum(nbetas); # number of parameters in each unique sieve
-    J = length(problem.Xvec);
+    if sieve_type == "polynomial"
+        # –– build product‐wise index (one block of size=size(Xvec[j],2))
+        J            = length(problem.Xvec)
+        counts       = size.(problem.Xvec,2)
+        starts_prod  = [1; cumsum(counts)[1:end-1] .+ 1]
+        ends_prod    = cumsum(counts)
+        # –– build group‐wise index in β
+        starts_grp   = [1; cumsum(nbetas)[1:end-1] .+ 1]
+        ends_grp     = cumsum(nbetas)
+        # –– fill each product j with its group’s β‐block
+        sieve_params = zeros(T, sum(counts))
+        for j in 1:J
+            g = findfirst(x->j in x, exchange)
+            sieve_params[starts_prod[j]:ends_prod[j]] .=
+                beta[starts_grp[g]:ends_grp[g]]
+        end
+        # –– append constant and γ, reshape as before
+        allp = [sieve_params; 1.0; gamma]
+        return reshape(allp, 1, length(allp))
+    else
+        nbeta = sum(nbetas); # number of parameters in each unique sieve
+        J = length(problem.Xvec);
 
-    # indexes in sieve space 
-    starts_sieve  = [1;cumsum(size.(problem.Xvec,2))[1:end-1] .+ 1]; 
-    ends_sieve    = cumsum(size.(problem.Xvec,2))
+        # indexes in sieve space 
+        starts_sieve  = [1;cumsum(size.(problem.Xvec,2))[1:end-1] .+ 1]; 
+        ends_sieve    = cumsum(size.(problem.Xvec,2))
 
-    # indexes in base parameter space
-    starts_params = [1;nbetas[1].+1];
-    ends_params   = cumsum(nbetas);
+        # indexes in base parameter space
+        starts_params = [1;cumsum(nbetas)[1:end-1] .+ 1];
+        ends_params   = cumsum(nbetas);
 
-    # Transform 
-    # sieve_params = Zygote.Buffer(zeros(T, problem.design_width));     
-    sieve_params = zeros(T, problem.design_width);
-    for j in 1:J
-        which_group = findfirst(j .∈  exchange); # find the group corresponding to this product
-        sieve_params[starts_sieve[j]:ends_sieve[j]] = beta[starts_params[which_group]:ends_params[which_group]]
+        # Transform 
+        # sieve_params = Zygote.Buffer(zeros(T, problem.design_width));     
+        sieve_params = zeros(T, problem.design_width);
+        for j in 1:J
+            which_group = findfirst(j .∈  exchange); # find the group corresponding to this product
+            sieve_params[starts_sieve[j]:ends_sieve[j]] = beta[starts_params[which_group]:ends_params[which_group]]
+        end
+
+        # all_params = [copy(sieve_params); 1.0; gamma];
+        all_params = [sieve_params; 1.0; gamma];
+        all_params = reshape(all_params, 1, length(all_params));
+
+        return all_params
     end
-
-    # all_params = [copy(sieve_params); 1.0; gamma];
-    all_params = [sieve_params; 1.0; gamma];
-    all_params = reshape(all_params, 1, length(all_params));
-
-    return all_params
 end
 
 function pick_step_size(problem, prior, tempmats, bigA; target = 0.2, n_samples = 100)
@@ -221,12 +251,13 @@ end
 
 @model function sample_quasibayes(problem::NPDemand.NPDProblem, 
     prior::Dict, 
-    tempmats=[], 
-    weight_matrices::Vector{Matrix{Float64}}=[],
-    prices::Matrix{Float64} = Matrix(problem.data[!,r"prices"]), 
-    shares::Matrix{Float64} = Matrix(problem.data[:, r"shares"]); 
+    tempmats::Matrix{Matrix{T}}=[], 
+    weight_matrices::Vector{Matrix{T}}=[],
+    prices::Matrix{T} = Matrix(problem.data[!,r"prices"]), 
+    shares::Matrix{T} = Matrix(problem.data[:, r"shares"]); 
     penalty = 0,
-    matrix_storage_dict = Dict())
+    matrix_storage_dict = Dict(), 
+    sieve_type = "bernstein") where T <: Real
     
     # prior
     betabar         = prior["betabar"]
@@ -238,15 +269,27 @@ end
     nbetas          = prior["nbetas"]
     
     gamma_length::Int = size(problem.Bvec[1],2);
-
     betastar ~ MvNormal(betabar, diagm(vbeta))
     gamma ~ MvNormal(gammabar, vgamma*diagm(ones(gamma_length-1)));
     
+    # @show length(betastar)
+
     # Apply reparameterization
-    beta = reparameterization(betastar, lbs, parameter_order)
+    # print(".")
+    beta = sieve_type == "bernstein" ? reparameterization(betastar, lbs, parameter_order) : betastar;
 
     # Format parameter vec so that gmm can use it
-    all_params = map_to_sieve(beta, gamma, problem.exchange, nbetas, problem)
+    sieve_type = get(prior, "sieve_type", "bernstein")
+    
+    # print("-")
+    all_params = map_to_sieve(
+        beta, 
+        gamma,   
+        problem.exchange, 
+        nbetas, 
+        problem;
+        sieve_type = sieve_type
+        )
     
     # Define objective function 
     if matrix_storage_dict == Dict()
@@ -260,10 +303,11 @@ end
 
     if !((penalty == 0) | (problem.constraints == [:exchangeability]))
         J = length(problem.Xvec);
+        # print("E")
         elasts = elast_mat_zygote(all_params, problem, tempmats; at = prices, s = shares);
         reshaped_elasts = [elasts[i][j1,j2] for j1=1:J, j2 = 1:J, i = 1:size(problem.data,1)];
         elasticity_check = run_elasticity_check(reshaped_elasts, problem.constraints, problem.exchange)
-
+        # print("/")
         if elasticity_check[1]
             # Quasi-Likelihood
             # print(".")
@@ -285,7 +329,10 @@ function posterior_elasticities(j, k, betadraws, gammadraws, tempmats, problem)
     ndraws = min(size(betadraws,1), 1_000);
     tmpout = zeros(eltype(betadraws), size(problem.data,1), ndraws)
     for i in 1:ndraws
-        params_i = map_to_sieve(betadraws[i,:], gammadraws[i,:], problem.exchange, nbetas, problem)
+        st       = problem.sampling_details.approximation_details[:sieve_type]
+        params_i = map_to_sieve(betadraws[i,:], gammadraws[i,:],
+                            problem.exchange, nbetas, problem;
+                            sieve_type=st)
         tmpout[:,i] = getindex.(elast_mat_zygote(params_i, problem, tempmats; 
             at = Matrix(problem.data[!,r"prices"]), s = Matrix(problem.data[!,r"shares"])), j,k); 
     end
@@ -297,26 +344,36 @@ function find_starting_point(problem, prior,
     tempmats, weight_matrices; 
     n_attempts = 1000)
     
-    prior_chain = Turing.sample(sample_quasibayes(problem, prior, tempmats, weight_matrices), Prior(), n_attempts)
+    prior_chain = Turing.sample(
+        sample_quasibayes(
+            problem, 
+            prior, 
+            tempmats, 
+            weight_matrices), 
+        Prior(), 
+        n_attempts)
 
-    nbetas = prior["nbetas"];
-    lbs = prior["lbs"];
+    nbetas          = prior["nbetas"];
+    lbs             = prior["lbs"];
     parameter_order = prior["parameter_order"];
-    gamma_length = size(problem.Bvec[1],2);
+    gamma_length    = size(problem.Bvec[1],2);
 
-    betastardraws = hcat([prior_chain["betastar[$i]"] for i in 1:sum(nbetas)]...)
-    betadraws = reparameterization_draws(betastardraws, lbs, parameter_order)
-    gammadraws = hcat([prior_chain["gamma[$i]"] for i in 1:gamma_length-1]...);
-    J = length(problem.Xvec);
+    betastardraws   = hcat([prior_chain["betastar[$i]"] for i in 1:sum(nbetas)]...)
+    betadraws       = reparameterization_draws(betastardraws, lbs, parameter_order)
+    gammadraws      = hcat([prior_chain["gamma[$i]"] for i in 1:gamma_length-1]...);
+    J               = length(problem.Xvec);
 
     # Initialize output
-    param_out = zeros(sum(prior["nbetas"]) + size(gammadraws,2))
+    param_out       = zeros(sum(prior["nbetas"]) + size(gammadraws,2))
 
     # Start looping over samples parameters
-    i=1;
+    i = 1;
     constraints_satisfied = false
     while (i < n_attempts) & !(constraints_satisfied) 
-        sieve_params = map_to_sieve(betadraws[i,:], gammadraws[i,:], problem.exchange, prior["nbetas"], problem)
+        st           = problem.sampling_details.approximation_details[:sieve_type]
+        sieve_params = map_to_sieve(betadraws[i,:], gammadraws[i,:],
+                               problem.exchange, prior["nbetas"], problem;
+                               sieve_type=st)
         
         # Calculate elasticities at these parameters 
         elasts_i = elast_mat_zygote(sieve_params, problem, tempmats; 
@@ -352,7 +409,9 @@ function smc(problem::NPDemand.NPDProblem;
     max_iter            = 1000, 
     adaptive_tolerance  = false, 
     max_violations      = 0.01,
-    modulo_num          = 1)
+    modulo_num          = 1, 
+    approximation_details::Dict{Symbol, Any} = Dict()
+    )
 
     # Define inputs to quasi-bayes sampling 
     prior           = problem.sampling_details.prior;
@@ -367,7 +426,7 @@ function smc(problem::NPDemand.NPDProblem;
 
     particles       = problem.chain;
     nbetas          = NPDemand.get_nbetas(problem);
-    nbeta           = length(lbs)
+    nbeta           = length(lbs) == 0 ? sum(nbetas) : length(lbs);
     
     betastardraws   = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
     betadraws       = NPDemand.reparameterization_draws(betastardraws, lbs, parameter_order)
@@ -383,8 +442,20 @@ function smc(problem::NPDemand.NPDProblem;
 
     # Format parameter vec so that gmm can use it
     thetas          = [betastardraws gammadraws]
-    betas           = reparameterization_draws(thetas[:,1:nbeta], lbs, parameter_order)
-    thetas_sieve    = vcat([map_to_sieve(betas[i,:], gammadraws[i,:], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+    betas           = NPDemand.reparameterization_draws(
+        thetas[:,1:nbeta], 
+        lbs, 
+        parameter_order
+        )
+    st            = approximation_details[:sieve_type]
+    thetas_sieve  = vcat([map_to_sieve(
+                            betas[i,:], 
+                            gammadraws[i,:],
+                            problem.exchange, 
+                            nbetas, 
+                            problem;
+                            sieve_type=st)
+                         for i in 1:nparticles]...)
     
     # 2. Set initial weights
     smc_weights     = fill(1.0 / nparticles, nparticles)
@@ -517,7 +588,7 @@ function smc(problem::NPDemand.NPDProblem;
                 # Propose new values + reparameterize + map to sieve
                 thetai_new       = thetas[i,:] + rand(seed, proposal_distribution)
                 betai_new        = NPDemand.reparameterization(thetai_new[1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
-                thetai_sieve_new = NPDemand.map_to_sieve(betai_new, thetai_new[(nbeta+1):end], problem.exchange, nbetas, problem)
+                thetai_sieve_new = NPDemand.map_to_sieve(betai_new, thetai_new[(nbeta+1):end], problem.exchange, nbetas, problem, sieve_type=st)
             
                 # Evaluate prior
                 # logprior_new     = logprior_smc(thetai_new[1:nbeta], thetai_new[(nbeta+1):end], beta_dist, gamma_dist) + logpenalty_smc(thetai_sieve_new, new_penalty, problem)
@@ -553,7 +624,7 @@ function smc(problem::NPDemand.NPDProblem;
         # println("\n Average MH acceptance rate: $(accept_rate)")
 
         # Check constraints 
-        violation_dict_array = [report_constraint_violations(problem, params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)];
+        violation_dict_array = [report_constraint_violations(problem, params = thetas_sieve[i,:], verbose = false, approximation_details = approximation_details) for i in axes(thetas_sieve,1)];
         violation_dict = Dict{Symbol, Float64}()
         for k in keys(violation_dict_array[1])
             push!(violation_dict, k => 
