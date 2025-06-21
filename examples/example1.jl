@@ -5,7 +5,7 @@ using NPDemand
 
 # Simulate data
 J = 5; # of products
-T = 20000; # # of markets
+T = 2000; # # of markets
 beta = -1; # price coefficient
 sdxi = 0.25; # standard deviation of xi
 s, p, z, x, xi  = simulate_logit(J, T, beta, sdxi);
@@ -22,7 +22,7 @@ obj_xtol = 1e-5;
 obj_ftol = 1e-5;
 
 approximation_details = Dict(
-                        :order => 3, 
+                        :order => 5, 
                         :max_interaction => 0,
                         :sieve_type => "polynomial"
                     )
@@ -30,7 +30,7 @@ approximation_details = Dict(
 constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
 @elapsed begin
     npd_problem = define_problem(df; 
-                            exchange = [[1],[2],[3],[4],[5]], 
+                            exchange = [[1;2;3;4;5]], 
                             index_vars = index_vars, 
                             constraints = constraints,
                             FE = [], 
@@ -39,7 +39,7 @@ constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
                             verbose = true
                         );
 
-    using Turing, Profile
+    using Turing#, Profile
     estimate!(npd_problem, 
         approximation_details = approximation_details, 
         quasi_bayes = true, 
@@ -49,13 +49,21 @@ constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
 
     price_elasticities!(npd_problem, 
                         sieve_type = "polynomial", 
-                        approximation_details = approximation_details
+                        approximation_details = approximation_details, 
+                        CI = 0.95
     );
     summarize_elasticities(npd_problem,"matrix", "quantile").Value
+
+    @time report_constraint_violations(npd_problem;
+        verbose = true,
+        output = "dict", 
+        approximation_details = approximation_details)
 
     smc!(npd_problem, 
         approximation_details = approximation_details)
 end
+
+true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
 
 elast_q = elasticity_quantiles(
     npd_problem, 1, 1, 
