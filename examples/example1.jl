@@ -59,7 +59,7 @@ constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
         output = "dict", 
         approximation_details = approximation_details)
 
-    smc!(npd_problem, 
+    @time smc!(npd_problem, 
         approximation_details = approximation_details)
 end
 
