@@ -279,8 +279,7 @@ function define_problem(df::DataFrame; exchange::Vector = [],
 
     verbose && println("Constructing helper matrices for elasticities...")
     problem.tempmats = calc_tempmats(
-        problem; 
-        approximation_details = approximation_details);
+        problem);
     verbose && println("Done constructing problem.")
     return problem
 end

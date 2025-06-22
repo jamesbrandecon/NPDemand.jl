@@ -1,5 +1,5 @@
 function calc_tempmats(problem::NPDProblem;
-    approximation_details::Dict{Symbol, Any} = Dict(), recipe = nothing)
+    recipe = nothing)
 
     J = length(problem.Xvec);
 
@@ -11,8 +11,9 @@ function calc_tempmats(problem::NPDProblem;
     tempmats = Matrix{Float64}[]
     perm_s   = zeros(size(s));
     nbetas   = size.(problem.Xvec,2);
+    approximation_details = problem.approximation_details;
 
-    if isnothing(recipe)
+    if approximation_details[:sieve_type] == "polynomial" && isnothing(recipe)
         recipes = [ begin
             ex2 = length(exchange)==J ? [] : adjust_exchange(exchange, j1)
             build_poly_recipe(J;
@@ -22,6 +23,7 @@ function calc_tempmats(problem::NPDProblem;
           end for j1 in minimum.(exchange)]
       end
 
+    if isempty(exchange) exchange = []; end # if exchange is empty, set it to empty vector
     for j1 = 1:J
         which_group = findfirst(j1 .∈  exchange); # find the group corresponding to this product
         first_product_in_group = minimum(exchange[which_group]);
@@ -34,13 +36,13 @@ function calc_tempmats(problem::NPDProblem;
         for j2 = 1:J 
             # println("Calculating tempmat for j1 = ", j1, " and j2 = ", j2)
             tempmat_s = calc_derivative_sieve(permutations[j1], permutations[j2];
-                exchange          = isempty(exchange) ? [] : adjust_exchange(exchange, first_product_in_group),
+                exchange          = ((exchange==[]) | (approximation_details[:sieve_type] == "bernstein")) ? exchange : adjust_exchange(exchange, first_product_in_group),
                 shares            = permuted_shares,             
                 permuted_shares   = permuted_shares,
                 perm              = permutations,
                 bernO             = bernO,
                 sieve_type        = approximation_details[:sieve_type],
-                recipe            = recipes[which_group]
+                recipe            = approximation_details[:sieve_type] == "polynomial" ? recipes[which_group] : nothing
                 )
             push!(tempmats, tempmat_s)
         end
@@ -275,7 +277,6 @@ end
     # @show length(betastar)
 
     # Apply reparameterization
-    # print(".")
     beta = sieve_type == "bernstein" ? reparameterization(betastar, lbs, parameter_order) : betastar;
 
     # Format parameter vec so that gmm can use it

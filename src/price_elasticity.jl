@@ -11,8 +11,7 @@ We also store the Jacobian of the demand function with respect to prices, which 
 """
 function price_elasticities!(problem; 
         CI::Union{Vector{Any}, Real} = [], 
-        n_draws::Union{Vector{Any}, Int} = [], 
-        sieve_type = "bernstein")
+        n_draws::Union{Vector{Any}, Int} = [])
     
     # Unpack approximation details
     approximation_details = problem.approximation_details;

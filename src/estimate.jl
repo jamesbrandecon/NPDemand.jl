@@ -244,7 +244,6 @@ function estimate!(problem::NPDProblem;
         gamma_length = size(Bvec[1],2);
 
         # Define inputs to quasi-bayes sampling 
-        @show sieve_type
         nbetas          = get_nbetas(problem)
         lbs             = sieve_type == "bernstein" ? get_lower_bounds(problem) : []
         parameter_order = lbs == []                 ? get_parameter_order(lbs)  : 1:sum(nbetas)
@@ -277,7 +276,7 @@ function estimate!(problem::NPDProblem;
             "gammabar" => zeros(gamma_length-1),
             "vgamma" => 10,
             "lbs" => lbs,
-            "parameter_order" => parameter_order,
+            "parameter_order" => collect(parameter_order),
             "nbetas" => nbetas
         )
 

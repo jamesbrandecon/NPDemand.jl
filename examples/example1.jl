@@ -1,7 +1,6 @@
 # Example which shows how to simulate data, estimate a model, and compare estimated to true own-price elasticities
 
 using Plots
-using Revise
 using NPDemand
 
 # Simulate data
@@ -13,8 +12,7 @@ s, p, z, x, xi  = simulate_logit(J, T, beta, sdxi);
 df = toDataFrame(s,p,z,x);
 
 # Specify estimation/model parameters
-bO = 2; 
-exchange = [collect(1:J)]; # exchangeability groups
+exchange = [[1;2;3;4;5]]; # exchangeability groups
 # Note: exchangability can be either 0-indexed or 1-indexed. This also works:
 # exchange = [[0 1], [2 3]]; 
 index_vars = ["prices", "x"]
@@ -23,15 +21,16 @@ obj_xtol = 1e-5;
 obj_ftol = 1e-5;
 
 approximation_details = Dict(
-                        :order => 5, 
+                        :order => 2, 
                         :max_interaction => 0,
-                        :sieve_type => "polynomial"
+                        :sieve_type => "bernstein"
                     )
 
 constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
+
 @elapsed begin
     npd_problem = define_problem(df; 
-                            exchange = [[1;2;3;4;5]], 
+                            exchange = exchange, 
                             index_vars = index_vars, 
                             constraints = constraints,
                             FE = [], 
@@ -48,16 +47,15 @@ constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
         skip = 5); 
 
     price_elasticities!(npd_problem, 
-                        sieve_type = "polynomial", 
-                        CI = 0.95
+                        CI = 0.95 # add confidence intervals to output
     );
     summarize_elasticities(npd_problem,"matrix", "quantile").Value
 
-    @time report_constraint_violations(npd_problem;
+    report_constraint_violations(npd_problem;
         verbose = true,
         output = "dict")
 
-    @time smc!(npd_problem)
+    smc!(npd_problem)
 end
 
 true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
