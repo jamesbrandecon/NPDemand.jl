@@ -47,7 +47,7 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     constraint_tol = 1e-5, # these inputs are no longer used 
     normalization=[], 
     verbose = false, 
-    sieve_type = "polynomial", approximation_details = Dict())
+    approximation_details = Dict())
     
     if approximation_details != Dict()
         bO    = approximation_details[:order]
@@ -55,6 +55,8 @@ function define_problem(df::DataFrame; exchange::Vector = [],
          
         max_interaction = approximation_details[:max_interaction]
         sieve_type = approximation_details[:sieve_type]
+    else 
+        error("No approximation details provided. Please provide a Dict with keys :order, :max_interaction, and :sieve_type.")
     end
     
     find_prices = findall(index_vars .== "prices")[1];
@@ -272,7 +274,8 @@ function define_problem(df::DataFrame; exchange::Vector = [],
                         [], 
                         [], 
                         [], 
-                        [])
+                        [], 
+                        approximation_details)
 
     verbose && println("Constructing helper matrices for elasticities...")
     problem.tempmats = calc_tempmats(
@@ -328,6 +331,7 @@ mutable struct NPDProblem
     tempmats
     smc_results
     sampling_details
+    approximation_details
 end
 
 import Base.+

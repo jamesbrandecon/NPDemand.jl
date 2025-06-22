@@ -29,17 +29,14 @@ function report_constraint_violations(problem;
     verbose = true,
     params = [], 
     output = "dict", 
-    n_draws::Int = 0, 
-    approximation_details = Dict(
-        "sieve_type" => "bernstein", 
-        "order" => 2, 
-        "max_interaction" => 1)
-        )
+    n_draws::Int = 0
+    )
 
-    sieve_type      = approximation_details[:sieve_type];
-    nbetas          = NPDemand.get_nbetas(problem);
-    lbs             = sieve_type == "bernstein" ? NPDemand.get_lower_bounds(problem) : [];
-    nbeta           = sum(nbetas);
+    approximation_details = problem.approximation_details;
+    sieve_type            = approximation_details[:sieve_type];
+    nbetas                = NPDemand.get_nbetas(problem);
+    lbs                   = sieve_type == "bernstein" ? NPDemand.get_lower_bounds(problem) : [];
+    nbeta                 = sum(nbetas);
     
 
     if (params ==[]) & (problem.chain == [])

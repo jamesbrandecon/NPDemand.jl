@@ -624,7 +624,7 @@ function smc(problem::NPDemand.NPDProblem;
         # println("\n Average MH acceptance rate: $(accept_rate)")
 
         # Check constraints 
-        violation_dict_array = [report_constraint_violations(problem, params = thetas_sieve[i,:], verbose = false, approximation_details = approximation_details) for i in axes(thetas_sieve,1)];
+        violation_dict_array = [report_constraint_violations(problem, params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)];
         violation_dict = Dict{Symbol, Float64}()
         for k in keys(violation_dict_array[1])
             push!(violation_dict, k => 

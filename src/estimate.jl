@@ -180,17 +180,8 @@ function estimate!(problem::NPDProblem;
     skip::Int = 5,
     n_attempts = 0,
     penalty = 0, 
-    step::Union{Real, Symbol} = 0.01, 
-    approximation_details = Dict(
-        :order => 1, 
-        :max_interaction => 2,
-        :sieve_type => "bernstein"
+    step::Union{Real, Symbol} = 0.01 
     )
-    )
-
-    sieve_type = approximation_details[:sieve_type]
-    order = approximation_details[:order]
-    max_interaction = approximation_details[:max_interaction]
 
     try 
         @assert (step isa Real) | (step == :auto)
@@ -224,6 +215,10 @@ function estimate!(problem::NPDProblem;
     exchange = problem.exchange;
     cfg = problem.cfg;
     weight_matrices = problem.weight_matrices;
+    approximation_details = problem.approximation_details;
+    sieve_type = approximation_details[:sieve_type]
+    order = approximation_details[:order]
+    max_interaction = approximation_details[:max_interaction]
 
     find_prices = findall(problem.index_vars .== "prices");
     price_index = find_prices[1];
@@ -249,6 +244,7 @@ function estimate!(problem::NPDProblem;
         gamma_length = size(Bvec[1],2);
 
         # Define inputs to quasi-bayes sampling 
+        @show sieve_type
         nbetas          = get_nbetas(problem)
         lbs             = sieve_type == "bernstein" ? get_lower_bounds(problem) : []
         parameter_order = lbs == []                 ? get_parameter_order(lbs)  : 1:sum(nbetas)
@@ -399,12 +395,7 @@ function smc!(problem::NPDemand.NPDProblem;
     max_iter            = 1000,
     adaptive_tolerance  = false, 
     max_violations      = 0.01,
-    extra_mh_loops      = 0, 
-    approximation_details = Dict(
-        :order => 1, 
-        :max_interaction => 2,
-        :sieve_type => "bernstein"
-    )
+    extra_mh_loops      = 0
     )
 
     try 
@@ -415,6 +406,7 @@ function smc!(problem::NPDemand.NPDProblem;
 
     burn_in_int = Int(burn_in * size(problem.chain,1));
     modulo_num = Int(1 + extra_mh_loops);
+    approximation_details = problem.approximation_details;
     sieve_type = approximation_details[:sieve_type]
 
     # Add smc_results to problem

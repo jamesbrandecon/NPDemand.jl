@@ -1,6 +1,7 @@
 # Example which shows how to simulate data, estimate a model, and compare estimated to true own-price elasticities
 
 using Plots
+using Revise
 using NPDemand
 
 # Simulate data
@@ -41,26 +42,22 @@ constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
 
     using Turing#, Profile
     estimate!(npd_problem, 
-        approximation_details = approximation_details, 
         quasi_bayes = true, 
-        sampler = Turing.NUTS(), 
+        sampler = Turing.NUTS(500, 0.65), 
         n_samples = 2000, 
         skip = 5); 
 
     price_elasticities!(npd_problem, 
                         sieve_type = "polynomial", 
-                        approximation_details = approximation_details, 
                         CI = 0.95
     );
     summarize_elasticities(npd_problem,"matrix", "quantile").Value
 
     @time report_constraint_violations(npd_problem;
         verbose = true,
-        output = "dict", 
-        approximation_details = approximation_details)
+        output = "dict")
 
-    @time smc!(npd_problem, 
-        approximation_details = approximation_details)
+    @time smc!(npd_problem)
 end
 
 true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);

@@ -12,17 +12,13 @@ We also store the Jacobian of the demand function with respect to prices, which 
 function price_elasticities!(problem; 
         CI::Union{Vector{Any}, Real} = [], 
         n_draws::Union{Vector{Any}, Int} = [], 
-        sieve_type = "bernstein", 
-        approximation_details = Dict())
+        sieve_type = "bernstein")
     
     # Unpack approximation details
-    max_interaction = 1; # placeholders
-    order           = 2;
-    if approximation_details != Dict()
-        order = approximation_details[:order]
-        max_interaction = approximation_details[:max_interaction]
-        sieve_type = approximation_details[:sieve_type]
-    end
+    approximation_details = problem.approximation_details;
+    order = approximation_details[:order]
+    max_interaction = approximation_details[:max_interaction]
+    sieve_type = approximation_details[:sieve_type]
 
     try 
         @assert (CI==[]) | (CI isa Real)
@@ -78,7 +74,7 @@ function price_elasticities!(problem;
         else
             elast   = [zeros(J,J) for i in 1:T];
             jacob   = [zeros(J,J) for i in 1:T];
-            alpha = 1 - CI;
+            alpha   = 1 - CI;
             try 
                 @assert ((n_draws > 0) & (n_draws <= size(problem.results.filtered_chain,1)))
             catch 
@@ -101,7 +97,7 @@ function price_elasticities!(problem;
                     max_interaction = max_interaction)
                 elast       = elast + elast_i.all_elast_mat;
                 jacob       = jacob + elast_i.Jmat;
-                push!(elast_CI, elast_i);
+                push!(elast_CI, elast_i.all_elast_mat);
             end
             ub = [
                 [quantile(getindex.(getindex.(elast_CI, t),j1,j2), 1-alpha/2) for j1 = 1:J, j2 = 1:J] 
