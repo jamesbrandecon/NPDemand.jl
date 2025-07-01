@@ -180,7 +180,8 @@ function estimate!(problem::NPDProblem;
     skip::Int = 5,
     n_attempts = 0,
     penalty = 0, 
-    step::Union{Real, Symbol} = 0.01 
+    step::Union{Real, Symbol} = 0.01, 
+    custom_prior::Dict = nothing
     )
 
     try 
@@ -271,16 +272,14 @@ function estimate!(problem::NPDProblem;
         end
         
         prior = Dict(
-            "betabar" => zeros(sum(nbetas)), 
-            "vbeta" => vbeta,
-            "gammabar" => zeros(gamma_length-1),
-            "vgamma" => 10,
+            "betabar" => isnothing(custom_prior) ? zeros(sum(nbetas)) : custom_prior["betabar"], 
+            "vbeta" => isnothing(custom_prior) ? vbeta : custom_prior["vbeta"],
+            "gammabar" => isnothing(custom_prior) ? zeros(gamma_length-1) : custom_prior["gammabar"],
+            "vgamma" => isnothing(custom_prior) ? 10 : custom_prior["vgamma"],
             "lbs" => lbs,
             "parameter_order" => collect(parameter_order),
             "nbetas" => nbetas
         )
-
-        # problem.tempmats = calc_tempmats(problem); # this already happens above
         
         # Find a starting point for sampling
         if ((problem.results != []) & (n_attempts == 0))

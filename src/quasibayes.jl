@@ -312,16 +312,16 @@ end
         if elasticity_check[1]
             # Quasi-Likelihood
             # print(".")
-            Turing.@addlogprob! -0.5 * objective(all_params)
+            Turing.@addlogprob! -0.5 * size(problem.data,1) * objective(all_params)
             return
         else
             # print("-")
-            Turing.@addlogprob! (-0.5 * objective(all_params) - penalty)
+            Turing.@addlogprob! (-0.5 * size(problem.data,1) * objective(all_params) - penalty)
             return
         end
     else
         # Quasi-Likelihood
-        Turing.@addlogprob! -0.5 * objective(all_params)
+        Turing.@addlogprob! -0.5 * size(problem.data,1) * objective(all_params)
         return
     end
 end
@@ -601,9 +601,9 @@ function smc(problem::NPDemand.NPDProblem;
                 end
 
                 # # Evaluate likelihood
-                loglike_new     = -0.5 * gmm(reshape(thetai_sieve_new, size(thetas_sieve,2), 1), problem, problem.weight_matrices)
+                loglike_new     = -0.5 * size(problem.data,1) * gmm(reshape(thetai_sieve_new, size(thetas_sieve,2), 1), problem, problem.weight_matrices)
                 if mh_iter == 1
-                    loglike_old = -0.5 * gmm(reshape(thetas_sieve[i,:], size(thetas_sieve,2), 1), problem, problem.weight_matrices)
+                    loglike_old = -0.5 * size(problem.data,1) * gmm(reshape(thetas_sieve[i,:], size(thetas_sieve,2), 1), problem, problem.weight_matrices)
                 else
                     loglike_old = loglike_storage[i]
                 end
