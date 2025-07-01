@@ -270,12 +270,12 @@ function estimate!(problem::NPDProblem;
         else 
             vbeta .= vbetastar
         end
-        
+
         prior = Dict(
-            "betabar" => isnothing(custom_prior) ? zeros(sum(nbetas)) : custom_prior["betabar"], 
-            "vbeta" => isnothing(custom_prior) ? vbeta : custom_prior["vbeta"],
-            "gammabar" => isnothing(custom_prior) ? zeros(gamma_length-1) : custom_prior["gammabar"],
-            "vgamma" => isnothing(custom_prior) ? 10 : custom_prior["vgamma"],
+            "betabar" => !isnothing(custom_prior) & haskey(custom_prior, "betabar") ? custom_prior["betabar"] .+ zeros(sum(nbetas)) : zeros(sum(nbetas)), 
+            "vbeta" => !isnothing(custom_prior) & haskey(custom_prior, "vbeta") ? custom_prior["vbeta"].*ones(size(vbeta)) : vbeta,
+            "gammabar" => !isnothing(custom_prior) & haskey(custom_prior, "gammabar") ? custom_prior["gammabar"] .+ zeros(gamma_length-1) : zeros(gamma_length-1),
+            "vgamma" => !isnothing(custom_prior) & haskey(custom_prior, "vgamma") ? custom_prior["vgamma"] : 10,
             "lbs" => lbs,
             "parameter_order" => collect(parameter_order),
             "nbetas" => nbetas

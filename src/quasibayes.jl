@@ -5,7 +5,7 @@ function calc_tempmats(problem::NPDProblem;
 
     s        = Matrix(problem.data[:, r"shares"]);
     exchange = problem.exchange;
-    bO       = problem.bO;
+    bO       = problem.approximation_details[:order];
     bernO    = convert.(Integer, bO);
     
     tempmats = Matrix{Float64}[]
