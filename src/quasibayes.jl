@@ -443,14 +443,14 @@ function smc(problem::NPDemand.NPDProblem;
 
     # Format parameter vec so that gmm can use it
     thetas          = [betastardraws gammadraws]
-    betas           = NPDemand.reparameterization_draws(
-        thetas[:,1:nbeta], 
-        lbs, 
-        parameter_order
-        )
+    # betas           = NPDemand.reparameterization_draws(
+    #     thetas[:,1:nbeta], 
+    #     lbs, 
+    #     parameter_order
+    #     )
     st            = approximation_details[:sieve_type]
     thetas_sieve  = vcat([map_to_sieve(
-                            betas[i,:], 
+                            betadraws[i,:], 
                             gammadraws[i,:],
                             problem.exchange, 
                             nbetas, 

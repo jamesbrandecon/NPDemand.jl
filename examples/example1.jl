@@ -42,10 +42,10 @@ constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
     using Turing#, Profile
     estimate!(npd_problem, 
         quasi_bayes = true, 
-        # sampler = Turing.NUTS(500, 0.65), 
+        sampler = Turing.NUTS(500, 0.65), 
         n_samples = 2000, 
-        skip = 5, 
-        custom_prior = Dict("vbeta" => 5, "vgamma" => 5.0, "betabar" => 1.0, "gammabar" => 0.0)); 
+        skip = 5,
+        custom_prior = Dict("vbeta" => 10, "vgamma" => 10.0, "betabar" => 0.0, "gammabar" => 0.0)); 
 
     price_elasticities!(npd_problem, 
                         CI = 0.95 # add confidence intervals to output

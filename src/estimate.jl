@@ -181,7 +181,7 @@ function estimate!(problem::NPDProblem;
     n_attempts = 0,
     penalty = 0, 
     step::Union{Real, Symbol} = 0.01, 
-    custom_prior::Dict = nothing
+    custom_prior::Union{Dict, Nothing} = nothing
     )
 
     try 
@@ -272,10 +272,10 @@ function estimate!(problem::NPDProblem;
         end
 
         prior = Dict(
-            "betabar" => !isnothing(custom_prior) & haskey(custom_prior, "betabar") ? custom_prior["betabar"] .+ zeros(sum(nbetas)) : zeros(sum(nbetas)), 
-            "vbeta" => !isnothing(custom_prior) & haskey(custom_prior, "vbeta") ? custom_prior["vbeta"].*ones(size(vbeta)) : vbeta,
-            "gammabar" => !isnothing(custom_prior) & haskey(custom_prior, "gammabar") ? custom_prior["gammabar"] .+ zeros(gamma_length-1) : zeros(gamma_length-1),
-            "vgamma" => !isnothing(custom_prior) & haskey(custom_prior, "vgamma") ? custom_prior["vgamma"] : 10,
+            "betabar" => !isnothing(custom_prior) && haskey(custom_prior, "betabar") ? custom_prior["betabar"] .+ zeros(sum(nbetas)) : zeros(sum(nbetas)), 
+            "vbeta" => !isnothing(custom_prior) && haskey(custom_prior, "vbeta") ? custom_prior["vbeta"].*ones(size(vbeta)) : vbeta,
+            "gammabar" => !isnothing(custom_prior) && haskey(custom_prior, "gammabar") ? custom_prior["gammabar"] .+ zeros(gamma_length-1) : zeros(gamma_length-1),
+            "vgamma" => !isnothing(custom_prior) && haskey(custom_prior, "vgamma") ? custom_prior["vgamma"] : 10,
             "lbs" => lbs,
             "parameter_order" => collect(parameter_order),
             "nbetas" => nbetas
