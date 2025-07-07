@@ -243,33 +243,49 @@ function calc_derivative_sieve(j1, j2;
         exchange = [], shares = [], 
         permuted_shares = [], perm = [], 
         bernO = 2, sieve_type = "bernstein", max_interaction = 1, 
-        recipe = nothing)
+        recipe = nothing, 
+        constraints = nothing)
+
+    basis_function = sieve_type == "bernstein" ? bern : poly
+    dbasis_function = sieve_type == "bernstein" ? dbern : dpoly
     
-    if sieve_type == "bernstein"
+    if (sieve_type == "bernstein") & (setdiff(constraints, [:exchangeability]) != Symbol[])
+        # When using this code, we need to invert j1 and j2 via perm, bc they have already been passed through perm 
+        j1_orig = perm[j1]; 
+        j2_orig = perm[j2];  
         tempmat_s = zeros(size(shares,1),1);
         J         = maximum(maximum.(exchange));
         for j_loop = 1:1:J
             stemp = permuted_shares[:,j_loop]; # j_loop = 1 -> stemp == perm_s[:,1] = s[:,2];
             # j1=3, j2=4. j_loop = 4 -> stemp = perm_s[:,4] = s[:,4]
-            if j2 == perm[j_loop] # j2==2, perm[1] ==2, so s[:,2] added as derivative 
+            if j2_orig == perm[j_loop] # j2==2, perm[1] ==2, so s[:,2] added as derivative 
                 tempmat_s = [tempmat_s dbern(stemp, bernO)];
             else 
                 tempmat_s = [tempmat_s bern(stemp, bernO)];
             end
         end
         tempmat_s = tempmat_s[:,2:end] # remove zeros used to initialize the matrix
-        tempmat_s, _, _ = make_interactions(tempmat_s, exchange, bernO, j1, perm);
-    else 
+        tempmat_s, _, _ = make_interactions(tempmat_s, exchange, bernO, j1_orig, perm);
+    elseif sieve_type == "raw_polynomial"
         # which_group = findall(j1 .∈ exchange)[1];
         # exchange_for_poly = length(exchange) == size(shares,2) ? [] : adjust_exchange(exchange, j1);
         tempmat_s = NPDemand.poly_features_derivative(
-            shares; 
+            permuted_shares; 
             order = bernO, 
             max_interaction = max_interaction, 
             exchange = exchange, 
             var_index = j2, 
             recipe = recipe);
-        
+    else 
+        # otherwise we are going to use fully generic tensor products
+        tempmat_s = NPDemand.tensor_features_derivative(
+            permuted_shares, 
+            var_index = j2,  # Find which column in permuted space contains original column j2
+            basis_orders = bernO .* ones(Int, size(shares,2)), 
+            exchange = exchange, 
+            basis_function = basis_function,
+            dbasis_function = dbasis_function
+            );
     end
     return tempmat_s
 end

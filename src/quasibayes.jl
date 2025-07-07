@@ -13,7 +13,7 @@ function calc_tempmats(problem::NPDProblem;
     nbetas   = size.(problem.Xvec,2);
     approximation_details = problem.approximation_details;
 
-    if approximation_details[:sieve_type] == "polynomial" && isnothing(recipe)
+    if approximation_details[:sieve_type] == "raw_polynomial" && isnothing(recipe)
         recipes = [ begin
             ex2 = length(exchange)==J ? [] : adjust_exchange(exchange, j1)
             build_poly_recipe(J;
@@ -21,7 +21,7 @@ function calc_tempmats(problem::NPDProblem;
                 max_interaction = approximation_details[:max_interaction],
                 exchange        = ex2)
           end for j1 in minimum.(exchange)]
-      end
+    end
 
     if isempty(exchange) exchange = []; end # if exchange is empty, set it to empty vector
     for j1 = 1:J
@@ -36,13 +36,15 @@ function calc_tempmats(problem::NPDProblem;
         for j2 = 1:J 
             # println("Calculating tempmat for j1 = ", j1, " and j2 = ", j2)
             tempmat_s = calc_derivative_sieve(permutations[j1], permutations[j2];
-                exchange          = ((exchange==[]) | (approximation_details[:sieve_type] == "bernstein")) ? exchange : adjust_exchange(exchange, first_product_in_group),
-                shares            = permuted_shares,             
+                exchange          = ((exchange==[]) | ((approximation_details[:sieve_type] == "bernstein") && (setdiff(problem.constraints, [:exchangeability])!=Symbol[]))) ? 
+                    exchange : adjust_exchange(exchange, first_product_in_group),
+                shares            = s,             
                 permuted_shares   = permuted_shares,
                 perm              = permutations,
                 bernO             = bernO,
                 sieve_type        = approximation_details[:sieve_type],
-                recipe            = approximation_details[:sieve_type] == "polynomial" ? recipes[which_group] : nothing
+                recipe            = approximation_details[:sieve_type] == "raw_polynomial" ? recipes[which_group] : nothing, 
+                constraints       = problem.constraints
                 )
             push!(tempmats, tempmat_s)
         end
@@ -312,16 +314,16 @@ end
         if elasticity_check[1]
             # Quasi-Likelihood
             # print(".")
-            Turing.@addlogprob! -0.5 * size(problem.data,1) * objective(all_params)
+            Turing.@addlogprob! -0.5  * objective(all_params)
             return
         else
             # print("-")
-            Turing.@addlogprob! (-0.5 * size(problem.data,1) * objective(all_params) - penalty)
+            Turing.@addlogprob! (-0.5 * objective(all_params) - penalty)
             return
         end
     else
         # Quasi-Likelihood
-        Turing.@addlogprob! -0.5 * size(problem.data,1) * objective(all_params)
+        Turing.@addlogprob! -0.5  * objective(all_params)
         return
     end
 end
@@ -601,9 +603,9 @@ function smc(problem::NPDemand.NPDProblem;
                 end
 
                 # # Evaluate likelihood
-                loglike_new     = -0.5 * size(problem.data,1) * gmm(reshape(thetai_sieve_new, size(thetas_sieve,2), 1), problem, problem.weight_matrices)
+                loglike_new     = -0.5 * gmm(reshape(thetai_sieve_new, size(thetas_sieve,2), 1), problem, problem.weight_matrices)
                 if mh_iter == 1
-                    loglike_old = -0.5 * size(problem.data,1) * gmm(reshape(thetas_sieve[i,:], size(thetas_sieve,2), 1), problem, problem.weight_matrices)
+                    loglike_old = -0.5 * gmm(reshape(thetas_sieve[i,:], size(thetas_sieve,2), 1), problem, problem.weight_matrices)
                 else
                     loglike_old = loglike_storage[i]
                 end

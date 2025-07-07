@@ -2,17 +2,18 @@
 
 using Plots
 using NPDemand
+using DataFrames
 
 # Simulate data
-J = 5; # of products
-T = 2000; # # of markets
+J = 4; # of products
+T = 10000; # # of markets
 beta = -1; # price coefficient
-sdxi = 0.25; # standard deviation of xi
+sdxi = 0.01; # standard deviation of xi
 s, p, z, x, xi  = simulate_logit(J, T, beta, sdxi);
 df = toDataFrame(s,p,z,x);
 
 # Specify estimation/model parameters
-exchange = [[1;2;3;4;5]]; # exchangeability groups
+exchange = [[1;2;3;4]]; # exchangeability groups
 # Note: exchangability can be either 0-indexed or 1-indexed. This also works:
 # exchange = [[0 1], [2 3]]; 
 index_vars = ["prices", "x"]
@@ -22,8 +23,8 @@ obj_ftol = 1e-5;
 
 approximation_details = Dict(
                         :order => 2, 
-                        :max_interaction => 0,
-                        :sieve_type => "bernstein"
+                        :max_interaction => 0, # not yet fully implemented 
+                        :sieve_type => "raw_polynomial", # "bernstein", "polynomial", or "raw_polynomial"
                     )
 
 constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
@@ -34,22 +35,21 @@ constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
                             index_vars = index_vars, 
                             constraints = constraints,
                             FE = [], 
-                            # bO = approximation_details[:order],
                             approximation_details = approximation_details, 
                             verbose = true
                         );
 
     using Turing#, Profile
     estimate!(npd_problem, 
-        quasi_bayes = true, 
-        sampler = Turing.NUTS(500, 0.65), 
-        n_samples = 2000, 
+        quasi_bayes = false, 
+        sampler = Turing.NUTS(1000, 0.65), 
+        n_samples = 1000, 
         skip = 5,
         custom_prior = Dict("vbeta" => 10, "vgamma" => 10.0, "betabar" => 0.0, "gammabar" => 0.0)); 
 
-    price_elasticities!(npd_problem, 
-                        CI = 0.95 # add confidence intervals to output
+    price_elasticities!(npd_problem
     );
+
     summarize_elasticities(npd_problem,"matrix", "quantile").Value
 
     report_constraint_violations(npd_problem;
@@ -59,7 +59,12 @@ constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
     smc!(npd_problem)
 end
 
+# All true own-price elasticities
 true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
+true_ownelast_df = DataFrame(
+    hcat([beta .* df[!,"prices$x"] .* (1 .- df[!,"shares$x"]) for x in 0:J-1]...), 
+    :auto
+);
 
 elast_q = elasticity_quantiles(
     npd_problem, 1, 1, 

@@ -1,9 +1,13 @@
 function prep_matrices(df::DataFrame, exchange, index_vars, 
     FEmat, product_FEs, order; price_iv = [], inner = false, 
-    verbose = true, approximation_details = Dict("sieve_type" => "bernstein", "order" => 2, "max_interaction" => 1))
+    verbose = true, 
+    approximation_details = Dict("sieve_type" => "bernstein", "order" => 2, "max_interaction" => 1), 
+    constraints = [])
 
     sieve_type = approximation_details[:sieve_type]
-
+    basis_function = sieve_type == "bernstein" ? bern : poly
+    dbasis_function = sieve_type == "bernstein" ? dbern : dpoly
+    
     # Unpack DataFrame df
     s = Matrix(df[:, r"shares"]);
     pt = Matrix(df[:, r"prices"]);
@@ -15,7 +19,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
 
     J = size(s,2);
     try 
-        @assert (sieve_type == "polynomial") | (J<20)
+        @assert (sieve_type == "raw_polynomial") | (J<20)
     catch
         error("J>20 not yet supported - will break polynomial and constraint construction")
     end
@@ -34,7 +38,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
     find_prices = findall(index_vars .== "prices");
     price_ind = find_prices[1];
 
-    if sieve_type == "polynomial"
+    if sieve_type == "raw_polynomial"
         # Unpack approximation details
         order           = approximation_details[:order]
         max_interaction = approximation_details[:max_interaction]
@@ -102,7 +106,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
         perm = collect(1:J);
         perm[first_product_in_group] = xj; perm[xj] = first_product_in_group;
 
-        if sieve_type == "bernstein"
+        if (sieve_type == "bernstein") & (setdiff(constraints, [:exchangeability]) != Symbol[])
             BERN_xj = zeros(T,1);
             
             # Market shares
@@ -111,7 +115,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
             end
             BERN_xj = BERN_xj[:,2:end]
             full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, order, xj, perm);
-        else
+        elseif sieve_type == "raw_polynomial"
             permuted_shares = zeros(T,1);
             for j = 1:1:J
                 permuted_shares = [permuted_shares s[:,perm[j]]]
@@ -126,6 +130,18 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
                 max_interaction = max_interaction, 
                 exchange = exchange_for_poly, 
                 recipe = recipes[which_group]);
+        else # otherwise we are going to use fully generic tensor products
+            permuted_shares = zeros(T,1);
+            for j = 1:1:J
+                permuted_shares = [permuted_shares s[:,perm[j]]]
+            end
+            permuted_shares = permuted_shares[:,2:end]
+            full_interaction = NPDemand.tensor_features(
+                permuted_shares,  # <-- Changed from 's' to 'permuted_shares'
+                basis_orders = order .* ones(Int, J), 
+                exchange = adjust_exchange(exchange, first_product_in_group), 
+                basis_function = basis_function,
+                dbasis_function = dbasis_function);
         end
 
         # --------------------------------------------
@@ -139,7 +155,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
                 end
                 A_xj = A_xj[:, 2:end]
                 A_xj, sym_combos, combos = make_interactions(A_xj, exchange, order, xj, perm);
-            else 
+            elseif sieve_type == "raw_polynomial" 
                 # A_xj = zeros(T,1);
                 # for j = 1:1:J
                 #     A_xj = [A_xj ztemp[:,perm[j]]]
@@ -152,6 +168,18 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
                     max_interaction = max_interaction, 
                     exchange = exchange_for_poly, 
                     recipe = recipes[which_group]);
+            else # otherwise we are going to use fully generic tensor products
+                permuted_instruments = zeros(T,1);
+                for j = 1:1:J
+                    permuted_instruments = [permuted_instruments zt[:,perm[j]]]
+                end
+                permuted_instruments = permuted_instruments[:,2:end]
+                A_xj = NPDemand.tensor_features(
+                    permuted_instruments,  # <-- Changed from 'zt' to 'permuted_instruments'
+                    basis_orders = order .* ones(Int, J),
+                    exchange = adjust_exchange(exchange, xj), 
+                    basis_function = basis_function,
+                    dbasis_function = dbasis_function);
             end
                 
             # Add index vars as IV

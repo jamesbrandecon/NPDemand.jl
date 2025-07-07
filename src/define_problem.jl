@@ -40,7 +40,7 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
     - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
 - `verbose`: if `false`, will not print updates as problem is generated
 """
-function define_problem(df::DataFrame; exchange::Vector = [], 
+function define_problem(df::DataFrame; exchange::Vector = [Int64[]], 
     index_vars = ["prices"], price_iv = [], FE = [], 
     constraints = [], bO = 2, 
     obj_xtol = 1e-5, obj_ftol = 1e-5, 
@@ -55,6 +55,8 @@ function define_problem(df::DataFrame; exchange::Vector = [],
          
         max_interaction = approximation_details[:max_interaction]
         sieve_type = approximation_details[:sieve_type]
+        @assert sieve_type in ["polynomial", "bernstein", "raw_polynomial"]
+            "sieve_type must be either 'polynomial', 'bernstein', or `raw_polynomial`. Got $sieve_type instead."
     else 
         error("No approximation details provided. Please provide a Dict with keys :order, :max_interaction, and :sieve_type.")
     end
@@ -124,7 +126,7 @@ function define_problem(df::DataFrame; exchange::Vector = [],
 
     # Check that exchange is only specified if exchangeability is in constraints
     E1 = (:exchangeability ∈ constraints);
-    E2 = (exchange!=[])
+    E2 = ((exchange!=[]) &  (exchange != [Int64[]]))
     if (E1!=E2)
         error("Keyword `exchange` should be specified (only) if :exchangeability is in `constraints` vector")
     end
@@ -212,7 +214,8 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     Xvec, Avec, Bvec, syms, combos = prep_matrices(
         df, exchange, index_vars, FEmat, product_FEs, bO; 
         price_iv = price_iv, verbose = verbose, 
-        approximation_details = approximation_details);
+        approximation_details = approximation_details, 
+        constraints = constraints);
     
     if constraints !=[] && sieve_type == "bernstein"
         verbose && println("Making linear constraint matrices....")
@@ -280,6 +283,7 @@ function define_problem(df::DataFrame; exchange::Vector = [],
     verbose && println("Constructing helper matrices for elasticities...")
     problem.tempmats = calc_tempmats(
         problem);
+
     verbose && println("Done constructing problem.")
     return problem
 end
