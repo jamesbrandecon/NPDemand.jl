@@ -23,11 +23,12 @@ obj_ftol = 1e-5;
 
 approximation_details = Dict(
                         :order => 2, 
-                        :max_interaction => 0, # not yet fully implemented 
-                        :sieve_type => "raw_polynomial", # "bernstein", "polynomial", or "raw_polynomial"
+                        :max_interaction => 2, 
+                        :sieve_type => "bernstein", # "bernstein" or "polynomial"
+                        :tensor => false # NOTE: tensor overrides max_interaction
                     )
 
-constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
+constraints = [:exchangeability]; 
 
 @elapsed begin
     npd_problem = define_problem(df; 

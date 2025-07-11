@@ -13,7 +13,7 @@ function calc_tempmats(problem::NPDProblem;
     nbetas   = size.(problem.Xvec,2);
     approximation_details = problem.approximation_details;
 
-    if approximation_details[:sieve_type] == "raw_polynomial" && isnothing(recipe)
+    if approximation_details[:sieve_type] == "polynomial" && isnothing(recipe)
         recipes = [ begin
             ex2 = length(exchange)==J ? [] : adjust_exchange(exchange, j1)
             build_poly_recipe(J;
@@ -43,8 +43,10 @@ function calc_tempmats(problem::NPDProblem;
                 perm              = permutations,
                 bernO             = bernO,
                 sieve_type        = approximation_details[:sieve_type],
-                recipe            = approximation_details[:sieve_type] == "raw_polynomial" ? recipes[which_group] : nothing, 
-                constraints       = problem.constraints
+                recipe            = approximation_details[:sieve_type] == "polynomial" ? recipes[which_group] : nothing, 
+                max_interaction   = approximation_details[:max_interaction],
+                constraints       = problem.constraints, 
+                tensor            = haskey(approximation_details, :tensor) ? approximation_details[:tensor] : true
                 )
             push!(tempmats, tempmat_s)
         end

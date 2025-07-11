@@ -102,7 +102,8 @@ function poly_features(X::AbstractMatrix;
                        order::Integer=2,
                        max_interaction::Integer=1,
                        exchange=Int[][],
-                       recipe::Union{PolyRecipe, Nothing}=nothing)
+                       recipe::Union{PolyRecipe, Nothing}=nothing, 
+                       basis_type::String = "bernstein")
   n,p = size(X)
   if isnothing(recipe)
     recipe = build_poly_recipe(p;
@@ -110,6 +111,9 @@ function poly_features(X::AbstractMatrix;
                 max_interaction=max_interaction,
                 exchange=exchange)
   end
+
+  # Pre-compute bases if using Bernstein
+  Bs = basis_type == "bernstein" ? [bern(X[:,j], order) for j in 1:p] : nothing 
 
   # now apply the recipe: each exps_group → one column
   cols = Vector{Vector{Real}}(undef, length(recipe.exps_groups))
@@ -119,7 +123,11 @@ function poly_features(X::AbstractMatrix;
       mon = ones(n)
       for j in 1:p
         if e[j] > 0
-          mon .*= X[:,j].^e[j]
+          if basis_type == "bernstein"
+            mon .*= Bs[j][:, e[j]+1]  # Select e[j]'th Bernstein basis
+          else
+            mon .*= X[:,j].^e[j]      # Standard polynomial power
+          end
         end
       end
       col .+= mon
@@ -140,7 +148,8 @@ function poly_features_derivative(X::AbstractMatrix;
                        order::Integer=2,
                        max_interaction::Integer=1,
                        exchange=Int[][],
-                       recipe::Union{PolyRecipe, Nothing}=nothing)
+                       recipe::Union{PolyRecipe, Nothing}=nothing,
+                       basis_type::String="bernstein")
   n,p = size(X)
   @assert 1 ≤ var_index ≤ p
 
@@ -149,6 +158,12 @@ function poly_features_derivative(X::AbstractMatrix;
                 order=order,
                 max_interaction=max_interaction,
                 exchange=exchange)
+  end
+  
+  # Pre-compute bases if using Bernstein
+  if basis_type == "bernstein"
+    Bs  = [bern(X[:,j], order)  for j in 1:p]
+    dBs = [dbern(X[:,j], order) for j in 1:p]
   end
 
   cols = Vector{Vector{Real}}(undef, length(recipe.exps_groups))
@@ -162,9 +177,17 @@ function poly_features_derivative(X::AbstractMatrix;
       for j in 1:p
         u = e[j]
         if j == var_index
-          mon .*= u .* X[:,j].^(u-1)
+          if basis_type == "bernstein"
+            mon .*= dBs[j][:, u+1]  # Use precomputed derivative
+          else
+            mon .*= u .* X[:,j].^(u-1)  # Standard polynomial derivative
+          end
         elseif u > 0
-          mon .*= X[:,j].^u
+          if basis_type == "bernstein"
+            mon .*= Bs[j][:, u+1]  # Use precomputed basis
+          else
+            mon .*= X[:,j].^u  # Standard polynomial
+          end
         end
       end
       col .+= mon

@@ -242,7 +242,7 @@ end
 function calc_derivative_sieve(j1, j2; 
         exchange = [], shares = [], 
         permuted_shares = [], perm = [], 
-        bernO = 2, sieve_type = "bernstein", max_interaction = 1, 
+        bernO = 2, sieve_type = "bernstein", max_interaction = 1, tensor = true,
         recipe = nothing, 
         constraints = nothing)
 
@@ -266,7 +266,7 @@ function calc_derivative_sieve(j1, j2;
         end
         tempmat_s = tempmat_s[:,2:end] # remove zeros used to initialize the matrix
         tempmat_s, _, _ = make_interactions(tempmat_s, exchange, bernO, j1_orig, perm);
-    elseif sieve_type == "raw_polynomial"
+    elseif tensor ==false
         # which_group = findall(j1 .∈ exchange)[1];
         # exchange_for_poly = length(exchange) == size(shares,2) ? [] : adjust_exchange(exchange, j1);
         tempmat_s = NPDemand.poly_features_derivative(
@@ -275,7 +275,8 @@ function calc_derivative_sieve(j1, j2;
             max_interaction = max_interaction, 
             exchange = exchange, 
             var_index = j2, 
-            recipe = recipe);
+            recipe = recipe, 
+            basis_type = sieve_type);
     else 
         # otherwise we are going to use fully generic tensor products
         tempmat_s = NPDemand.tensor_features_derivative(

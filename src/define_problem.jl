@@ -55,8 +55,8 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
          
         max_interaction = approximation_details[:max_interaction]
         sieve_type = approximation_details[:sieve_type]
-        @assert sieve_type in ["polynomial", "bernstein", "raw_polynomial"]
-            "sieve_type must be either 'polynomial', 'bernstein', or `raw_polynomial`. Got $sieve_type instead."
+        @assert sieve_type in ["polynomial", "bernstein"]
+            "sieve_type must be either 'polynomial' or 'bernstein'. Got $sieve_type instead."
     else 
         error("No approximation details provided. Please provide a Dict with keys :order, :max_interaction, and :sieve_type.")
     end
@@ -217,19 +217,9 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
         approximation_details = approximation_details, 
         constraints = constraints);
     
-    if constraints !=[] && sieve_type == "bernstein"
+    if sieve_type == "bernstein" && setdiff(constraints, [:exchangeability]) != Symbol[]
         verbose && println("Making linear constraint matrices....")
         Aineq, Aeq, maxs, mins = make_constraint(df, constraints, exchange, syms);
-    # elseif constraints !=[] && sieve_type == "polynomial"
-    #     # verbose && println("Making linear constraint matrices....")
-    #     Aeq = [];
-    #     # for exchange_ind = 1:length(exchange)
-    #     #     for prod_ind in exchange[exchange_ind]
-                
-    #     #     end
-    #     # end
-    #     # vcat!(
-    #     #     Aeq, 
     else 
         Aineq = [];
         Aeq = [];

@@ -1,13 +1,18 @@
 function prep_matrices(df::DataFrame, exchange, index_vars, 
     FEmat, product_FEs, order; price_iv = [], inner = false, 
     verbose = true, 
-    approximation_details = Dict("sieve_type" => "bernstein", "order" => 2, "max_interaction" => 1), 
+    approximation_details = Dict(
+        :sieve_type => "bernstein", 
+        :order => 2, 
+        :max_interaction => 1, 
+        :tensor => true), 
     constraints = [])
 
     sieve_type = approximation_details[:sieve_type]
+    tensor = haskey(approximation_details, :tensor) ? approximation_details[:tensor] : true
     basis_function = sieve_type == "bernstein" ? bern : poly
     dbasis_function = sieve_type == "bernstein" ? dbern : dpoly
-    
+
     # Unpack DataFrame df
     s = Matrix(df[:, r"shares"]);
     pt = Matrix(df[:, r"prices"]);
@@ -19,7 +24,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
 
     J = size(s,2);
     try 
-        @assert (sieve_type == "raw_polynomial") | (J<20)
+        @assert (sieve_type == "polynomial") | (J<20)
     catch
         error("J>20 not yet supported - will break polynomial and constraint construction")
     end
@@ -38,7 +43,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
     find_prices = findall(index_vars .== "prices");
     price_ind = find_prices[1];
 
-    if sieve_type == "raw_polynomial"
+    if !tensor 
         # Unpack approximation details
         order           = approximation_details[:order]
         max_interaction = approximation_details[:max_interaction]
@@ -107,6 +112,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
         perm[first_product_in_group] = xj; perm[xj] = first_product_in_group;
 
         if (sieve_type == "bernstein") & (setdiff(constraints, [:exchangeability]) != Symbol[])
+            # In this case, we have to use our custom code to keep track of how to make linear constraints
             BERN_xj = zeros(T,1);
             
             # Market shares
@@ -115,12 +121,13 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
             end
             BERN_xj = BERN_xj[:,2:end]
             full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, order, xj, perm);
-        elseif sieve_type == "raw_polynomial"
+        elseif tensor == false
             permuted_shares = zeros(T,1);
             for j = 1:1:J
                 permuted_shares = [permuted_shares s[:,perm[j]]]
             end
-            permuted_shares = permuted_shares[:,2:end]
+            permuted_shares = permuted_shares[:,2:end];
+
             # We only want to exchange columns in the current exchange group
             # if it contains more than one product after dropping the current product
             exchange_for_poly = length(exchange) == J ? [] : adjust_exchange(exchange, first_product_in_group);
@@ -129,7 +136,9 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
                 order = order, 
                 max_interaction = max_interaction, 
                 exchange = exchange_for_poly, 
-                recipe = recipes[which_group]);
+                recipe = recipes[which_group], 
+                basis_type = sieve_type);
+
         else # otherwise we are going to use fully generic tensor products
             permuted_shares = zeros(T,1);
             for j = 1:1:J
@@ -149,26 +158,28 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
         if !inner 
             A_xj = zeros(T,1)
             ztemp = zt;
-            if sieve_type == "bernstein"
+            if (sieve_type == "bernstein") & (setdiff(constraints, [:exchangeability]) != Symbol[])
                 for zj = 1:1:size(ztemp, 2)
                     A_xj = [A_xj bern(ztemp[:,perm[zj]], IVbernO)]
                 end
                 A_xj = A_xj[:, 2:end]
                 A_xj, sym_combos, combos = make_interactions(A_xj, exchange, order, xj, perm);
-            elseif sieve_type == "raw_polynomial" 
-                # A_xj = zeros(T,1);
-                # for j = 1:1:J
-                #     A_xj = [A_xj ztemp[:,perm[j]]]
-                # end
-                # A_xj = A_xj[:,2:end]
+            elseif tensor == false
+                permuted_instruments = zeros(T,1);
+                for j = 1:1:J
+                    permuted_instruments = [permuted_instruments zt[:,perm[j]]]
+                end
                 exchange_for_poly = length(exchange) == J ? [] : adjust_exchange(exchange, xj);
                 A_xj = poly_features(
                     zt, 
                     order = order, 
                     max_interaction = max_interaction, 
                     exchange = exchange_for_poly, 
-                    recipe = recipes[which_group]);
+                    recipe = recipes[which_group], 
+                    basis_type = sieve_type);
             else # otherwise we are going to use fully generic tensor products
+                @assert tensor == true
+
                 permuted_instruments = zeros(T,1);
                 for j = 1:1:J
                     permuted_instruments = [permuted_instruments zt[:,perm[j]]]
@@ -225,7 +236,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
         if !inner
             push!(Avec, A_xj)
         end
-        if sieve_type == "bernstein"
+        if (sieve_type == "bernstein") & (setdiff(constraints, [:exchangeability]) != Symbol[])
             push!(syms, sym_combos)
             push!(all_combos, combos)
         end
