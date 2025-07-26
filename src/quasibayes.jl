@@ -336,7 +336,7 @@ function posterior_elasticities(j, k, betadraws, gammadraws, tempmats, problem)
     ndraws = min(size(betadraws,1), 1_000);
     tmpout = zeros(eltype(betadraws), size(problem.data,1), ndraws)
     for i in 1:ndraws
-        st       = problem.sampling_details.approximation_details[:sieve_type]
+        st       = problem.approximation_details[:sieve_type]
         params_i = map_to_sieve(betadraws[i,:], gammadraws[i,:],
                             problem.exchange, nbetas, problem;
                             sieve_type=st)
@@ -377,7 +377,7 @@ function find_starting_point(problem, prior,
     i = 1;
     constraints_satisfied = false
     while (i < n_attempts) & !(constraints_satisfied) 
-        st           = problem.sampling_details.approximation_details[:sieve_type]
+        st           = problem.approximation_details[:sieve_type]
         sieve_params = map_to_sieve(betadraws[i,:], gammadraws[i,:],
                                problem.exchange, prior["nbetas"], problem;
                                sieve_type=st)
