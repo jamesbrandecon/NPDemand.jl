@@ -119,8 +119,10 @@ function get_lower_bounds(problem)
                 push!(lbs, findall(vec(sum(A[findall(A[:,j] .== -1),:], dims=1)) .== 1))
             end
         end
-    else 
+    elseif problem.Aeq != []
         lbs = 5000 .* ones(Int, size(problem.Aeq[:,sieve_to_betas_index(problem)], 2))
+    else
+        lbs = 5000 .* ones(Int, sum(size.(problem.Xvec,2)))
     end
     return lbs
 end

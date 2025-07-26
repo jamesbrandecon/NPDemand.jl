@@ -420,3 +420,39 @@ function tensor_features_derivative(X::AbstractMatrix;
   # # end
   # return hcat(cols...)
 end
+
+
+function count_params(;
+  n_products::Int,
+  approximation_details::Dict{Symbol, Any},
+  exchange::Vector{Vector{Int}} = [collect(1:n_products)]) 
+
+  # simulate data with n_products and 3 markets 
+  s, p, z, x, xi  = simulate_logit(n_products, 5, -1, 0.01);
+  df = toDataFrame(s,p,z,x);
+
+  Xvec, ~, ~, ~, ~ = NPDemand.prep_matrices(
+        df, exchange, ["prices", "x"], [], false, approximation_details[:order]; 
+        price_iv = ["prices"], verbose = false, 
+        approximation_details = approximation_details, 
+        constraints = [:exchangeability], inner = true
+    );
+
+  # count the number of unique parameters and total paramterers 
+  total_params = sum(size.(Xvec,2)) 
+  unique_params = sum(size.(Xvec,2)[first.(exchange)]) 
+
+  return(
+    Dict(
+      :total_params => total_params,
+      :unique_params => unique_params,
+      :sieve_type => approximation_details[:sieve_type],
+      :order => approximation_details[:order],
+      :max_interaction => approximation_details[:max_interaction],
+      :tensor => approximation_details[:tensor],
+      :exchange => exchange, 
+      :n_products => n_products
+    )
+  )
+end
+

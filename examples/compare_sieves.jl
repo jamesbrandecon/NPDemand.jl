@@ -30,9 +30,9 @@ npd_problem_bernstein_full = define_problem(df;
                         FE = [], 
                         approximation_details = Dict(
                             :order => 2,  
-                            :max_interaction => Inf, 
+                            :max_interaction => 0, 
                             :sieve_type => "bernstein", 
-                            :tensor => true # NOTE: tensor overrides max_interaction
+                            :tensor => false # NOTE: tensor overrides max_interaction
                         ), 
                         verbose = true
                         );

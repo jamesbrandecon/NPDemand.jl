@@ -39,7 +39,7 @@ function report_constraint_violations(problem;
     nbeta                 = sum(nbetas);
     
 
-    if (params ==[]) & (problem.chain == [])
+    if (params ==[]) & (problem.chain == []) & (problem.results.filtered_chain == [])
         param_vec = problem.results.minimizer; # if there's no chain, use the GMM result
     elseif (params ==[]) & (problem.results.filtered_chain != [])
         particles       = problem.results.filtered_chain;

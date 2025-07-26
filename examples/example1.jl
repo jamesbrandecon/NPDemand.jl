@@ -25,10 +25,10 @@ approximation_details = Dict(
                         :order => 2, 
                         :max_interaction => 2, 
                         :sieve_type => "bernstein", # "bernstein" or "polynomial"
-                        :tensor => false # NOTE: tensor overrides max_interaction
+                        :tensor => true # NOTE: tensor overrides max_interaction
                     )
 
-constraints = [:exchangeability]; 
+constraints = [:exchangeability, :monotone, :diagonal_dominance_all, :all_substitutes]; 
 
 @elapsed begin
     npd_problem = define_problem(df; 
@@ -40,9 +40,9 @@ constraints = [:exchangeability];
                             verbose = true
                         );
 
-    using Turing#, Profile
+    using Turing
     estimate!(npd_problem, 
-        quasi_bayes = false, 
+        quasi_bayes = true, 
         sampler = Turing.NUTS(1000, 0.65), 
         n_samples = 1000, 
         skip = 5,

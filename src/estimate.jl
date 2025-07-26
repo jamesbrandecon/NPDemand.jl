@@ -282,10 +282,11 @@ function estimate!(problem::NPDProblem;
         )
         
         # Find a starting point for sampling
-        if ((problem.results != []) & (n_attempts == 0))
-            println("Using existing minimizer as the initial point")
-            start = [problem.results.minimizer[NPDemand.sieve_to_betas_index(problem)]; problem.results.minimizer[problem.design_width+2:end]]
-        elseif (n_attempts == 0)
+        # ((problem.results != []) & (n_attempts == 0))
+        # println("Using existing minimizer as the initial point")
+        # start = [problem.results.minimizer[NPDemand.sieve_to_betas_index(problem)]; problem.results.minimizer[problem.design_width+2:end]]
+        # elseif
+        if (n_attempts == 0)
             start, start_exit = find_starting_point(problem, prior, problem.tempmats, weight_matrices, n_attempts = 1);
         else
             verbose && println("Finding a valid starting point for sampler....")
