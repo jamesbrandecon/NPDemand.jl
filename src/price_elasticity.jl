@@ -31,7 +31,7 @@ function price_elasticities!(problem;
             sieve_type = sieve_type, 
             max_interaction = max_interaction);
         problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast.all_elast_mat)
-        problem.all_jacobians    = elast.Jmat
+        problem.all_jacobians    = elast.Jmat;
     else
         burn_in = problem.sampling_details.burn_in;
         skip    = problem.sampling_details.skip;
@@ -68,8 +68,8 @@ function price_elasticities!(problem;
             end
             elast .= elast ./ n_draws; # Calculate the mean posterior elasticities
             jacob .= jacob ./ n_draws;
-            problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast)
-            problem.all_jacobians    = jacob
+            problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast);
+            problem.all_jacobians    = jacob;
         else
             elast   = [zeros(J,J) for i in 1:T];
             jacob   = [zeros(J,J) for i in 1:T];
@@ -112,8 +112,8 @@ function price_elasticities!(problem;
                 market_ids = problem.data.market_ids, 
                 all_elasticities = elast, 
                 ub = ub, 
-                lb = lb)
-            problem.all_jacobians    = jacob
+                lb = lb);
+            problem.all_jacobians    = jacob;
         end
     end
 end
