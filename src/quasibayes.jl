@@ -279,8 +279,6 @@ end
     gamma_length::Int = size(problem.Bvec[1],2);
     betastar ~ MvNormal(betabar, diagm(vbeta))
     gamma ~ MvNormal(gammabar, vgamma*diagm(ones(gamma_length-1)));
-    
-    # @show length(betastar)
 
     # Apply reparameterization
     beta = sieve_type == "bernstein" ? reparameterization(betastar, lbs, parameter_order) : betastar;

@@ -247,7 +247,7 @@ function estimate!(problem::NPDProblem;
         # Define inputs to quasi-bayes sampling 
         nbetas          = get_nbetas(problem)
         lbs             = sieve_type == "bernstein" ? get_lower_bounds(problem) : []
-        parameter_order = lbs == []                 ? get_parameter_order(lbs)  : 1:sum(nbetas)
+        parameter_order = lbs != []                 ? get_parameter_order(lbs)  : 1:sum(nbetas)
         vbetastar       = 10;
         vbeta           = zeros(sum(nbetas))
 
