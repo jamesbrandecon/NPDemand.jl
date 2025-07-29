@@ -243,11 +243,10 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
     # Clean up 
     Aineq = Aineq[2:end,:];
     Aineq = Matrix(hcat(unique(eachrow(Aineq))...)') # Drop redundant inequality constraints
+    Aeq = Aeq[2:end,:];
     if size(Aineq,2)==0
         Aineq = [];
     end
-
-    Aeq = Aeq[2:end,:];
 
     mins = dropdims(getindex.(argmin(Aeq, dims=2),2), dims=2);
     order = sortperm(mins, rev=true);
