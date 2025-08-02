@@ -110,8 +110,8 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
         first_product_in_group = exchange[which_group][1];
         perm = collect(1:J);
         perm[first_product_in_group] = xj; perm[xj] = first_product_in_group;
-
-        if (sieve_type == "bernstein") & (setdiff(constraints, [:exchangeability]) != Symbol[])
+        
+        if (sieve_type == "bernstein") & (tensor == true)
             # In this case, we have to use our custom code to keep track of how to make linear constraints
             BERN_xj = zeros(T,1);
             
@@ -158,7 +158,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
         if !inner 
             A_xj = zeros(T,1)
             ztemp = zt;
-            if (sieve_type == "bernstein") & (setdiff(constraints, [:exchangeability]) != Symbol[])
+            if (sieve_type == "bernstein") & (tensor == true)
                 for zj = 1:1:size(ztemp, 2)
                     A_xj = [A_xj bern(ztemp[:,perm[zj]], IVbernO)]
                 end
@@ -236,7 +236,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
         if !inner
             push!(Avec, A_xj)
         end
-        if (sieve_type == "bernstein") & (setdiff(constraints, [:exchangeability]) != Symbol[])
+        if (sieve_type == "bernstein") & (tensor==true)
             push!(syms, sym_combos)
             push!(all_combos, combos)
         end

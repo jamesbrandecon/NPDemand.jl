@@ -8,18 +8,9 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
 
     ncols = size(X,2);
     J = Int(ncols/(m+1));
-    # input_string = ""
-    # input_string2 = ""
     prime_vec = primes(1000);
     order_prime_factors = prime_vec[1:m+1]; 
     r = order_prime_factors;
-    # G = [];
-    # G2 = [];
-    # for j = 1:J
-    #     # Make G[j] contain groups of (m+1) columns
-    #     push!(G, r)
-    #     push!(G2, (j-1)*(m+1)+1:j*(m+1))
-    # end
     G = [r for j = 1:J];
     G2 = [(j-1)*(m+1)+1:j*(m+1) for j = 1:J];
     
@@ -34,7 +25,6 @@ function make_interactions(X::Matrix, exchange_vec, m, this_j, perm)
     combos = reshape(combos, length(combos));
     combos = collect.(combos);
     
-
     # Make symbol vector to apply combos to so that constriaints can be applied by name
     sym_vec = [Symbol("shares$i") for i in perm]
     # @show sym_vec this_j
