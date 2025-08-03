@@ -249,7 +249,7 @@ function calc_derivative_sieve(j1, j2;
     basis_function = sieve_type == "bernstein" ? bern : poly
     dbasis_function = sieve_type == "bernstein" ? dbern : dpoly
     
-    if (sieve_type == "bernstein") & (setdiff(constraints, [:exchangeability]) != Symbol[])
+    if (sieve_type == "bernstein") & (tensor == true)
         # When using this code, we need to invert j1 and j2 via perm, bc they have already been passed through perm 
         j1_orig = perm[j1]; 
         j2_orig = perm[j2];  
