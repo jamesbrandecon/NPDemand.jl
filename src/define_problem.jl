@@ -217,13 +217,13 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
         approximation_details = approximation_details, 
         constraints = constraints);
     
-    if sieve_type == "bernstein" && setdiff(constraints, [:exchangeability]) != Symbol[]
+    if sieve_type == "bernstein" && (approximation_details[:tensor] == true)
         verbose && println("Making linear constraint matrices....")
         Aineq, Aeq, maxs, mins = make_constraint(df, constraints, exchange, syms);
     else 
         Aineq = [];
         Aeq = [];
-        mins = []; 
+        mins = []; ## NEED TO FIX FOR NON-BERNSTEIN, NON-TENSOR SIEVES 
         maxs = [];
     end
     
