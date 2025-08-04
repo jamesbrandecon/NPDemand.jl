@@ -6,6 +6,7 @@ function calc_tempmats(problem::NPDProblem;
     s        = Matrix(problem.data[:, r"shares"]);
     exchange = problem.exchange;
     bO       = problem.approximation_details[:order];
+    tensor   = haskey(problem.approximation_details, :tensor) ? problem.approximation_details[:tensor] : true;
     bernO    = convert.(Integer, bO);
     
     tempmats = Matrix{Float64}[]
@@ -36,7 +37,7 @@ function calc_tempmats(problem::NPDProblem;
         for j2 = 1:J 
             # println("Calculating tempmat for j1 = ", j1, " and j2 = ", j2)
             tempmat_s = calc_derivative_sieve(permutations[j1], permutations[j2];
-                exchange          = ((exchange==[]) | ((approximation_details[:sieve_type] == "bernstein") && (setdiff(problem.constraints, [:exchangeability])!=Symbol[]))) ? 
+                exchange          = ((exchange==[]) | ((approximation_details[:sieve_type] == "bernstein") && (tensor == true))) ? 
                     exchange : adjust_exchange(exchange, first_product_in_group),
                 shares            = s,             
                 permuted_shares   = permuted_shares,
