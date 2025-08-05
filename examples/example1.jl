@@ -3,6 +3,7 @@
 using Plots
 using NPDemand
 using DataFrames
+using Turing
 
 # Simulate data
 J = 4; # of products
@@ -17,9 +18,6 @@ exchange = [[1;2;3;4]]; # exchangeability groups
 # Note: exchangability can be either 0-indexed or 1-indexed. This also works:
 # exchange = [[0 1], [2 3]]; 
 index_vars = ["prices", "x"]
-constraint_tol = 1e-5;
-obj_xtol = 1e-5;
-obj_ftol = 1e-5;
 
 approximation_details = Dict(
                         :order => 2, 
@@ -28,7 +26,8 @@ approximation_details = Dict(
                         :tensor => true # NOTE: tensor overrides max_interaction
                     )
 
-constraints = [:exchangeability, :monotone, :diagonal_dominance_all, :all_substitutes]; 
+# could also add all_substitutes, but we'll withhold here and see whether it's enforeced anyway
+constraints = [:exchangeability, :monotone, :diagonal_dominance_all]; 
 
 @elapsed begin
     npd_problem = define_problem(df; 
@@ -40,7 +39,6 @@ constraints = [:exchangeability, :monotone, :diagonal_dominance_all, :all_substi
                             verbose = true
                         );
 
-    using Turing
     estimate!(npd_problem, 
         quasi_bayes = true, 
         sampler = Turing.NUTS(1000, 0.65), 
@@ -53,9 +51,16 @@ constraints = [:exchangeability, :monotone, :diagonal_dominance_all, :all_substi
 
     summarize_elasticities(npd_problem,"matrix", "quantile").Value
 
+    # Check the compliance with constraints that were imposed in estimation
     report_constraint_violations(npd_problem;
         verbose = true,
         output = "dict")
+
+    # Or check a broader/narrower set of constraints
+    report_constraint_violations(npd_problem;
+        verbose = true,
+        output = "dict", 
+        constraints = [:exchangeability, :monotone, :diagonal_dominance_all, :all_substitutes])
 
     smc!(npd_problem)
 end

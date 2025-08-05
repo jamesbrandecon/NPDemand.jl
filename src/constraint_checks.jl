@@ -29,7 +29,8 @@ function report_constraint_violations(problem;
     verbose = true,
     params = [], 
     output = "dict", 
-    n_draws::Int = 0
+    n_draws::Int = 0, 
+    constraints = problem.constraints
     )
 
     approximation_details = problem.approximation_details;
@@ -37,7 +38,6 @@ function report_constraint_violations(problem;
     nbetas                = NPDemand.get_nbetas(problem);
     lbs                   = sieve_type == "bernstein" ? NPDemand.get_lower_bounds(problem) : [];
     nbeta                 = sum(nbetas);
-    
 
     if (params ==[]) & (problem.chain == []) & (problem.results.filtered_chain == [])
         param_vec = problem.results.minimizer; # if there's no chain, use the GMM result
@@ -61,11 +61,12 @@ function report_constraint_violations(problem;
     end
 
     if length(size(param_vec)) == 1
-        violations = report_constraint_violations_inner(problem, verbose = verbose, params = param_vec, output = output)
+        violations = report_constraint_violations_inner(problem, verbose = verbose, 
+                params = param_vec, output = output, constraints_to_check = constraints)
     else 
         violation_dict_array = [
         report_constraint_violations_inner(problem, 
-            params = param_vec[i,:], verbose = false) for i in axes(param_vec,1)
+            params = param_vec[i,:], verbose = false, constraints_to_check = constraints) for i in axes(param_vec,1)
         ];
         violations = Dict{Symbol, Float64}()
         for k in keys(violation_dict_array[1])
@@ -78,7 +79,8 @@ end
 function report_constraint_violations_inner(problem;
     verbose = true,
     params = [], 
-    output = "dict")
+    output = "dict", 
+    constraints_to_check = constraints)
 
     J = length(problem.Xvec)
 
@@ -95,7 +97,7 @@ function report_constraint_violations_inner(problem;
     num_violated_per_market = zeros(Int64, size(problem.data,1));
 
     # Monotonicity
-    if :monotone in problem.constraints
+    if :monotone in constraints_to_check
         monotone_satisfied = [all(diag(reshaped_jacobians[:,:,i]) .<=0) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& monotone_satisfied;
         num_violated_per_market .+= (1 .- monotone_satisfied);
@@ -105,7 +107,7 @@ function report_constraint_violations_inner(problem;
     end
     
     # All substitutes
-    if :all_substitutes in problem.constraints
+    if :all_substitutes in constraints_to_check
         all_subs_satisfied = [check_all_subs(reshaped_jacobians[:,:,i]) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& all_subs_satisfied;
         num_violated_per_market .+= (1 .- all_subs_satisfied);
@@ -115,7 +117,7 @@ function report_constraint_violations_inner(problem;
     end
 
     # Diagonal dominance
-    if :diagonal_dominance_all in problem.constraints
+    if :diagonal_dominance_all in constraints_to_check
         diag_dom_satisfied = [check_diagonal_dominance(reshaped_jacobians[:,:,i]) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& diag_dom_satisfied;
         num_violated_per_market .+= (1 .- diag_dom_satisfied);
@@ -125,7 +127,7 @@ function report_constraint_violations_inner(problem;
     end
 
     # Substitutes within group
-    if :subs_in_group in problem.constraints
+    if :subs_in_group in constraints_to_check
         subs_in_group_satisfied = [check_subs_in_group(reshaped_jacobians[:,:,i], problem.exchange) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& subs_in_group_satisfied;
         num_violated_per_market .+= (1 .- subs_in_group_satisfied)
@@ -135,7 +137,7 @@ function report_constraint_violations_inner(problem;
     end
 
     # Substitutes across group
-    if :subs_across_group in problem.constraints
+    if :subs_across_group in constraints_to_check
         subs_across_group_satisfied = [check_subs_across_group(reshaped_jacobians[:,:,i], problem.exchange) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& subs_across_group_satisfied;
         num_violated_per_market .+= (1 .- subs_across_group_satisfied)
@@ -145,7 +147,7 @@ function report_constraint_violations_inner(problem;
     end
 
     # All complements
-    if :all_complements in problem.constraints
+    if :all_complements in constraints_to_check
         all_comps_satisfied = [check_all_complements(reshaped_jacobians[:,:,i]) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& all_comps_satisfied;
         num_violated_per_market .+= (1 .- all_comps_satisfied)
@@ -155,7 +157,7 @@ function report_constraint_violations_inner(problem;
     end
 
     # Complements within group
-    if :complements_in_group in problem.constraints
+    if :complements_in_group in constraints_to_check
         complements_in_group_satisfied = [check_comps_in_group(reshaped_jacobians[:,:,i], problem.exchange) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& complements_in_group_satisfied;
         num_violated_per_market .+= (1 .- complements_in_group_satisfied)
@@ -165,7 +167,7 @@ function report_constraint_violations_inner(problem;
     end
 
     # Complements across group
-    if :complements_across_group in problem.constraints
+    if :complements_across_group in constraints_to_check
         complements_across_group_satisfied = [check_comps_across_group(reshaped_jacobians[:,:,i], problem.exchange) for i in axes(reshaped_jacobians,3)];
         all_satisfied = all_satisfied .& complements_across_group_satisfied;
         num_violated_per_market .+= (1 .- complements_across_group_satisfied)
@@ -183,7 +185,7 @@ function report_constraint_violations_inner(problem;
     elseif output == "count"
         return Int.(num_violated_per_market)
     elseif output == "frac"
-        return num_violated_per_market/length(problem.constraints)
+        return num_violated_per_market/length(constraints_to_check)
     else
         return Float64::violations[:any]
     end
