@@ -80,7 +80,7 @@ function report_constraint_violations_inner(problem;
     verbose = true,
     params = [], 
     output = "dict", 
-    constraints_to_check = constraints)
+    constraints_to_check = problem.constraints)
 
     J = length(problem.Xvec)
 
