@@ -93,7 +93,7 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
         error("Cannot constrain both :subs_in_group and :complements_in_group")
     end
     if (:subs_across_group ∈ constraints) && (:complements_across_group ∈ constraints)
-        error("Cannot constrain both :subs_in_group and :complements_across_group")
+        error("Cannot constrain both :subs_across_group and :complements_across_group")
     end
 
     # Checking structure of index
@@ -107,7 +107,7 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
             error("Diagonal dominance only implemented in conjunction with monotonicity-- add :monotone to constraints")
         end
         if (exchange != []) && (:exchangeability ∉ constraints)
-            error("Vector exchange is nonempty but :exchangeability is listed in constraints")
+            error("Vector exchange is nonempty but :exchangeability is not listed in constraints")
         end
     end
 
