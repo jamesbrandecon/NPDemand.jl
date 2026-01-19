@@ -1,5 +1,17 @@
 function prep_matrices(df::DataFrame, exchange, index_vars, 
-    FEmat, product_FEs, bO; price_iv = [], inner = false, verbose = true)
+    FEmat, product_FEs, order; price_iv = [], inner = false, 
+    verbose = true, 
+    approximation_details = Dict(
+        :sieve_type => "bernstein", 
+        :order => 2, 
+        :max_interaction => 1, 
+        :tensor => true), 
+    constraints = [])
+
+    sieve_type = approximation_details[:sieve_type]
+    tensor = haskey(approximation_details, :tensor) ? approximation_details[:tensor] : true
+    basis_function = sieve_type == "bernstein" ? bern : poly
+    dbasis_function = sieve_type == "bernstein" ? dbern : dpoly
 
     # Unpack DataFrame df
     s = Matrix(df[:, r"shares"]);
@@ -12,14 +24,13 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
 
     J = size(s,2);
     try 
-        @assert J<20
+        @assert (sieve_type == "polynomial") | (J<20)
     catch
         error("J>20 not yet supported - will break polynomial and constraint construction")
     end
-    bernO = bO;
-    order = bO;
+    bernO = order;
     T = size(df,1);
-    IVbernO = bO;
+    IVbernO = order;
 
     # --------------------------------------------
     # Check normalization
@@ -31,6 +42,20 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
 
     find_prices = findall(index_vars .== "prices");
     price_ind = find_prices[1];
+
+    if !tensor 
+        # Unpack approximation details
+        order           = approximation_details[:order]
+        max_interaction = approximation_details[:max_interaction]
+        
+        recipes = [ begin
+        ex2 = length(exchange)==J ? [] : adjust_exchange(exchange, j1)
+        build_poly_recipe(J;
+            order           = approximation_details[:order],
+            max_interaction = approximation_details[:max_interaction],
+            exchange        = ex2)
+        end for j1 in minimum.(exchange)]
+    end
 
     # --------------------------------------------
     # Prep for design matrix and constraints
@@ -83,67 +108,126 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
     for xj = 1:J
         which_group = findall(xj .∈ exchange)[1];
         first_product_in_group = exchange[which_group][1];
-        BERN_xj = zeros(T,1);
-        
         perm = collect(1:J);
         perm[first_product_in_group] = xj; perm[xj] = first_product_in_group;
         
-        # Market shares
-        for j = 1:1:J
-            BERN_xj = [BERN_xj bern(s[:,perm[j]], bO)]
-        end
-        BERN_xj = BERN_xj[:,2:end]
-
-        # full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, bO, first_product_in_group, perm);
-        full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, bO, xj, perm);
-        # temp_combo_size = size(full_interaction,2);
-        # println("size of combos: $temp_combo_size")
-    # --------------------------------------------
-    # Instruments
-    if !inner 
-        A_xj = zeros(T,1)
-        ztemp = zt;
-        for zj = 1:1:size(ztemp, 2)
-            A_xj = [A_xj bern(ztemp[:,perm[zj]], IVbernO)]
-        end
-        A_xj = A_xj[:, 2:end]
-        A_xj, sym_combos, combos = make_interactions(A_xj, exchange, bO, xj, perm);
+        if (sieve_type == "bernstein") & (tensor == true)
+            # In this case, we have to use our custom code to keep track of how to make linear constraints
+            BERN_xj = zeros(T,1);
             
-        # Add index vars as IV
-        for k ∈ eachindex(index_vars) 
-            v = index_vars[k];
-            if v!= "prices"
-                A_xj = hcat(A_xj, df[!,"$(v)$(xj-1)"]);
+            # Market shares
+            for j = 1:1:J
+                BERN_xj = [BERN_xj bern(s[:,perm[j]], order)]
             end
+            BERN_xj = BERN_xj[:,2:end]
+            full_interaction, sym_combos, combos = make_interactions(BERN_xj, exchange, order, xj, perm);
+        elseif tensor == false
+            permuted_shares = zeros(T,1);
+            for j = 1:1:J
+                permuted_shares = [permuted_shares s[:,perm[j]]]
+            end
+            permuted_shares = permuted_shares[:,2:end];
+
+            # We only want to exchange columns in the current exchange group
+            # if it contains more than one product after dropping the current product
+            exchange_for_poly = length(exchange) == J ? [] : adjust_exchange(exchange, first_product_in_group);
+            full_interaction  = poly_features(
+                permuted_shares, 
+                order = order, 
+                max_interaction = max_interaction, 
+                exchange = exchange_for_poly, 
+                recipe = recipes[which_group], 
+                basis_type = sieve_type);
+
+        else # otherwise we are going to use fully generic tensor products
+            permuted_shares = zeros(T,1);
+            for j = 1:1:J
+                permuted_shares = [permuted_shares s[:,perm[j]]]
+            end
+            permuted_shares = permuted_shares[:,2:end]
+            full_interaction = NPDemand.tensor_features(
+                permuted_shares,  # <-- Changed from 's' to 'permuted_shares'
+                basis_orders = order .* ones(Int, J), 
+                exchange = adjust_exchange(exchange, first_product_in_group), 
+                basis_function = basis_function,
+                dbasis_function = dbasis_function);
         end
 
-        # add IVs for price
-        if (price_iv == []) | (price_iv == ["price_iv"])
-            A_xj = hcat(A_xj, df[!,"price_iv$(xj-1)"])
-        else
-            for p_ivs ∈ price_iv
-                A_xj = hcat(A_xj, df[!,"$(p_ivs)$(xj-1)"]);
+        # --------------------------------------------
+        # Instruments
+        if !inner 
+            A_xj = zeros(T,1)
+            ztemp = zt;
+            if (sieve_type == "bernstein") & (tensor == true)
+                for zj = 1:1:size(ztemp, 2)
+                    A_xj = [A_xj bern(ztemp[:,perm[zj]], IVbernO)]
+                end
+                A_xj = A_xj[:, 2:end]
+                A_xj, sym_combos, combos = make_interactions(A_xj, exchange, order, xj, perm);
+            elseif tensor == false
+                permuted_instruments = zeros(T,1);
+                for j = 1:1:J
+                    permuted_instruments = [permuted_instruments zt[:,perm[j]]]
+                end
+                exchange_for_poly = length(exchange) == J ? [] : adjust_exchange(exchange, xj);
+                A_xj = poly_features(
+                    zt, 
+                    order = order, 
+                    max_interaction = max_interaction, 
+                    exchange = exchange_for_poly, 
+                    recipe = recipes[which_group], 
+                    basis_type = sieve_type);
+            else # otherwise we are going to use fully generic tensor products
+                @assert tensor == true
+
+                permuted_instruments = zeros(T,1);
+                for j = 1:1:J
+                    permuted_instruments = [permuted_instruments zt[:,perm[j]]]
+                end
+                permuted_instruments = permuted_instruments[:,2:end]
+                A_xj = NPDemand.tensor_features(
+                    permuted_instruments,  # <-- Changed from 'zt' to 'permuted_instruments'
+                    basis_orders = order .* ones(Int, J),
+                    exchange = adjust_exchange(exchange, xj), 
+                    basis_function = basis_function,
+                    dbasis_function = dbasis_function);
+            end
+                
+            # Add index vars as IV
+            for k ∈ eachindex(index_vars) 
+                v = index_vars[k];
+                if v!= "prices"
+                    A_xj = hcat(A_xj, df[!,"$(v)$(xj-1)"]);
+                end
+            end
+
+            # add IVs for price
+            if (price_iv == []) | (price_iv == ["price_iv"])
+                A_xj = hcat(A_xj, df[!,"price_iv$(xj-1)"])
+            else
+                for p_ivs ∈ price_iv
+                    A_xj = hcat(A_xj, df[!,"$(p_ivs)$(xj-1)"]);
+                end
+            end
+            
+            # Add FEs/dummies as IVs
+            if FEmat !=[]
+                A_xj = hcat(A_xj, FEmat);
+            end
+            if product_FEs == true 
+                num_FEs = J - length(exchange);
+                prodFE = zeros(size(A_xj,1),num_FEs);
+
+                which_group = findall(xj .∈ exchange)[1];
+                first_product_in_group = exchange[which_group][1];
+
+                if xj !=first_product_in_group # dropping last product's FE for location normalization
+                    prodFE[:,prod_FE_counter] .= 1;
+                    prod_FE_counter +=1;
+                end
+                A_xj = hcat(A_xj, prodFE);
             end
         end
-        
-        # Add FEs/dummies as IVs
-        if FEmat !=[]
-            A_xj = hcat(A_xj, FEmat);
-        end
-        if product_FEs == true 
-            num_FEs = J - length(exchange);
-            prodFE = zeros(size(A_xj,1),num_FEs);
-
-            which_group = findall(xj .∈ exchange)[1];
-            first_product_in_group = exchange[which_group][1];
-
-            if xj !=first_product_in_group # dropping last product's FE for location normalization
-                prodFE[:,prod_FE_counter] .= 1;
-                prod_FE_counter +=1;
-            end
-            A_xj = hcat(A_xj, prodFE);
-        end
-    end
 
         if (!inner) & (verbose)
             println("Done with choice $(xj-1)")
@@ -152,9 +236,28 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
         if !inner
             push!(Avec, A_xj)
         end
-        push!(syms, sym_combos)
-        push!(all_combos, combos)
+        if (sieve_type == "bernstein") & (tensor==true)
+            push!(syms, sym_combos)
+            push!(all_combos, combos)
+        end
     end
 
     return Xvec, Avec, B, syms, all_combos
+end
+
+function adjust_exchange(exchange::Vector{Vector{Int}}, xj::Int)
+    new_groups = Vector{Vector{Int}}()
+    for g in exchange
+        if xj ∈ g
+            # remove the focal element but keep the remainder if any
+            g2 = filter(i->i != xj, g)
+            if !isempty(g2)
+                push!(new_groups, g2)
+            end
+        else
+            # non‐focal groups stay intact
+            push!(new_groups, copy(g))
+        end
+    end
+    return new_groups
 end

@@ -82,3 +82,16 @@ Fixed effects are estimated as parameters, not absorbed from the data. So, be ca
 
 To include fixed effects (categorical variables), use the option `FE` to provide a vector of strings, where each element of the vector is a name of a column in the provided data `df`. Note however that at present, variables that are included as fixed effect must be constant across products within a market. The only exception to this rule is `"product"` which is a keyword which will produce product fixed-effects. There need not be a column named `product` in the data, and in fact the code will ignore it if it's there. 
 
+
+## Contributing 
+The most useful way to contribute at the moment is to help us allow for alternative sieve approximations for each demand function. Functions that need to be extended to do this: '
+
+- /src/prep_matrices.jl
+    - prep_matrices()
+
+- /src/sieve_functions.jl: 
+    - add functions for constructing sieve approximation **and** the derivative of that approximation (hopefully linear in parameters)
+
+- /src/price_elasticities.jl: 
+    - calc_derivative_sieve()
+

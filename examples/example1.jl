@@ -2,44 +2,99 @@
 
 using Plots
 using NPDemand
+using DataFrames
+using Turing
 
 # Simulate data
 J = 4; # of products
-T = 5000; # # of markets
+T = 10000; # # of markets
 beta = -1; # price coefficient
-sdxi = 0.25; # standard deviation of xi
+sdxi = 0.01; # standard deviation of xi
 s, p, z, x, xi  = simulate_logit(J, T, beta, sdxi);
 df = toDataFrame(s,p,z,x);
 
 # Specify estimation/model parameters
-bO = 2; 
-exchange = [[1 2], [3 4]]
+exchange = [[1;2;3;4]]; # exchangeability groups
 # Note: exchangability can be either 0-indexed or 1-indexed. This also works:
 # exchange = [[0 1], [2 3]]; 
 index_vars = ["prices", "x"]
-constraint_tol = 1e-5;
-obj_xtol = 1e-5;
-obj_ftol = 1e-5;
 
-constraints = [:exchangeability, :monotone, :diagonal_dominance_all];
-npd_problem = define_problem(df; 
+approximation_details = Dict(
+                        :order => 2, 
+                        :max_interaction => 2, 
+                        :sieve_type => "bernstein", # "bernstein" or "polynomial"
+                        :tensor => true # NOTE: tensor overrides max_interaction
+                    )
+
+# could also add all_substitutes, but we'll withhold here and see whether it's enforeced anyway
+constraints = [:exchangeability, :monotone, :diagonal_dominance_all]; 
+
+@elapsed begin
+    npd_problem = define_problem(df; 
                             exchange = exchange, 
                             index_vars = index_vars, 
                             constraints = constraints,
-                            bO = bO,
-                            FE = ["dummyFE", "product"]
-                            );
-show(npd_problem)
+                            FE = [], 
+                            approximation_details = approximation_details, 
+                            verbose = true
+                        );
 
-# Estimate problem and plot comparison of estimated and true own-price elasticities
-estimate!(npd_problem) 
+    estimate!(npd_problem, 
+        quasi_bayes = true, 
+        sampler = Turing.NUTS(1000, 0.65), 
+        n_samples = 1000, 
+        skip = 5,
+        custom_prior = Dict("vbeta" => 10, "vgamma" => 10.0, "betabar" => 0.0, "gammabar" => 0.0)); 
 
-price_elasticities!(npd_problem);
+    price_elasticities!(npd_problem
+    );
+
+    summarize_elasticities(npd_problem,"matrix", "quantile").Value
+
+    # Check the compliance with constraints that were imposed in estimation
+    report_constraint_violations(npd_problem;
+        verbose = true,
+        output = "dict")
+
+    # Or check a broader/narrower set of constraints
+    report_constraint_violations(npd_problem;
+        verbose = true,
+        output = "dict", 
+        constraints = [:exchangeability, :monotone, :diagonal_dominance_all, :all_substitutes])
+
+    smc!(npd_problem)
+end
+
+# All true own-price elasticities
 true_elast_prod1 = beta .* df.prices0 .* (1 .- df.shares0);
+true_ownelast_df = DataFrame(
+    hcat([beta .* df[!,"prices$x"] .* (1 .- df[!,"shares$x"]) for x in 0:J-1]...), 
+    :auto
+);
 
+elast_q = elasticity_quantiles(
+    npd_problem, 1, 1, 
+    quantiles = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], 
+    n_draws = 300)
+  
 scatter(true_elast_prod1, own_elasticities(npd_problem)[:,1], alpha = 0.3, ylims = (-4,1), 
             legend = false, xlabel = "Truth", ylabel = "Estimate")
 plot!(true_elast_prod1, true_elast_prod1, linewidth = 2, linecolor = :black)
+
+histogram(own_elasticities(npd_problem)[:,1], 
+            bins = 50, 
+            alpha = 0.5, 
+            # legend = false, 
+            xlabel = "Own Price Elasticity", 
+            ylabel = "Density", 
+            title = "Posterior Distribution of Own Price Elasticity", 
+            normalize = :pdf)
+histogram!(true_elast_prod1, 
+            bins = 50, 
+            alpha = 0.5, 
+            # legend = false, 
+            title = "True Own Price Elasticity", 
+            normalize = :pdf)
 
 # Make copy of problem and drop all but exchangeability constraints
 npd_problem2 = deepcopy(npd_problem)
@@ -51,3 +106,9 @@ price_elasticities!(npd_problem2);
 scatter(true_elast_prod1, own_elasticities(npd_problem2)[:,1], alpha = 0.3, ylims = (-4,1), 
             legend = false, xlabel = "Truth", ylabel = "Estimate")
 plot!(true_elast_prod1, true_elast_prod1, linewidth = 2, linecolor = :black)
+
+
+report_constraint_violations(npd_problem;
+        verbose = true,
+        output = "dict", 
+        approximation_details = approximation_details)

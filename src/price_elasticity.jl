@@ -12,6 +12,13 @@ We also store the Jacobian of the demand function with respect to prices, which 
 function price_elasticities!(problem; 
         CI::Union{Vector{Any}, Real} = [], 
         n_draws::Union{Vector{Any}, Int} = [])
+    
+    # Unpack approximation details
+    approximation_details = problem.approximation_details;
+    order = approximation_details[:order]
+    max_interaction = approximation_details[:max_interaction]
+    sieve_type = approximation_details[:sieve_type]
+
     try 
         @assert (CI==[]) | (CI isa Real)
     catch 
@@ -19,9 +26,12 @@ function price_elasticities!(problem;
     end
 
     if problem.chain ==[]
-        elast = price_elasticities_inner(problem);
+        elast = price_elasticities_inner(
+            problem, 
+            sieve_type = sieve_type, 
+            max_interaction = max_interaction);
         problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast.all_elast_mat)
-        problem.all_jacobians    = elast.Jmat
+        problem.all_jacobians    = elast.Jmat;
     else
         burn_in = problem.sampling_details.burn_in;
         skip    = problem.sampling_details.skip;
@@ -43,19 +53,27 @@ function price_elasticities!(problem;
                                 sample_i[sum(nbetas)+1:end], 
                                 problem.exchange, 
                                 nbetas, 
-                                problem)
-                elast_i = price_elasticities_inner(problem, β = β_i)
+                                problem, 
+                                sieve_type = sieve_type)
+                elast_i = price_elasticities_inner(
+                    problem, 
+                    β = β_i, 
+                    sieve_type = sieve_type,
+                    max_interaction = max_interaction);
+                # if typeof(elast_i) <:NamedTuple
+                #     elast_i = elast_i.all_elast_mat;
+                # end
                 elast = elast .+ elast_i.all_elast_mat;
                 jacob = jacob .+ elast_i.Jmat;
             end
             elast .= elast ./ n_draws; # Calculate the mean posterior elasticities
             jacob .= jacob ./ n_draws;
-            problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast)
-            problem.all_jacobians    = jacob
+            problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast);
+            problem.all_jacobians    = jacob;
         else
             elast   = [zeros(J,J) for i in 1:T];
             jacob   = [zeros(J,J) for i in 1:T];
-            alpha = 1 - CI;
+            alpha   = 1 - CI;
             try 
                 @assert ((n_draws > 0) & (n_draws <= size(problem.results.filtered_chain,1)))
             catch 
@@ -65,15 +83,20 @@ function price_elasticities!(problem;
 
             for i in ProgressBar(1:n_draws)
                 sample_i    = problem.results.filtered_chain[i,:];
-                β_i         = map_to_sieve(sample_i[1:sum(nbetas)], 
+                β_i = map_to_sieve(sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
                                 problem.exchange, 
                                 nbetas, 
-                                problem)
-                elast_i     = price_elasticities_inner(problem, β = β_i)
+                                problem, 
+                                sieve_type = sieve_type)
+                elast_i = price_elasticities_inner(
+                    problem, 
+                    β = β_i, 
+                    sieve_type = sieve_type,
+                    max_interaction = max_interaction)
                 elast       = elast + elast_i.all_elast_mat;
                 jacob       = jacob + elast_i.Jmat;
-                push!(elast_CI, elast_i);
+                push!(elast_CI, elast_i.all_elast_mat);
             end
             ub = [
                 [quantile(getindex.(getindex.(elast_CI, t),j1,j2), 1-alpha/2) for j1 = 1:J, j2 = 1:J] 
@@ -89,13 +112,17 @@ function price_elasticities!(problem;
                 market_ids = problem.data.market_ids, 
                 all_elasticities = elast, 
                 ub = ub, 
-                lb = lb)
-            problem.all_jacobians    = jacob
+                lb = lb);
+            problem.all_jacobians    = jacob;
         end
     end
 end
 
-function price_elasticities_inner(npd_problem; β = npd_problem.results.minimizer)
+function price_elasticities_inner(npd_problem; 
+    β = npd_problem.results.minimizer, 
+    sieve_type = "bernstein", 
+    max_interaction = 1)
+
     # Add a market ID column if not already present
     if !(:market_ids ∈ names(npd_problem.data))
         npd_problem.data[!,"market_ids"] .= 1:size(npd_problem.data,1);
@@ -112,6 +139,7 @@ function price_elasticities_inner(npd_problem; β = npd_problem.results.minimize
     B = npd_problem.Bvec;
     bO = npd_problem.bO;
     exchange = npd_problem.exchange;
+    nbetas = size.(npd_problem.Xvec,2);
 
     # Check inputs
     if (at!=[]) & (size(at,2) != size(df[:,r"prices"],2))
@@ -136,36 +164,18 @@ function price_elasticities_inner(npd_problem; β = npd_problem.results.minimize
     tempmats = []
     dsids = zeros(J,J,size(index,1)) # initialize matrix of ∂s^{-1}/∂s
     for j1 = 1:J
-        which_group = findall(j1 .∈ exchange)[1];
-        first_product_in_group = exchange[which_group][1];
-
-        perm = collect(1:J);
-        perm[first_product_in_group] = j1; perm[j1] = first_product_in_group;
-    
-        perm_s = copy(s);
-        perm_s[:,first_product_in_group] = s[:,j1]; perm_s[:,j1] = s[:,first_product_in_group];
-        
-        if j1 ==1 
-            init_ind = 0;
-        else
-            init_ind = sum(size.(X[1:j1-1],2))
-        end
-        θ_j1 = θ[init_ind+1:init_ind+size(X[j1],2)];
+        θ_j1, permuted_shares, permutations = get_params_one_equation(j1; exchange = exchange, s = s, θ = θ, nbetas = nbetas)
         
         for j2 = 1:J 
-            tempmat_s = zeros(size(index,1),1)
-            for j_loop = 1:1:J
-                stemp = perm_s[:,j_loop]; # j_loop = 1 -> stemp == perm_s[:,1] = s[:,2];
-                # j1=3, j2=4. j_loop = 4 -> stemp = perm_s[:,4] = s[:,4]
-                if j2 == perm[j_loop] # j2==2, perm[1] ==2, so s[:,2] added as derivative 
-                    tempmat_s = [tempmat_s dbern(stemp, bernO)];
-                else 
-                    tempmat_s = [tempmat_s bern(stemp, bernO)];
-                end
-            end
-            tempmat_s = tempmat_s[:,2:end]
-            tempmat_s, a, b = make_interactions(tempmat_s, exchange, bernO, j1, perm);
-            
+            # tempmat_s = calc_derivative_sieve(j1, j2; 
+            #     exchange = exchange, 
+            #     shares = s, 
+            #     permuted_shares = permuted_shares, 
+            #     perm = permutations, 
+            #     bernO = bernO, 
+            #     sieve_type = sieve_type, 
+            #     max_interaction = max_interaction)
+            tempmat_s = npd_problem.tempmats[j1,j2];
             dsids[j1,j2,:] = tempmat_s * θ_j1;
             push!(tempmats, tempmat_s)
         end
@@ -206,6 +216,80 @@ function price_elasticities_inner(npd_problem; β = npd_problem.results.minimize
     (;all_elast_mat, Jmat)
 end
 
+function get_params_one_equation(j1; exchange = [], s = [], θ = [], nbetas = [])
+    which_group                               = findall(j1 .∈ exchange)[1];
+    first_product_in_group                    = exchange[which_group][1];
+    J                                         = maximum(maximum.(exchange));
+
+    permutations                              = collect(1:J);
+    permutations[first_product_in_group]      = j1; 
+    permutations[j1]                          = first_product_in_group;
+
+    permuted_shares                           = copy(s);
+    permuted_shares[:,first_product_in_group] = s[:,j1]; 
+    permuted_shares[:,j1]                     = s[:,first_product_in_group];
+    
+    if j1 ==1 
+        init_ind = 0;
+    else
+        init_ind = sum(nbetas[1:j1-1])
+    end
+    θ_j1 = θ[init_ind+1:init_ind+nbetas[j1]];
+    
+    return θ_j1, permuted_shares, permutations
+end
+
+function calc_derivative_sieve(j1, j2; 
+        exchange = [], shares = [], 
+        permuted_shares = [], perm = [], 
+        bernO = 2, sieve_type = "bernstein", max_interaction = 1, tensor = true,
+        recipe = nothing, 
+        constraints = nothing)
+
+    basis_function = sieve_type == "bernstein" ? bern : poly
+    dbasis_function = sieve_type == "bernstein" ? dbern : dpoly
+    
+    if (sieve_type == "bernstein") & (tensor == true)
+        # When using this code, we need to invert j1 and j2 via perm, bc they have already been passed through perm 
+        j1_orig = perm[j1]; 
+        j2_orig = perm[j2];  
+        tempmat_s = zeros(size(shares,1),1);
+        J         = maximum(maximum.(exchange));
+        for j_loop = 1:1:J
+            stemp = permuted_shares[:,j_loop]; # j_loop = 1 -> stemp == perm_s[:,1] = s[:,2];
+            # j1=3, j2=4. j_loop = 4 -> stemp = perm_s[:,4] = s[:,4]
+            if j2_orig == perm[j_loop] # j2==2, perm[1] ==2, so s[:,2] added as derivative 
+                tempmat_s = [tempmat_s dbern(stemp, bernO)];
+            else 
+                tempmat_s = [tempmat_s bern(stemp, bernO)];
+            end
+        end
+        tempmat_s = tempmat_s[:,2:end] # remove zeros used to initialize the matrix
+        tempmat_s, _, _ = make_interactions(tempmat_s, exchange, bernO, j1_orig, perm);
+    elseif tensor ==false
+        # which_group = findall(j1 .∈ exchange)[1];
+        # exchange_for_poly = length(exchange) == size(shares,2) ? [] : adjust_exchange(exchange, j1);
+        tempmat_s = NPDemand.poly_features_derivative(
+            permuted_shares; 
+            order = bernO, 
+            max_interaction = max_interaction, 
+            exchange = exchange, 
+            var_index = j2, 
+            recipe = recipe, 
+            basis_type = sieve_type);
+    else 
+        # otherwise we are going to use fully generic tensor products
+        tempmat_s = NPDemand.tensor_features_derivative(
+            permuted_shares, 
+            var_index = j2,  # Find which column in permuted space contains original column j2
+            basis_orders = bernO .* ones(Int, size(shares,2)), 
+            exchange = exchange, 
+            basis_function = basis_function,
+            dbasis_function = dbasis_function
+            );
+    end
+    return tempmat_s
+end
 
 """
     summarize_elasticities(problem::NPDProblem, which_elasticities::String, stat::String; 
@@ -223,7 +307,17 @@ When a problem has been estimated via quasi-Bayesian methods, the function can i
 Output is a NamedTuple: (;Statistic, Posterior_Mean, Posterior_Median, Posterior_CI)
 """
 function summarize_elasticities(problem, which_elasticities::String, stat::String; 
-    q = [], integrate = false, n_draws::Int = 100, CI::Real = 0.95)
+    q = [], integrate = false, n_draws::Int = 100, CI::Real = 0.95, 
+    approximation_details = Dict(
+        :order => 2, 
+        :max_interaction => 2,
+        :sieve_type => "bernstein"
+    ))
+
+    # Unpack approximation details
+    max_interaction = approximation_details[:max_interaction]
+    order           = approximation_details[:order]
+    sieve_type      = approximation_details[:sieve_type]
 
     # Add input checks
     if stat ∉ ["mean", "quantile"]; error("stat must be in ['mean', 'quantile']"); end
@@ -280,8 +374,16 @@ function summarize_elasticities(problem, which_elasticities::String, stat::Strin
                                 sample_i[sum(nbetas)+1:end], 
                                 problem.exchange, 
                                 nbetas, 
-                                problem)
-                elast_i_matrix     = price_elasticities_inner(problem, β = β_i);
+                                problem, 
+                                sieve_type = sieve_type)
+                elast_i_matrix     = price_elasticities_inner(
+                    problem, 
+                    β = β_i, 
+                    sieve_type = sieve_type,
+                    max_interaction = max_interaction);
+                if typeof(elast_i_matrix) <:NamedTuple
+                    elast_i_matrix = elast_i_matrix.all_elast_mat;
+                end
                 if which_elasticities == "own"
                     for j ∈ 1:J
                         append!(elast_i, getindex.(elast_i_matrix, j, j));
@@ -336,12 +438,21 @@ function summarize_elasticities(problem, which_elasticities::String, stat::Strin
             output = zeros(J,J,n_draws);
             for i in 1:n_draws
                 sample_i    = problem.results.filtered_chain[i,:];
-                β_i         = map_to_sieve(sample_i[1:sum(nbetas)], 
+                β_i         = map_to_sieve(
+                                sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
                                 problem.exchange, 
                                 nbetas, 
-                                problem)
-                elast_i_matrix  = price_elasticities_inner(problem, β = β_i);
+                                problem, 
+                                sieve_type = sieve_type)
+                elast_i_matrix  = price_elasticities_inner(
+                    problem, 
+                    β = β_i, 
+                    sieve_type = sieve_type,
+                    max_interaction = max_interaction);
+                if typeof(elast_i_matrix) <:NamedTuple
+                    elast_i_matrix = elast_i_matrix.all_elast_mat;
+                end
                 for j1 ∈ 1:J
                     for j2 ∈ 1:J
                         if stat=="mean"
