@@ -83,31 +83,31 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
     end
 
     problem_has_nonlinear_constraints = false;
-    if (:subs_in_group ∈ constraints) | (:complements_in_group ∈ constraints) | (:all_substitutes_nonlinear ∈ constraints) | (:subs_across_group ∈ constraints) | (:complements_across_group ∈ constraints) |
+    if (:subs_in_group ∈ constraints) || (:complements_in_group ∈ constraints) || (:all_substitutes_nonlinear ∈ constraints) || (:subs_across_group ∈ constraints) || (:complements_across_group ∈ constraints) ||
         (:monotone_nonlinear ∈ constraints)
         problem_has_nonlinear_constraints = true;
     end
 
     # Make sure that we're not trying to constrain subs in group and complements in group, or the same across groups 
-    if (:subs_in_group ∈ constraints) & (:complements_in_group ∈ constraints)
+    if (:subs_in_group ∈ constraints) && (:complements_in_group ∈ constraints)
         error("Cannot constrain both :subs_in_group and :complements_in_group")
     end
-    if (:subs_across_group ∈ constraints) & (:complements_across_group ∈ constraints)
-        error("Cannot constrain both :subs_in_group and :complements_across_group")
+    if (:subs_across_group ∈ constraints) && (:complements_across_group ∈ constraints)
+        error("Cannot constrain both :subs_across_group and :complements_across_group")
     end
 
     # Checking structure of index
-    if (find_prices !=1 ) | !(typeof(index_vars)<:Vector) #index_vars[1] !="prices"
+    if (find_prices !=1 ) || !(typeof(index_vars)<:Vector) #index_vars[1] !="prices"
         error("Variable index_vars must be a Vector, and `prices` must be the first element")
     end
 
     # Checking constraints
-    if (:diagonal_dominance_all ∈ constraints) | (:diagonal_dominance_group ∈ constraints)
+    if (:diagonal_dominance_all ∈ constraints) || (:diagonal_dominance_group ∈ constraints)
         if :monotone ∉ constraints 
             error("Diagonal dominance only implemented in conjunction with monotonicity-- add :monotone to constraints")
         end
-        if (exchange != []) & (:exchangeability ∉ constraints)
-            error("Vector exchange is nonempty but :exchangeability is listed in constraints")
+        if (exchange != []) && (:exchangeability ∉ constraints)
+            error("Vector exchange is nonempty but :exchangeability is not listed in constraints")
         end
     end
 
@@ -119,14 +119,14 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
     end
 
     try 
-        @assert (length(exchange) <=2) | (sieve_type == "polynomial")
+        @assert (length(exchange) <=2) || (sieve_type == "polynomial")
     catch 
         error("NPDemand currently only supports models with two or fewer exchangeable groups in `exchange`")
     end
 
     # Check that exchange is only specified if exchangeability is in constraints
     E1 = (:exchangeability ∈ constraints);
-    E2 = ((exchange!=[]) &  (exchange != [Int64[]]))
+    E2 = ((exchange!=[]) &&  (exchange != [Int64[]]))
     if (E1!=E2)
         error("Keyword `exchange` should be specified (only) if :exchangeability is in `constraints` vector")
     end
@@ -139,7 +139,7 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
     end
 
     # Check that price_iv is a vector of strings or symbols
-    if (price_iv !=[]) & !(typeof(price_iv) <: Vector)
+    if (price_iv !=[]) && !(typeof(price_iv) <: Vector)
         error("Keyword `price_iv` should be a Vector of Symbols or Strings indicating column names in `df`")
     end
 
@@ -184,7 +184,7 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
                 unique_vals = unique(df[!,f]);
                 unique_vals = unique_vals[1:end-1]; # Drop one category per FE dimension
                 for fi ∈ unique_vals
-                    if (f==FE[1]) & (fi==unique_vals[1])
+                    if (f==FE[1]) && (fi==unique_vals[1])
                         FEmat = reshape((df[!,f] .== fi), size(df,1),1)
                     else
                         FEmat = hcat(FEmat, reshape((df[!,f] .== fi), size(df,1),1))
@@ -335,9 +335,9 @@ Re-calculates constraint matrices under `new_constraints`, ignoring previous con
 The `exchangeability` constraint is an exception. To change anything about the structure of exchangeability for the problem changes, define a new problem.
 """
 function update_constraints!(problem::NPDProblem, new_constraints::Vector{Symbol}; verbose = true)
-    case1  = ((:exchangeability ∈ new_constraints) & (:exchangeability ∉ problem.constraints));
-    case2 = ((:exchangeability ∉ new_constraints) & (:exchangeability ∈ problem.constraints));
-    if case1 | case2
+    case1  = ((:exchangeability ∈ new_constraints) && (:exchangeability ∉ problem.constraints));
+    case2 = ((:exchangeability ∉ new_constraints) && (:exchangeability ∈ problem.constraints));
+    if case1 || case2
         error("Constraint :exchangeability should be included in updated problem (only) if in original problem.")
     else
         verbose && println("Updating linear constraint matrices....")
@@ -363,7 +363,7 @@ function Base.show(io::IO, problem::NPDProblem)
     FE = problem.FE;
     obj_xtol = problem.obj_xtol;
     obj_ftol = problem.obj_ftol;
-    estimated_TF = ((problem.results !=[]) | (problem.chain != []));
+    estimated_TF = ((problem.results !=[]) || (problem.chain != []));
     
     println(io, "NPD Problem:")
     println(io, "- Number of choices: $(J)")
@@ -393,7 +393,7 @@ function make_param_mapping(problem::NPDProblem)
                 unique_vals = sort(unique(df[!,f]));
                 unique_vals = unique_vals[1:end-1]; # Drop one category per FE dimension
                 for fi ∈ unique_vals
-                    if (f==FE[1]) & (fi==unique_vals[1])
+                    if (f==FE[1]) && (fi==unique_vals[1])
                         FEmat = reshape((df[!,f] .== fi), size(df,1),1)
                     else
                         FEmat = hcat(FEmat, reshape((df[!,f] .== fi), size(df,1),1))
