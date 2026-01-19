@@ -39,9 +39,9 @@ function report_constraint_violations(problem;
     lbs                   = sieve_type == "bernstein" ? NPDemand.get_lower_bounds(problem) : [];
     nbeta                 = sum(nbetas);
 
-    if (params ==[]) & (problem.chain == []) & (problem.results.filtered_chain == [])
+    if (params ==[]) && (problem.chain == []) && (problem.results.filtered_chain == [])
         param_vec = problem.results.minimizer; # if there's no chain, use the GMM result
-    elseif (params ==[]) & (problem.results.filtered_chain != [])
+    elseif (params ==[]) && (problem.results.filtered_chain != [])
         particles       = problem.results.filtered_chain;
         if (n_draws > 0)
             draw_subset = sample(1:size(particles,1), n_draws, replace = false);
