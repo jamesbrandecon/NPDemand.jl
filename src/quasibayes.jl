@@ -37,7 +37,7 @@ function calc_tempmats(problem::NPDProblem;
         for j2 = 1:J 
             # println("Calculating tempmat for j1 = ", j1, " and j2 = ", j2)
             tempmat_s = calc_derivative_sieve(permutations[j1], permutations[j2];
-                exchange          = ((exchange==[]) | ((approximation_details[:sieve_type] == "bernstein") && (tensor == true))) ? 
+                exchange          = ((exchange==[]) || ((approximation_details[:sieve_type] == "bernstein") && (tensor == true))) ? 
                     exchange : adjust_exchange(exchange, first_product_in_group),
                 shares            = s,             
                 permuted_shares   = permuted_shares,
