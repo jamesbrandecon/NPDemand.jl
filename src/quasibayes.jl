@@ -375,7 +375,7 @@ function find_starting_point(problem, prior,
     # Start looping over samples parameters
     i = 1;
     constraints_satisfied = false
-    while (i < n_attempts) & !(constraints_satisfied) 
+    while (i < n_attempts) && !(constraints_satisfied)
         st           = problem.approximation_details[:sieve_type]
         sieve_params = map_to_sieve(betadraws[i,:], gammadraws[i,:],
                                problem.exchange, prior["nbetas"], problem;
