@@ -178,7 +178,7 @@ function reparameterization_draws(betastar_draws, lbs, parameter_order)
     nbeta = size(betastar_draws, 2)
     ndraws = size(betastar_draws, 1)
     beta_draws = zeros(eltype(betastar_draws), ndraws,nbeta)
-    if all(lbs .==5000) | (lbs == [])
+    if all(lbs .== 5000) || (lbs == [])
         beta_draws .= betastar_draws;
     else
         for r in 1:ndraws
