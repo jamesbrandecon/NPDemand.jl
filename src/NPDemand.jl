@@ -11,7 +11,7 @@ using StatsBase: weights
 using Random
 
 using Zygote
-using Turing, AdvancedMH
+using Turing, AdvancedMH, MCMCChains
 using Roots: find_zero, Bisection
 using ProgressBars: ProgressBar
 
