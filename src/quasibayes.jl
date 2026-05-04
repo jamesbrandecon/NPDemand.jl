@@ -153,7 +153,7 @@ function get_parameter_order(lbs)
     return assigned
 end
 
-function reparameterization(betastar::Vector{T}, lbs::Vector, parameter_order::Vector; buffer_beta = similar(betastar)) where T<:Real
+function reparameterization(betastar::AbstractVector{T}, lbs::AbstractVector, parameter_order::AbstractVector; buffer_beta = similar(betastar)) where T<:Real
 
     # buffer_beta = Zygote.Buffer(betastar); # Have to define a "Buffer" to make an editable object for Zygote
     if all(lbs .== 5000)
@@ -252,7 +252,7 @@ function pick_step_size(problem, prior, tempmats, bigA; target = 0.2, n_samples 
         chain = Turing.sample(sample_quasibayes(problem, prior, tempmats, bigA), MH(
             :gamma => AdvancedMH.RandomWalkProposal(Normal(0, step)),
             :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), diagm(step*ones(sum(nbetas)))))
-            ), n_samples, initial_params = start, chain_type = MCMCChains.Chains); 
+            ), n_samples, initial_params = InitFromParams((;start)), chain_type = MCMCChains.Chains); 
         push!(accept, mean(chain["betastar[1]"][2:end,:] - chain["betastar[1]"][1:(end-1),:] .!= 0))
     end
     return step_grid[findmin(abs.(accept .- target))[2]], step_grid, accept

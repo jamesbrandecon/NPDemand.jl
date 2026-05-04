@@ -316,7 +316,7 @@ function estimate!(problem::NPDProblem;
                 sample_quasibayes(problem, prior, problem.tempmats, weight_matrices; 
                 penalty = penalty, matrix_storage_dict = matrix_storage_dict), 
                 sampler, n_samples,
-                initial_params = start, 
+                initial_params = InitFromParams((;start)), 
                 sieve_type = sieve_type
                 ); 
 
