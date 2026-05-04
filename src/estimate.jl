@@ -317,7 +317,8 @@ function estimate!(problem::NPDProblem;
                 penalty = penalty, matrix_storage_dict = matrix_storage_dict), 
                 sampler, n_samples,
                 initial_params = InitFromParams((;start)), 
-                sieve_type = sieve_type
+                sieve_type = sieve_type,
+                chain_type = MCMCChains.Chains
                 ); 
 
         # Convert thh chain into the parameter sieve
