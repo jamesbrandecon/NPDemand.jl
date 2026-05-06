@@ -251,7 +251,7 @@ function pick_step_size(problem, prior, tempmats, bigA; target = 0.2, n_samples 
         step = x;
         chain = Turing.sample(sample_quasibayes(problem, prior, tempmats, bigA), MH(
             :gamma => AdvancedMH.RandomWalkProposal(Normal(0, step)),
-            :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), diagm(step*ones(sum(nbetas)))))
+            :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), Diagonal(fill(step, sum(nbetas)))))
             ), n_samples, initial_params = InitFromParams((;start)), chain_type = MCMCChains.Chains); 
         push!(accept, mean(chain["betastar[1]"][2:end,:] - chain["betastar[1]"][1:(end-1),:] .!= 0))
     end
@@ -278,8 +278,8 @@ end
     nbetas          = prior["nbetas"]
     
     gamma_length::Int = size(problem.Bvec[1],2);
-    betastar ~ MvNormal(betabar, diagm(vbeta))
-    gamma ~ MvNormal(gammabar, vgamma*diagm(ones(gamma_length-1)));
+    betastar ~ MvNormal(betabar, Diagonal(vbeta))
+    gamma ~ MvNormal(gammabar, Diagonal(fill(vgamma, gamma_length-1)));
 
     # Apply reparameterization
     beta = sieve_type == "bernstein" ? reparameterization(betastar, lbs, parameter_order) : betastar;
@@ -581,7 +581,7 @@ function smc(problem::NPDemand.NPDProblem;
             proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
         catch
             @warn "Covariance matrix is not positive definite. Using identity matrix instead. If using a non-adaptive grid, you may wish to increase `grid_points`."
-            Sigma = diagm(ones(size(cov(thetas),1)))
+            Sigma = Diagonal(ones(size(cov(thetas),1)))
             proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
         end
         
@@ -774,8 +774,8 @@ function make_prior_dists(prior, gamma_length)
     vgamma      = prior["vgamma"]    
     ngamma      = gamma_length-1;
     
-    beta_dist   = MvNormal(betabar, diagm(vbeta))
-    gamma_dist  = MvNormal(gammabar, vgamma*diagm(ones(ngamma)))
+    beta_dist   = MvNormal(betabar, Diagonal(vbeta))
+    gamma_dist  = MvNormal(gammabar, Diagonal(fill(vgamma, ngamma)))
 
     return beta_dist, gamma_dist
 end
