@@ -65,8 +65,9 @@ function calc_tempmats(problem::NPDProblem;
 end
 
 function inner_elast_loop(dsids_i::AbstractMatrix{T}, J::Int, at::AbstractVector{Float64}, svec::AbstractVector{Float64}; type::String = "jacobian") where T
-    J_s = [dsids_i[j1,j2] for j1 in 1:J, j2 in 1:J]
-    temp = -1*pinv(J_s);
+    # J_s = [dsids_i[j1,j2] for j1 in 1:J, j2 in 1:J]
+    # temp = -1*pinv(J_s);
+    temp = -1*pinv(dsids_i)
 
     if type == "jacobian"
         return temp 
@@ -86,8 +87,9 @@ function elast_mat_zygote(θ::AbstractArray{T},
     temp_length = size(problem.data,1); #length(dsids[1,1,:]);
 
     dsids_raw     = [tempmat_storage[j1, j2] * θ[indexes[j1]+1:indexes[j1+1]] for j1 in 1:J, j2 in 1:J]
-    dsids         = [dsids_raw[j1, j2][i] for j1 in 1:J, j2 in 1:J, i in 1:length(dsids_raw[1, 1])]
-    all_elast_mat = [inner_elast_loop(dsids[:, :, ii], J, at[ii, :], s[ii, :]; type = type) for ii in 1:temp_length]
+    # dsids         = [dsids_raw[j1, j2][i] for j1 in 1:J, j2 in 1:J, i in 1:length(dsids_raw[1, 1])]
+    # all_elast_mat = [inner_elast_loop(dsids[:, :, ii], J, at[ii, :], s[ii, :]; type = type) for ii in 1:temp_length]
+    all_elast_mat = [inner_elast_loop([dsids_raw[j1,j2][i] for j1 in 1:J, j2 in 1:J], J, view(at, i, :), view(s, i, :); type = type) for i in 1:temp_length]
 
     return all_elast_mat
 end
