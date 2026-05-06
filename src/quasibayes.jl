@@ -252,7 +252,7 @@ function pick_step_size(problem, prior, tempmats, bigA; target = 0.2, n_samples 
         chain = Turing.sample(sample_quasibayes(problem, prior, tempmats, bigA), MH(
             :gamma => AdvancedMH.RandomWalkProposal(Normal(0, step)),
             :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), Diagonal(fill(step, sum(nbetas)))))
-            ), n_samples, initial_params = InitFromParams((;start)), chain_type = MCMCChains.Chains); 
+            ), n_samples, initial_params = InitFromParams((;start)), chain_type = MCMCChains.Chains, discard_initial = 1); 
         push!(accept, mean(chain["betastar[1]"][2:end,:] - chain["betastar[1]"][1:(end-1),:] .!= 0))
     end
     return step_grid[findmin(abs.(accept .- target))[2]], step_grid, accept
@@ -358,7 +358,8 @@ function find_starting_point(problem, prior,
             weight_matrices), 
         Prior(), 
         n_attempts,
-        chain_type = MCMCChains.Chains)
+        chain_type = MCMCChains.Chains,
+        discard_initial = 1)
 
     nbetas          = prior["nbetas"];
     lbs             = prior["lbs"];
