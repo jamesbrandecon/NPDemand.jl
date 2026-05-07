@@ -248,3 +248,55 @@ function unpack(θ_packed, exchange::Array, lengths; grad=true)
     end
     return θ
 end
+
+# Allocation-free GMM objective: accepts (beta, gamma) directly without constructing all_params.
+# Uses pre-partitioned yZX/XZy/XX blocks (β-block and γ-block split by column),
+# and a precomputed permutation (group_for_product, starts_params, ends_params) that maps
+# each product's sieve position back to the corresponding exchange-group beta slice.
+function gmm_fast_v2(
+        beta::AbstractVector{T}, gamma::AbstractVector{T},
+        yZX_β, XZy_β, XX_ββ, XX_βγ,
+        yZX_γ_sum, XZy_γ_sum, XX_γγ_sum,
+        starts_params, ends_params, group_for_product, J) where T <: Real
+
+    # Gamma-only quadratic (identical across products — computed once outside the loop)
+    Xγ  = XX_γγ_sum * gamma
+    out = -dot(yZX_γ_sum, gamma) - dot(gamma, XZy_γ_sum) + dot(gamma, Xγ)
+
+    for i in 1:J
+        g   = group_for_product[i]
+        @views β_i = beta[starts_params[g]:ends_params[g]]
+        out += -dot(yZX_β[i], β_i) - dot(β_i, XZy_β[i]) +
+               dot(β_i, XX_ββ[i] * β_i) + 2 * dot(β_i, XX_βγ[i] * gamma)
+    end
+    return out
+end
+
+function ChainRulesCore.rrule(::typeof(gmm_fast_v2),
+        beta::AbstractVector, gamma::AbstractVector,
+        yZX_β, XZy_β, XX_ββ, XX_βγ,
+        yZX_γ_sum, XZy_γ_sum, XX_γγ_sum,
+        starts_params, ends_params, group_for_product, J)
+    Ω = gmm_fast_v2(beta, gamma, yZX_β, XZy_β, XX_ββ, XX_βγ,
+                    yZX_γ_sum, XZy_γ_sum, XX_γγ_sum,
+                    starts_params, ends_params, group_for_product, J)
+    function gmm_fast_v2_pullback(ȳ)
+        ∂beta  = zeros(eltype(beta), length(beta))
+        ∂gamma = ȳ .* (-yZX_γ_sum .- XZy_γ_sum .+ 2 .* (XX_γγ_sum * gamma))
+        for i in 1:J
+            g = group_for_product[i]
+            @views β_i = beta[starts_params[g]:ends_params[g]]
+            ∂beta[starts_params[g]:ends_params[g]] .+=
+                ȳ .* (-yZX_β[i] .- XZy_β[i] .+ 2 .* (XX_ββ[i] * β_i) .+ 2 .* (XX_βγ[i] * gamma))
+            ∂gamma .+= ȳ .* 2 .* (XX_βγ[i]' * β_i)
+        end
+        return ChainRulesCore.NoTangent(), ∂beta, ∂gamma,
+               ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent(),
+               ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent(),
+               ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent(),
+               ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent(),
+               ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent(),
+               ChainRulesCore.NoTangent()
+    end
+    return Ω, gmm_fast_v2_pullback
+end

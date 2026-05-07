@@ -11,6 +11,7 @@ using StatsBase: weights
 using Random
 
 using Zygote
+import ChainRulesCore
 using Turing, AdvancedMH, MCMCChains
 using Roots: find_zero, Bisection
 using ProgressBars: ProgressBar

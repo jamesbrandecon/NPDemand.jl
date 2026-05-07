@@ -256,7 +256,7 @@ function estimate!(problem::NPDProblem;
                 :gamma => AdvancedMH.RandomWalkProposal(MvNormal(zeros(gamma_length-1), diagm(step*ones(gamma_length-1)))),
                 :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), diagm(step*ones(sum(nbetas))))))
         elseif (sampler ==[]) | (sampler == "hmc")
-            sampler = HMC(0.01, 1; adtype = AutoForwardDiff())
+            sampler = HMC(0.01, 1; adtype = AutoReverseDiff(compile=true))
         end
         
         if sieve_type == "bernstein" 
@@ -310,23 +310,67 @@ function estimate!(problem::NPDProblem;
         matrix_storage_dict["XX"] = [augmented_X[i+1]'* weight_matrices[i+1] * augmented_X[i+1] for i in 0:J-1]
         matrix_storage_dict["XZy"] = [augmented_X[i+1]' * weight_matrices[i+1]' * (-1 .* df[!,"prices$i"]) for i in 0:J-1]
 
-        # Sample 
+        # Partitioned matrices for gmm_fast_v2 (avoids map_to_sieve + concatenation in AD path)
+        nθ_v2    = size.(Xvec, 2)
+        yZX_raw  = matrix_storage_dict["yZX"]
+        XX_raw   = matrix_storage_dict["XX"]
+        XZy_raw  = matrix_storage_dict["XZy"]
+        yZX_β_v2 = [copy(parent(yZX_raw[i])[1:nθ_v2[i]])              for i in 1:J]
+        yZX_γ_v2 = [copy(parent(yZX_raw[i])[nθ_v2[i]+1:end])          for i in 1:J]
+        XZy_β_v2 = [XZy_raw[i][1:nθ_v2[i]]                            for i in 1:J]
+        XZy_γ_v2 = [XZy_raw[i][nθ_v2[i]+1:end]                        for i in 1:J]
+        XX_ββ_v2 = [XX_raw[i][1:nθ_v2[i], 1:nθ_v2[i]]                for i in 1:J]
+        XX_βγ_v2 = [XX_raw[i][1:nθ_v2[i], nθ_v2[i]+1:end]            for i in 1:J]
+        XX_γγ_v2 = [XX_raw[i][nθ_v2[i]+1:end, nθ_v2[i]+1:end]        for i in 1:J]
+        matrix_storage_dict["yZX_β"]           = yZX_β_v2
+        matrix_storage_dict["XZy_β"]           = XZy_β_v2
+        matrix_storage_dict["XX_ββ"]           = XX_ββ_v2
+        matrix_storage_dict["XX_βγ"]           = XX_βγ_v2
+        matrix_storage_dict["yZX_γ_sum"]       = sum(yZX_γ_v2)
+        matrix_storage_dict["XZy_γ_sum"]       = sum(XZy_γ_v2)
+        matrix_storage_dict["XX_γγ_sum"]       = sum(XX_γγ_v2)
+        matrix_storage_dict["starts_params_v2"] = [1; cumsum(nbetas)[1:end-1] .+ 1]
+        matrix_storage_dict["ends_params_v2"]   = Vector(cumsum(nbetas))
+        matrix_storage_dict["group_for_product"] = [findfirst(j .∈ exchange) for j in 1:J]
+
+        # Sample
         verbose && println("Beginning sampling....")
-        chain = Turing.sample(
-                sample_quasibayes(problem, prior, problem.tempmats, weight_matrices; 
-                penalty = penalty, matrix_storage_dict = matrix_storage_dict), 
+        no_penalty     = (penalty == 0) || (problem.constraints == [:exchangeability])
+        use_analytical = no_penalty && (sampler isa HMC)
+
+        if use_analytical
+            # Extract step size and leapfrog count from the HMC sampler object if provided,
+            # falling back to the auto-tuned step and a default of 10 leapfrog steps.
+            ε_hmc = (sampler isa HMC && hasproperty(sampler, :ϵ))            ? sampler.ϵ :
+                    (sampler isa HMC && hasproperty(sampler, :ε))            ? sampler.ε :
+                    (sampler isa HMC && hasproperty(sampler, :δ))            ? sampler.δ : step
+            L_hmc = (sampler isa HMC && hasproperty(sampler, :n_leapfrog))  ? sampler.n_leapfrog :
+                    (sampler isa HMC && hasproperty(sampler, :n))            ? sampler.n : 10
+            z_init_vec = vcat(start.z_beta, start.z_gamma)
+            chain = analytical_hmc(prior, matrix_storage_dict, J;
+                n_samples  = n_samples,
+                step_size  = ε_hmc,
+                n_leapfrog = L_hmc,
+                z_init     = z_init_vec,
+                verbose    = verbose)
+        else
+            chain = Turing.sample(
+                sample_quasibayes(problem, prior, problem.tempmats, weight_matrices;
+                penalty = penalty, matrix_storage_dict = matrix_storage_dict),
                 sampler, n_samples,
-                initial_params = InitFromParams((;start)), 
+                initial_params = InitFromParams((;start)),
                 sieve_type = sieve_type,
                 chain_type = MCMCChains.Chains,
-                discard_initial = 1
-                ); 
+                discard_initial = 1)
+        end
 
-        # Convert thh chain into the parameter sieve
+        # Convert chain from NCP (z) space back to parameter space
         start_row = burn_in+1;
-        betastardraws = hcat([chain["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
-        betadraws = reparameterization_draws(betastardraws, lbs, parameter_order)
-        gammadraws = hcat([chain["gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]
+        z_betadraws   = hcat([chain["z_beta[$i]"]  for i in 1:sum(nbetas)]...)[start_row:end,:]
+        z_gammadraws  = hcat([chain["z_gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]
+        betastardraws = prior["betabar"]' .+ sqrt.(prior["vbeta"]') .* z_betadraws
+        gammadraws    = prior["gammabar"]' .+ sqrt(prior["vgamma"]) .* z_gammadraws
+        betadraws     = reparameterization_draws(betastardraws, lbs, parameter_order)
         
         # thin the markov chain
         L = size(betastardraws,1);

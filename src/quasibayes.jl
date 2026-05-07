@@ -156,24 +156,52 @@ function get_parameter_order(lbs)
 end
 
 function reparameterization(betastar::AbstractVector{T}, lbs::AbstractVector, parameter_order::AbstractVector; buffer_beta = similar(betastar)) where T<:Real
-
-    # buffer_beta = Zygote.Buffer(betastar); # Have to define a "Buffer" to make an editable object for Zygote
     if all(lbs .== 5000)
-        buffer_beta = betastar;
+        return betastar
     else
-        nbeta = length(betastar)
         for i in parameter_order
             if isnothing(lbs[i])
                 buffer_beta[i] = betastar[i]
             else
-                wchlb::eltype(betastar) = findmax(buffer_beta[lbs[i]])[1]
-                buffer_beta[i] = wchlb + exp(betastar[i])
+                buffer_beta[i] = maximum(buffer_beta[lbs[i]]) + exp(betastar[i])
             end
         end
-        # return copy(buffer_beta)
+        return copy(buffer_beta)
     end
-    # return buffer_beta
-    return buffer_beta
+end
+
+function ChainRulesCore.rrule(::typeof(reparameterization), betastar::AbstractVector, lbs::AbstractVector, parameter_order::AbstractVector)
+    if all(lbs .== 5000)
+        trivial_pullback(ȳ) = ChainRulesCore.NoTangent(), ChainRulesCore.unthunk(ȳ), ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent()
+        return betastar, trivial_pullback
+    else
+        beta = similar(betastar)
+        jmax = zeros(Int, length(betastar))
+        for i in parameter_order
+            if isnothing(lbs[i])
+                beta[i] = betastar[i]
+            else
+                am    = argmax(beta[lbs[i]])
+                jmax[i] = lbs[i][am]
+                beta[i] = beta[jmax[i]] + exp(betastar[i])
+            end
+        end
+        beta_out = copy(beta)
+        function ordering_pullback(ȳ)
+            ȳ_work    = copy(ChainRulesCore.unthunk(ȳ))
+            ∂betastar = zeros(eltype(betastar), length(betastar))
+            for i in Iterators.reverse(parameter_order)
+                if isnothing(lbs[i])
+                    ∂betastar[i] = ȳ_work[i]
+                else
+                    ∂betastar[i]   = ȳ_work[i] * exp(betastar[i])
+                    ȳ_work[jmax[i]] += ȳ_work[i]
+                end
+            end
+            return ChainRulesCore.NoTangent(), ∂betastar, ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent()
+        end
+        return beta_out, ordering_pullback
+    end
 end
 
 function reparameterization_draws(betastar_draws, lbs, parameter_order)
@@ -251,11 +279,13 @@ function pick_step_size(problem, prior, tempmats, bigA; target = 0.2, n_samples 
     accept = [];
     for x in step_grid
         step = x;
+        _nbetas = prior["nbetas"];
+        _nγ     = size(problem.Bvec[1],2) - 1;
         chain = Turing.sample(sample_quasibayes(problem, prior, tempmats, bigA), MH(
-            :gamma => AdvancedMH.RandomWalkProposal(Normal(0, step)),
-            :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), Diagonal(fill(step, sum(nbetas)))))
-            ), n_samples, initial_params = InitFromParams((;start)), chain_type = MCMCChains.Chains, discard_initial = 1); 
-        push!(accept, mean(chain["betastar[1]"][2:end,:] - chain["betastar[1]"][1:(end-1),:] .!= 0))
+            :z_gamma => AdvancedMH.RandomWalkProposal(MvNormal(zeros(_nγ),          Diagonal(fill(step, _nγ)))),
+            :z_beta  => AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(_nbetas)), Diagonal(fill(step, sum(_nbetas)))))
+            ), n_samples, chain_type = MCMCChains.Chains, discard_initial = 1);
+        push!(accept, mean(chain["z_beta[1]"][2:end,:] - chain["z_beta[1]"][1:(end-1),:] .!= 0))
     end
     return step_grid[findmin(abs.(accept .- target))[2]], step_grid, accept
 end
@@ -280,55 +310,53 @@ end
     nbetas          = prior["nbetas"]
     
     gamma_length::Int = size(problem.Bvec[1],2);
-    betastar ~ MvNormal(betabar, Diagonal(vbeta))
-    gamma ~ MvNormal(gammabar, Diagonal(fill(vgamma, gamma_length-1)));
 
-    # Apply reparameterization
+    # Non-centered parameterization: sample standardized noise, reconstruct parameters.
+    # All latent variables have unit prior variance — better HMC geometry when
+    # polynomial coefficients have very different scales.
+    z_beta  ~ filldist(Normal(0, 1), length(betabar))
+    z_gamma ~ filldist(Normal(0, 1), gamma_length-1)
+    betastar = betabar .+ sqrt.(vbeta) .* z_beta
+    gamma    = gammabar .+ sqrt(vgamma) .* z_gamma
+
+    # Apply reparameterization (uses the kwarg sieve_type, then overwrite from prior for map_to_sieve)
     beta = sieve_type == "bernstein" ? reparameterization(betastar, lbs, parameter_order) : betastar;
-
-    # Format parameter vec so that gmm can use it
     sieve_type = get(prior, "sieve_type", "bernstein")
-    
-    # print("-")
-    all_params = map_to_sieve(
-        beta, 
-        gamma,   
-        problem.exchange, 
-        nbetas, 
-        problem;
-        sieve_type = sieve_type
-        )
-    
-    # Define objective function 
-    if matrix_storage_dict == Dict()
-        objective = x -> gmm(x, problem, weight_matrices)
-    else 
-        yZX = matrix_storage_dict["yZX"]
-        XZy = matrix_storage_dict["XZy"]
-        XX = matrix_storage_dict["XX"]
-        objective = x -> gmm_fast(x, problem, yZX, XZy, XX, problem.design_width, length(problem.Avec));
-    end
+
+    use_v2 = matrix_storage_dict != Dict()
 
     if !((penalty == 0) | (problem.constraints == [:exchangeability]))
+        # Penalty branch: map_to_sieve still needed for elast_mat_zygote
+        all_params = map_to_sieve(beta, gamma, problem.exchange, nbetas, problem; sieve_type = sieve_type)
         J = length(problem.Xvec);
-        # print("E")
         elasts = elast_mat_zygote(all_params, problem, tempmats; at = prices, s = shares);
-        reshaped_elasts = [elasts[i][j1,j2] for j1=1:J, j2 = 1:J, i = 1:size(problem.data,1)];
+        reshaped_elasts = [elasts[i][j1,j2] for j1=1:J, j2=1:J, i=1:size(problem.data,1)];
         elasticity_check = run_elasticity_check(reshaped_elasts, problem.constraints, problem.exchange)
-        # print("/")
-        if elasticity_check[1]
-            # Quasi-Likelihood
-            # print(".")
-            Turing.@addlogprob! -0.5  * objective(all_params)
-            return
-        else
-            # print("-")
-            Turing.@addlogprob! (-0.5 * objective(all_params) - penalty)
-            return
-        end
+        loglik = use_v2 ?
+            -0.5 * gmm_fast_v2(beta, gamma,
+                matrix_storage_dict["yZX_β"], matrix_storage_dict["XZy_β"],
+                matrix_storage_dict["XX_ββ"], matrix_storage_dict["XX_βγ"],
+                matrix_storage_dict["yZX_γ_sum"], matrix_storage_dict["XZy_γ_sum"],
+                matrix_storage_dict["XX_γγ_sum"],
+                matrix_storage_dict["starts_params_v2"], matrix_storage_dict["ends_params_v2"],
+                matrix_storage_dict["group_for_product"], length(problem.Avec)) :
+            -0.5 * gmm(all_params, problem, weight_matrices)
+        Turing.@addlogprob! (elasticity_check[1] ? loglik : loglik - penalty)
+        return
     else
-        # Quasi-Likelihood
-        Turing.@addlogprob! -0.5  * objective(all_params)
+        # No-penalty branch: skip map_to_sieve entirely when partitioned matrices are available
+        if use_v2
+            Turing.@addlogprob! -0.5 * gmm_fast_v2(beta, gamma,
+                matrix_storage_dict["yZX_β"], matrix_storage_dict["XZy_β"],
+                matrix_storage_dict["XX_ββ"], matrix_storage_dict["XX_βγ"],
+                matrix_storage_dict["yZX_γ_sum"], matrix_storage_dict["XZy_γ_sum"],
+                matrix_storage_dict["XX_γγ_sum"],
+                matrix_storage_dict["starts_params_v2"], matrix_storage_dict["ends_params_v2"],
+                matrix_storage_dict["group_for_product"], length(problem.Avec))
+        else
+            all_params = map_to_sieve(beta, gamma, problem.exchange, nbetas, problem; sieve_type = sieve_type)
+            Turing.@addlogprob! -0.5 * gmm(all_params, problem, weight_matrices)
+        end
         return
     end
 end
@@ -368,13 +396,19 @@ function find_starting_point(problem, prior,
     parameter_order = prior["parameter_order"];
     gamma_length    = size(problem.Bvec[1],2);
 
-    betastardraws   = hcat([prior_chain["betastar[$i]"] for i in 1:sum(nbetas)]...)
+    betabar         = prior["betabar"]
+    gammabar        = prior["gammabar"]
+    vbeta           = prior["vbeta"]
+    vgamma          = prior["vgamma"]
+    z_betadraws     = hcat([prior_chain["z_beta[$i]"]  for i in 1:sum(nbetas)]...)
+    z_gammadraws    = hcat([prior_chain["z_gamma[$i]"] for i in 1:gamma_length-1]...)
+    betastardraws   = betabar' .+ sqrt.(vbeta') .* z_betadraws
+    gammadraws      = gammabar' .+ sqrt(vgamma) .* z_gammadraws
     betadraws       = reparameterization_draws(betastardraws, lbs, parameter_order)
-    gammadraws      = hcat([prior_chain["gamma[$i]"] for i in 1:gamma_length-1]...);
     J               = length(problem.Xvec);
 
     # Initialize output
-    param_out       = zeros(sum(prior["nbetas"]) + size(gammadraws,2))
+    param_out       = (z_beta = zeros(sum(nbetas)), z_gamma = zeros(gamma_length-1))
 
     # Start looping over samples parameters
     i = 1;
@@ -398,15 +432,149 @@ function find_starting_point(problem, prior,
 
     if constraints_satisfied
         exit_flag = "success";
-        param_out = [betastardraws[i-1,:];gammadraws[i-1,:]]
-    else 
+        param_out = (z_beta = z_betadraws[i-1,:], z_gamma = z_gammadraws[i-1,:])
+    else
         exit_flag = "failed";
     end
     
     return param_out, exit_flag
 end
 
-function smc(problem::NPDemand.NPDProblem; 
+# Leapfrog HMC using fully analytical gradients — no AD overhead.
+# For the quasi-Bayes GMM log-posterior (quadratic in parameters, Gaussian NCP prior)
+# the gradient is a closed-form linear expression; no Turing model machinery needed.
+function analytical_hmc(prior::Dict, msd::Dict, J::Int;
+    n_samples::Int  = 1000,
+    step_size::Real = 0.01,
+    n_leapfrog::Int = 10,
+    z_init          = nothing,
+    burn_in::Int    = 0,
+    seed::Union{Int,Nothing} = nothing,
+    verbose::Bool   = true)
+
+    betabar  = prior["betabar"];  vbeta    = prior["vbeta"]
+    gammabar = prior["gammabar"]; vgamma   = prior["vgamma"]
+    lbs      = prior["lbs"];      parameter_order = prior["parameter_order"]
+    lbs_trivial = all(lbs .== 5000)
+
+    nbeta  = length(betabar);   ngamma = length(gammabar)
+    n      = nbeta + ngamma
+
+    sqrt_vbeta  = sqrt.(vbeta);  sqrt_vgamma = sqrt(vgamma)
+
+    yZX_β     = msd["yZX_β"];    XZy_β     = msd["XZy_β"]
+    XX_ββ     = msd["XX_ββ"];    XX_βγ     = msd["XX_βγ"]
+    yZX_γ_sum = msd["yZX_γ_sum"]; XZy_γ_sum = msd["XZy_γ_sum"]
+    XX_γγ_sum = msd["XX_γγ_sum"]
+    starts    = msd["starts_params_v2"]; ends = msd["ends_params_v2"]
+    gfp       = msd["group_for_product"]
+
+    # Per-group beta sizes; pre-allocate inner-loop buffers once
+    nbeta_per_g = ends .- starts .+ 1
+    nb_max      = maximum(nbeta_per_g)
+    buf_ββ  = zeros(nb_max)  # XX_ββ[i] * β_i (size nbeta_i)
+    buf_βγ  = zeros(nb_max)  # XX_βγ[i] * gamma (size nbeta_i)
+    buf_γ   = zeros(ngamma)  # XX_βγ[i]' * β_i and XX_γγ_sum * gamma (size ngamma)
+    beta    = zeros(nbeta);   gamma  = zeros(ngamma)
+    ∂beta   = zeros(nbeta);   ∂gamma = zeros(ngamma)
+
+    # Computes log-posterior and fills grad in-place.  Zero heap allocations for lbs_trivial.
+    function logpost_grad!(grad, z)
+        z_β = @view z[1:nbeta];  z_γ = @view z[nbeta+1:end]
+
+        @. beta  = betabar + sqrt_vbeta * z_β
+        @. gamma = gammabar + sqrt_vgamma * z_γ
+
+        repar_pb = nothing
+        if !lbs_trivial
+            betastar = copy(beta)
+            beta_out, repar_pb = ChainRulesCore.rrule(reparameterization, betastar, lbs, parameter_order)
+            beta .= beta_out
+        end
+
+        # γ-only quadratic terms
+        mul!(buf_γ, XX_γγ_sum, gamma)
+        val_γ = dot(gamma, buf_γ)
+        @. ∂gamma = -yZX_γ_sum - XZy_γ_sum + 2*buf_γ
+        val = -dot(yZX_γ_sum, gamma) - dot(gamma, XZy_γ_sum) + val_γ
+        fill!(∂beta, 0)
+
+        # Per-product terms
+        for i in 1:J
+            g   = gfp[i]
+            nb  = nbeta_per_g[g]
+            β_i = @view beta[starts[g]:ends[g]]
+            ∂β_g = @view ∂beta[starts[g]:ends[g]]
+            ββ_v = @view buf_ββ[1:nb]
+            βγ_v = @view buf_βγ[1:nb]
+
+            mul!(ββ_v, XX_ββ[i], β_i)
+            mul!(βγ_v, XX_βγ[i], gamma)
+
+            @. ∂β_g += -yZX_β[i] - XZy_β[i] + 2*ββ_v + 2*βγ_v
+            val    += -dot(yZX_β[i], β_i) - dot(β_i, XZy_β[i]) +
+                       dot(β_i, ββ_v) + 2*dot(β_i, βγ_v)
+
+            mul!(buf_γ, XX_βγ[i]', β_i)
+            @. ∂gamma += 2*buf_γ
+        end
+
+        # Chain rule through reparameterization then NCP
+        if lbs_trivial
+            @. grad[1:nbeta]    = -z_β - 0.5*∂beta*sqrt_vbeta
+        else
+            _, ∂betastar, _, _ = repar_pb(∂beta)
+            @. grad[1:nbeta]    = -z_β - 0.5*∂betastar*sqrt_vbeta
+        end
+        @. grad[nbeta+1:end] = -z_γ - 0.5*∂gamma*sqrt_vgamma
+
+        return -0.5*(dot(z_β, z_β) + dot(z_γ, z_γ)) - 0.5*val
+    end
+
+    # --- Leapfrog HMC ---
+    rng      = isnothing(seed) ? Random.default_rng() : Random.MersenneTwister(seed)
+    n_store  = n_samples + burn_in
+    samples  = Matrix{Float64}(undef, n_store, n)
+    z        = isnothing(z_init) ? zeros(n) : float(vec(z_init))[1:n]
+    z_prop   = similar(z);  grad = zeros(n);  grad_prop = zeros(n);  p = similar(z)
+
+    logp     = logpost_grad!(grad, z)
+    n_accept = 0
+
+    iter = verbose ? ProgressBar(1:n_store) : 1:n_store
+    for s in iter
+        randn!(rng, p)
+        H_old = -logp + 0.5*dot(p, p)
+        z_prop .= z;  grad_prop .= grad
+        logp_prop = logp
+
+        # Leapfrog
+        p .+= 0.5 .* step_size .* grad_prop
+        for l in 1:n_leapfrog
+            z_prop   .+= step_size .* p
+            logp_prop  = logpost_grad!(grad_prop, z_prop)
+            p .+= (l < n_leapfrog ? step_size : 0.5*step_size) .* grad_prop
+        end
+
+        H_new = -logp_prop + 0.5*dot(p, p)
+        if log(rand(rng)) < H_old - H_new
+            z .= z_prop;  grad .= grad_prop
+            logp = logp_prop;  n_accept += 1
+        end
+        samples[s, :] .= z
+    end
+
+    verbose && @info "analytical_hmc acceptance rate: $(round(n_accept/n_store*100, digits=1))%"
+
+    param_names = vcat(
+        [Symbol("z_beta[$i]")  for i in 1:nbeta],
+        [Symbol("z_gamma[$i]") for i in 1:ngamma])
+    return MCMCChains.Chains(
+        reshape(samples, n_store, n, 1),
+        param_names)
+end
+
+function smc(problem::NPDemand.NPDProblem;
     grid_points::Int    = 50, 
     max_penalty::Real   = 5, 
     ess_threshold::Real = 100, 
@@ -438,9 +606,15 @@ function smc(problem::NPDemand.NPDProblem;
     nbetas          = NPDemand.get_nbetas(problem);
     nbeta           = length(lbs) == 0 ? sum(nbetas) : length(lbs);
     
-    betastardraws   = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
+    _betabar        = prior["betabar"]
+    _gammabar       = prior["gammabar"]
+    _vbeta          = prior["vbeta"]
+    _vgamma         = prior["vgamma"]
+    z_betadraws     = hcat([particles["z_beta[$i]"]  for i in 1:sum(nbetas)]...)[start_row:end,:]
+    z_gammadraws    = hcat([particles["z_gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]
+    betastardraws   = _betabar' .+ sqrt.(_vbeta') .* z_betadraws
+    gammadraws      = _gammabar' .+ sqrt(_vgamma) .* z_gammadraws
     betadraws       = NPDemand.reparameterization_draws(betastardraws, lbs, parameter_order)
-    gammadraws      = hcat([particles["gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]
 
     # thin the markov chain
     L               = size(betastardraws,1);
