@@ -710,9 +710,9 @@ function smc(problem::NPDemand.NPDProblem;
     t = 1;
     beta_dist, gamma_dist = make_prior_dists(prior, gamma_length);
     beta_μ = beta_dist.μ;
-    beta_Σ = Matrix(beta_dist.Σ);
     gamma_μ = gamma_dist.μ;
-    gamma_Σ = Matrix(gamma_dist.Σ);
+    chol_beta   = cholesky(Matrix(beta_dist.Σ));  logdet_beta  = 2.0 * sum(log.(diag(chol_beta.L)))
+    chol_gamma  = cholesky(Matrix(gamma_dist.Σ)); logdet_gamma = 2.0 * sum(log.(diag(chol_gamma.L)))
     logprior_t_minus_1 = zeros(nparticles);
 
     failure_count = 0;
@@ -795,28 +795,45 @@ function smc(problem::NPDemand.NPDProblem;
             proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
         end
         
-        print("\n Running Metropolis-Hasting steps....\n")
-        Threads.@threads for i in ProgressBar(axes(thetas,1))
+        # One RNG per thread — created before the parallel region so each thread
+        # gets an independent, reproducible stream. mh_iter is mixed into the seed
+        # so successive MH steps within a particle draw different proposals.
+        thread_rngs = [MersenneTwister(seed + tid) for tid in 1:Threads.maxthreadid()]
+        reparameterization_bufs = [zeros(eltype(thetas_sieve), sum(nbetas)) for _ in 1:Threads.maxthreadid()]
+
+        prog = Threads.Atomic{Int}(0)
+
+        # Async monitor: reads the atomic counter every 0.5s and overwrites the progress line.
+        monitor = @async begin
+            while (n_done = prog[]) < nparticles
+                print(@sprintf("\r  MH steps: %d/%d (%.0f%%)", n_done, nparticles, 100.0*n_done/nparticles))
+                sleep(0.5)
+            end
+            println(@sprintf("\r  MH steps: %d/%d (100%%)  ", nparticles, nparticles))
+        end
+
+        Threads.@threads for i in axes(thetas,1)
+            tid  = Threads.threadid()
+            rng  = thread_rngs[tid]
+            reparameterization_storage = reparameterization_bufs[tid]
             for mh_iter in 1:mh_steps
-                reparameterization_storage = zeros(eltype(thetas_sieve), sum(nbetas));
-                # println(i)
-                seed = MersenneTwister(3*Threads.threadid() + i);
+                # Re-seed per (particle, step) so each draw is independent
+                Random.seed!(rng, seed + i + mh_iter * nparticles)
 
                 # Propose new values + reparameterize + map to sieve
-                thetai_new       = thetas[i,:] + rand(seed, proposal_distribution)
+                thetai_new       = thetas[i,:] + rand(rng, proposal_distribution)
                 betai_new        = NPDemand.reparameterization(thetai_new[1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
                 thetai_sieve_new = NPDemand.map_to_sieve(betai_new, thetai_new[(nbeta+1):end], problem.exchange, nbetas, problem, sieve_type=st)
-            
+
                 # Evaluate prior
-                # logprior_new     = logprior_smc(thetai_new[1:nbeta], thetai_new[(nbeta+1):end], beta_dist, gamma_dist) + logpenalty_smc(thetai_sieve_new, new_penalty, problem)
-                logprior_new     = logprior_smc(thetai_new[1:nbeta], thetai_new[(nbeta+1):end], beta_μ, beta_Σ, gamma_μ, gamma_Σ) + logpenalty_smc(thetai_sieve_new, new_penalty, problem)
+                logprior_new     = logprior_smc(thetai_new[1:nbeta], thetai_new[(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetai_sieve_new, new_penalty, problem)
                 if mh_iter == 1
-                    logprior_old = logprior_smc(thetas[i,1:nbeta], thetas[i,(nbeta+1):end], beta_μ, beta_Σ, gamma_μ, gamma_Σ) + logpenalty_smc(thetas_sieve[i,:], new_penalty, problem)
+                    logprior_old = logprior_smc(thetas[i,1:nbeta], thetas[i,(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetas_sieve[i,:], new_penalty, problem)
                 else
                     logprior_old = logprior_storage[i]
                 end
 
-                # # Evaluate likelihood
+                # Evaluate likelihood
                 loglike_new     = -0.5 * gmm(reshape(thetai_sieve_new, size(thetas_sieve,2), 1), problem, problem.weight_matrices)
                 if mh_iter == 1
                     loglike_old = -0.5 * gmm(reshape(thetas_sieve[i,:], size(thetas_sieve,2), 1), problem, problem.weight_matrices)
@@ -824,9 +841,9 @@ function smc(problem::NPDemand.NPDProblem;
                     loglike_old = loglike_storage[i]
                 end
 
-                # # Calculate MH acceptance ratio
+                # Calculate MH acceptance ratio
                 logratio = loglike_new + logprior_new - loglike_old - logprior_old
-                if rand(seed) < exp(logratio)
+                if rand(rng) < exp(logratio)
                     thetas[i,:]         = thetai_new
                     thetas_sieve[i,:]   = thetai_sieve_new
                     logprior_storage[i] = logprior_new
@@ -835,7 +852,9 @@ function smc(problem::NPDemand.NPDProblem;
                 end
                 GC.safepoint()
             end
+            Threads.atomic_add!(prog, 1)
         end
+        wait(monitor)
         n_accept = n_accept ./ mh_steps
         accept_rate = round(mean(n_accept), digits = 2);
         # println("\n Average MH acceptance rate: $(accept_rate)")
@@ -877,16 +896,22 @@ end
 
 function logpdf_mvn(mu::Vector{T}, Sigma::Matrix{T}, theta::Vector{T}) where T<:Real
     n = length(mu)
-    
+
     # Ensure that Sigma is positive definite
     L = cholesky(Sigma).L
     diff = theta - mu
     quadratic_form = sum((L \ diff) .^ 2)
-    
+
     logdetSigma = 2.0 * sum(log.(diag(L))) # log determinant of Sigma
     logpdf = -0.5 * (n * log(2 * π) + logdetSigma + quadratic_form)
-    
+
     return logpdf
+end
+
+function logpdf_mvn(mu::Vector, chol::Cholesky, logdet_sigma::Real, theta::AbstractVector)
+    diff = theta .- mu
+    quadratic_form = sum((chol.L \ diff) .^ 2)
+    return -0.5 * (length(mu) * log(2π) + logdet_sigma + quadratic_form)
 end
 
 # function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T}, 
@@ -991,11 +1016,17 @@ function make_prior_dists(prior, gamma_length)
 end
 
 # function logprior_smc(particle_betastar::AbstractArray{T}, particle_gamma::AbstractArray{T}, beta_dist, gamma_dist) where T
-function logprior_smc(particle_betastar, particle_gamma, beta_μ, beta_Σ, gamma_μ, gamma_Σ)  
-    # out_beta    = logpdf(beta_dist, particle_betastar)
-    # out_gamma   = logpdf(gamma_dist, particle_gamma)
+function logprior_smc(particle_betastar, particle_gamma, beta_μ, beta_Σ, gamma_μ, gamma_Σ)
     out_beta    = logpdf_mvn(beta_μ, beta_Σ, particle_betastar)
     out_gamma   = logpdf_mvn(gamma_μ, gamma_Σ, particle_gamma)
+    return out_beta + out_gamma
+end
+
+function logprior_smc(particle_betastar, particle_gamma,
+                      beta_μ, chol_beta::Cholesky, logdet_beta::Real,
+                      gamma_μ, chol_gamma::Cholesky, logdet_gamma::Real)
+    out_beta  = logpdf_mvn(beta_μ, chol_beta,  logdet_beta,  particle_betastar)
+    out_gamma = logpdf_mvn(gamma_μ, chol_gamma, logdet_gamma, particle_gamma)
     return out_beta + out_gamma
 end
 
