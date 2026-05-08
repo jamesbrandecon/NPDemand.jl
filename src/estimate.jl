@@ -241,7 +241,7 @@ function estimate!(problem::NPDProblem;
         end
         
         burn_in_fraction = burn_in;
-        burn_in = Int(burn_in * n_samples);
+        burn_in = round(Int, burn_in * n_samples);
         gamma_length = size(Bvec[1],2);
 
         # Define inputs to quasi-bayes sampling 
