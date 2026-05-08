@@ -83,8 +83,8 @@ npd_problem = define_problem(df;
 
 # estimate baseline model
 @time estimate!(npd_problem, 
-    quasi_bayes = true, 
-    sampler = HMC(0.01, 10), 
+    quasi_bayes = true,
+    sampler = HMC(0.1, 10), 
     # sampler = NUTS(1000, 0.65), 
     n_samples = 1000, 
     skip = 1); 

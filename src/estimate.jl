@@ -351,6 +351,7 @@ function estimate!(problem::NPDProblem;
                 n_samples  = n_samples,
                 step_size  = ε_hmc,
                 n_leapfrog = L_hmc,
+                n_adapt    = burn_in,
                 z_init     = z_init_vec,
                 verbose    = verbose)
         else

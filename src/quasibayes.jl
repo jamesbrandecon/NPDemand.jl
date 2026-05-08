@@ -444,13 +444,16 @@ end
 # For the quasi-Bayes GMM log-posterior (quadratic in parameters, Gaussian NCP prior)
 # the gradient is a closed-form linear expression; no Turing model machinery needed.
 function analytical_hmc(prior::Dict, msd::Dict, J::Int;
-    n_samples::Int  = 1000,
-    step_size::Real = 0.01,
-    n_leapfrog::Int = 10,
-    z_init          = nothing,
-    burn_in::Int    = 0,
+    n_samples::Int      = 1000,
+    step_size::Real     = 0.01,
+    n_leapfrog::Int     = 10,
+    n_adapt::Int        = 0,        # warm-up steps for dual-averaging (0 = off)
+    target_accept::Real = 0.8,      # target acceptance rate during adaptation
+    adapt_L::Bool       = true,     # also adjust L to keep trajectory length ~ 1
+    z_init              = nothing,
+    burn_in::Int        = 0,
     seed::Union{Int,Nothing} = nothing,
-    verbose::Bool   = true)
+    verbose::Bool       = true)
 
     betabar  = prior["betabar"];  vbeta    = prior["vbeta"]
     gammabar = prior["gammabar"]; vgamma   = prior["vgamma"]
@@ -531,15 +534,24 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
         return -0.5*(dot(z_β, z_β) + dot(z_γ, z_γ)) - 0.5*val
     end
 
-    # --- Leapfrog HMC ---
+    # --- Leapfrog HMC with optional dual-averaging adaptation ---
     rng      = isnothing(seed) ? Random.default_rng() : Random.MersenneTwister(seed)
     n_store  = n_samples + burn_in
     samples  = Matrix{Float64}(undef, n_store, n)
     z        = isnothing(z_init) ? zeros(n) : float(vec(z_init))[1:n]
     z_prop   = similar(z);  grad = zeros(n);  grad_prop = zeros(n);  p = similar(z)
 
-    logp     = logpost_grad!(grad, z)
-    n_accept = 0
+    logp      = logpost_grad!(grad, z)
+    n_accept  = 0
+    ε         = float(step_size)
+    L         = n_leapfrog
+    τ_target  = ε * L           # fixed trajectory length; L adapts to preserve this
+
+    # Nesterov dual-averaging state (Hoffman & Gelman 2014, Algorithm 5)
+    μ       = log(10 * ε)      # log of 10× initial step (target for averaging)
+    H̄       = 0.0              # running mean of (target_accept - α)
+    log_ε̄   = log(ε)           # ergodic mean of log ε (used after adaptation)
+    t₀      = 10;  γ_da = 0.05;  κ = 0.75
 
     iter = verbose ? ProgressBar(1:n_store) : 1:n_store
     for s in iter
@@ -549,19 +561,40 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
         logp_prop = logp
 
         # Leapfrog
-        p .+= 0.5 .* step_size .* grad_prop
-        for l in 1:n_leapfrog
-            z_prop   .+= step_size .* p
+        p .+= 0.5 .* ε .* grad_prop
+        for l in 1:L
+            z_prop    .+= ε .* p
             logp_prop  = logpost_grad!(grad_prop, z_prop)
-            p .+= (l < n_leapfrog ? step_size : 0.5*step_size) .* grad_prop
+            p .+= (l < L ? ε : 0.5*ε) .* grad_prop
         end
 
         H_new = -logp_prop + 0.5*dot(p, p)
-        if log(rand(rng)) < H_old - H_new
+        # Treat NaN/Inf proposals as hard rejections so α=0 drives ε down
+        α = (isfinite(H_new) && isfinite(logp_prop)) ? min(1.0, exp(H_old - H_new)) : 0.0
+        if log(rand(rng)) < log(α + eps())
             z .= z_prop;  grad .= grad_prop
             logp = logp_prop;  n_accept += 1
         end
         samples[s, :] .= z
+
+        # Dual-averaging step-size adaptation during warm-up
+        if n_adapt > 0 && s <= n_adapt
+            m     = float(s)
+            H̄     = (1 - 1/(m + t₀)) * H̄ + (1/(m + t₀)) * (target_accept - α)
+            log_ε = μ - (sqrt(m) / γ_da) * H̄
+            log_ε̄ = m^(-κ) * log_ε + (1 - m^(-κ)) * log_ε̄
+            ε     = clamp(exp(log_ε), 1e-6, 10.0)
+            adapt_L && (L = clamp(round(Int, τ_target / ε), 1, 200))
+        elseif n_adapt > 0 && s == n_adapt + 1
+            ε = clamp(exp(log_ε̄), 1e-6, 10.0)
+            adapt_L && (L = clamp(round(Int, τ_target / ε), 1, 200))
+        end
+
+        if verbose
+            phase = (n_adapt > 0 && s <= n_adapt) ? "adapt" : "sample"
+            set_description(iter, @sprintf("HMC [%s] ε=%.3g L=%d acc=%.0f%%",
+                phase, ε, L, n_accept/s*100))
+        end
     end
 
     verbose && @info "analytical_hmc acceptance rate: $(round(n_accept/n_store*100, digits=1))%"
