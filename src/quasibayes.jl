@@ -785,15 +785,20 @@ function smc(problem::NPDemand.NPDProblem;
         # 3.4 Perturb particles via MH step(s)
         n_accept = zeros(nparticles);
         proposal_distribution = [];
-        try 
-            Sigma = cov(thetas); # covariance matrix parameters, used to improve proposals
-            Sigma = Sigma .* 2.38^2 ./ size(Sigma,1); # scale covariance matrix
-            proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
-        catch
-            @warn "Covariance matrix is not positive definite. Using identity matrix instead. If using a non-adaptive grid, you may wish to increase `grid_points`."
-            Sigma = Diagonal(ones(size(cov(thetas),1)))
-            proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
-        end
+        Sigma = cov(thetas); # covariance matrix parameters, used to improve proposals
+        Sigma = (Sigma + Diagonal(fill(1e-6, size(Sigma, 1)))) .* 2.38^2 ./ size(Sigma,1); # scale covariance matrix
+        proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
+
+        #     proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
+        # try 
+        #     Sigma = cov(thetas); # covariance matrix parameters, used to improve proposals
+        #     Sigma = Sigma .* 2.38^2 ./ size(Sigma,1); # scale covariance matrix
+        #     proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
+        # catch
+        #     @warn "Covariance matrix is not positive definite. Using identity matrix instead. If using a non-adaptive grid, you may wish to increase `grid_points`."
+        #     Sigma = Diagonal(ones(size(cov(thetas),1)))
+        #     proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
+        # end
         
         # One RNG per thread — created before the parallel region so each thread
         # gets an independent, reproducible stream. mh_iter is mixed into the seed
@@ -801,60 +806,70 @@ function smc(problem::NPDemand.NPDProblem;
         thread_rngs = [MersenneTwister(seed + tid) for tid in 1:Threads.maxthreadid()]
         reparameterization_bufs = [zeros(eltype(thetas_sieve), sum(nbetas)) for _ in 1:Threads.maxthreadid()]
 
-        prog = Threads.Atomic{Int}(0)
+        prog           = Threads.Atomic{Int}(0)
+        monitor_active = Threads.Atomic{Bool}(true)
 
         # Async monitor: reads the atomic counter every 0.5s and overwrites the progress line.
+        # monitor_active is set to false in the finally block so the task always exits cleanly,
+        # even if the threaded loop throws (which would otherwise leave this task running forever).
         monitor = @async begin
-            while (n_done = prog[]) < nparticles
+            while monitor_active[] && (n_done = prog[]) < nparticles
                 print(@sprintf("\r  MH steps: %d/%d (%.0f%%)", n_done, nparticles, 100.0*n_done/nparticles))
                 sleep(0.5)
             end
-            println(@sprintf("\r  MH steps: %d/%d (100%%)  ", nparticles, nparticles))
+            prog[] >= nparticles && println(@sprintf("\r  MH steps: %d/%d (100%%)  ", nparticles, nparticles))
         end
 
-        Threads.@threads for i in axes(thetas,1)
-            tid  = Threads.threadid()
-            rng  = thread_rngs[tid]
-            reparameterization_storage = reparameterization_bufs[tid]
-            for mh_iter in 1:mh_steps
-                # Re-seed per (particle, step) so each draw is independent
-                Random.seed!(rng, seed + i + mh_iter * nparticles)
+        _blas_threads = BLAS.get_num_threads()
+        BLAS.set_num_threads(1)
+        try
+            Threads.@threads for i in axes(thetas,1)
+                tid  = Threads.threadid()
+                rng  = thread_rngs[tid]
+                reparameterization_storage = reparameterization_bufs[tid]
+                for mh_iter in 1:mh_steps
+                    # Re-seed per (particle, step) so each draw is independent
+                    Random.seed!(rng, seed + i + mh_iter * nparticles)
 
-                # Propose new values + reparameterize + map to sieve
-                thetai_new       = thetas[i,:] + rand(rng, proposal_distribution)
-                betai_new        = NPDemand.reparameterization(thetai_new[1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
-                thetai_sieve_new = NPDemand.map_to_sieve(betai_new, thetai_new[(nbeta+1):end], problem.exchange, nbetas, problem, sieve_type=st)
+                    # Propose new values + reparameterize + map to sieve
+                    thetai_new       = thetas[i,:] + rand(rng, proposal_distribution)
+                    betai_new        = NPDemand.reparameterization(thetai_new[1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
+                    thetai_sieve_new = NPDemand.map_to_sieve(betai_new, thetai_new[(nbeta+1):end], problem.exchange, nbetas, problem, sieve_type=st)
 
-                # Evaluate prior
-                logprior_new     = logprior_smc(thetai_new[1:nbeta], thetai_new[(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetai_sieve_new, new_penalty, problem)
-                if mh_iter == 1
-                    logprior_old = logprior_smc(thetas[i,1:nbeta], thetas[i,(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetas_sieve[i,:], new_penalty, problem)
-                else
-                    logprior_old = logprior_storage[i]
+                    # Evaluate prior
+                    logprior_new     = logprior_smc(thetai_new[1:nbeta], thetai_new[(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetai_sieve_new, new_penalty, problem)
+                    if mh_iter == 1
+                        logprior_old = logprior_smc(thetas[i,1:nbeta], thetas[i,(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetas_sieve[i,:], new_penalty, problem)
+                    else
+                        logprior_old = logprior_storage[i]
+                    end
+
+                    # Evaluate likelihood
+                    loglike_new     = -0.5 * gmm(reshape(thetai_sieve_new, size(thetas_sieve,2), 1), problem, problem.weight_matrices)
+                    if mh_iter == 1
+                        loglike_old = -0.5 * gmm(reshape(thetas_sieve[i,:], size(thetas_sieve,2), 1), problem, problem.weight_matrices)
+                    else
+                        loglike_old = loglike_storage[i]
+                    end
+
+                    # Calculate MH acceptance ratio
+                    logratio = loglike_new + logprior_new - loglike_old - logprior_old
+                    if rand(rng) < exp(logratio)
+                        thetas[i,:]         = thetai_new
+                        thetas_sieve[i,:]   = thetai_sieve_new
+                        logprior_storage[i] = logprior_new
+                        loglike_storage[i]  = loglike_new
+                        n_accept[i]        += 1
+                    end
+                    GC.safepoint()
                 end
-
-                # Evaluate likelihood
-                loglike_new     = -0.5 * gmm(reshape(thetai_sieve_new, size(thetas_sieve,2), 1), problem, problem.weight_matrices)
-                if mh_iter == 1
-                    loglike_old = -0.5 * gmm(reshape(thetas_sieve[i,:], size(thetas_sieve,2), 1), problem, problem.weight_matrices)
-                else
-                    loglike_old = loglike_storage[i]
-                end
-
-                # Calculate MH acceptance ratio
-                logratio = loglike_new + logprior_new - loglike_old - logprior_old
-                if rand(rng) < exp(logratio)
-                    thetas[i,:]         = thetai_new
-                    thetas_sieve[i,:]   = thetai_sieve_new
-                    logprior_storage[i] = logprior_new
-                    loglike_storage[i]  = loglike_new
-                    n_accept[i]        += 1
-                end
-                GC.safepoint()
+                Threads.atomic_add!(prog, 1)
             end
-            Threads.atomic_add!(prog, 1)
+        finally
+            BLAS.set_num_threads(_blas_threads)
+            monitor_active[] = false
+            wait(monitor)
         end
-        wait(monitor)
         n_accept = n_accept ./ mh_steps
         accept_rate = round(mean(n_accept), digits = 2);
         # println("\n Average MH acceptance rate: $(accept_rate)")
@@ -875,19 +890,19 @@ function smc(problem::NPDemand.NPDProblem;
         push!(penalty_vec, new_penalty)
         prev_penalty = new_penalty;
 
-        println("|--------------------------------|--------|")
-        println("| Iteration results              |        |")
-        println("|--------------------------------|--------|")
-        println(@sprintf("| %-30s | %.4f   |", "Current Penalty", new_penalty))
+        println("|--------------------------------|----------|")
+        println("| Iteration results              |          |")
+        println("|--------------------------------|----------|")
+        println(@sprintf("| %-30s | %8.4g |", "Current Penalty", new_penalty))
         if !(isnan(ess) | isinf(ess))
-            println(@sprintf("| %-30s | %.2f |", "ESS", Int(floor(ess))))
+            println(@sprintf("| %-30s | %8d |", "ESS", Int(floor(ess))))
         else
-            println(@sprintf("| %-30s | %.2f |", "ESS", NaN))
+            println(@sprintf("| %-30s | %8s |", "ESS", "NaN"))
         end
-        println(@sprintf("| %-30s | %.2f   |", "Average MH Acceptance rate", accept_rate))
-        println("| Violations                     |        |")
+        println(@sprintf("| %-30s | %8.2f |", "Average MH Acceptance rate", accept_rate))
+        println("| Violations                     |          |")
         for (key, value) in violation_dict
-            println(@sprintf("| %-30s | %.3f  |", key, value))
+            println(@sprintf("| %-30s | %8.3f |", key, value))
         end
     end
 
