@@ -713,7 +713,7 @@ function smc(problem::NPDemand.NPDProblem;
     gamma_μ = gamma_dist.μ;
     chol_beta   = cholesky(Matrix(beta_dist.Σ));  logdet_beta  = 2.0 * sum(log.(diag(chol_beta.L)))
     chol_gamma  = cholesky(Matrix(gamma_dist.Σ)); logdet_gamma = 2.0 * sum(log.(diag(chol_gamma.L)))
-    logprior_t_minus_1 = zeros(nparticles);
+    logprior_t_minus_1 = Float64[];  # empty signals "not yet computed" to get_importance_weights
 
     failure_count = 0;
     while (violation_dict[:any] > max_violations) & (prev_penalty < max_penalty) & (t < max_iter)
@@ -909,19 +909,19 @@ function smc(problem::NPDemand.NPDProblem;
     return (; thetas, smc_weights, violations = viol_store, ess = ess_store, penalties = penalty_vec);
 end
 
-function logpdf_mvn(mu::Vector{T}, Sigma::Matrix{T}, theta::Vector{T}) where T<:Real
-    n = length(mu)
+# function logpdf_mvn(mu::Vector{T}, Sigma::Matrix{T}, theta::Vector{T}) where T<:Real
+#     n = length(mu)
 
-    # Ensure that Sigma is positive definite
-    L = cholesky(Sigma).L
-    diff = theta - mu
-    quadratic_form = sum((L \ diff) .^ 2)
+#     # Ensure that Sigma is positive definite
+#     L = cholesky(Sigma).L
+#     diff = theta - mu
+#     quadratic_form = sum((L \ diff) .^ 2)
 
-    logdetSigma = 2.0 * sum(log.(diag(L))) # log determinant of Sigma
-    logpdf = -0.5 * (n * log(2 * π) + logdetSigma + quadratic_form)
+#     logdetSigma = 2.0 * sum(log.(diag(L))) # log determinant of Sigma
+#     logpdf = -0.5 * (n * log(2 * π) + logdetSigma + quadratic_form)
 
-    return logpdf
-end
+#     return logpdf
+# end
 
 function logpdf_mvn(mu::Vector, chol::Cholesky, logdet_sigma::Real, theta::AbstractVector)
     diff = theta .- mu
@@ -968,36 +968,34 @@ function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T},
     end
 end
 
-function get_importance_weights(thetas_sieve::Matrix{T}, smc_weights::Vector{T}, 
-    penalty_prev::Real, penalty_new::Float64, problem::NPDemand.NPDProblem; 
+function get_importance_weights(thetas_sieve::Matrix{T}, smc_weights::Vector{T},
+    penalty_prev::Real, penalty_new::Float64, problem::NPDemand.NPDProblem;
     new_log_weights     = similar(smc_weights),
     logprior_t          = zeros(T, size(thetas_sieve,1)),
-    logprior_t_minus_1  = zeros(T, size(thetas_sieve,1)),
+    logprior_t_minus_1  = Float64[],
     multithread         = false) where T<:Real
 
-    if multithread == false 
+    # Use isempty rather than == zeros to avoid an O(n) allocation + comparison on every call,
+    # and removes the ambiguity when legitimately-zero penalties coincide with the sentinel value.
+    recompute_prev = isempty(logprior_t_minus_1)
+
+    if multithread == false
         for i in axes(thetas_sieve,1)
-            particle_sieve_i          = thetas_sieve[i,:]
-            logprior_t[i]             = logpenalty_smc(particle_sieve_i, penalty_new, problem)
-            if logprior_t_minus_1     == zeros(T, size(thetas_sieve,1))
-                logprior_t_minus_1_i  = logpenalty_smc(particle_sieve_i, penalty_prev, problem)
-                log_prior_ratio           = logprior_t[i] - logprior_t_minus_1_i
-            else
-                log_prior_ratio           = logprior_t[i] - logprior_t_minus_1[i]
-            end
-            new_log_weights[i]            = log(smc_weights[i]) + log_prior_ratio;
+            particle_sieve_i = thetas_sieve[i,:]
+            logprior_t[i]    = logpenalty_smc(particle_sieve_i, penalty_new, problem)
+            log_prior_ratio  = recompute_prev ?
+                logprior_t[i] - logpenalty_smc(particle_sieve_i, penalty_prev, problem) :
+                logprior_t[i] - logprior_t_minus_1[i]
+            new_log_weights[i] = log(smc_weights[i]) + log_prior_ratio
         end
     else
         Threads.@threads for i in axes(thetas_sieve,1)
-            particle_sieve_i          = thetas_sieve[i,:]
-            logprior_t[i]             = logpenalty_smc(particle_sieve_i, penalty_new, problem)
-            if logprior_t_minus_1     == zeros(T, size(thetas_sieve,1))
-                logprior_t_minus_1_i  = logpenalty_smc(particle_sieve_i, penalty_prev, problem)
-                log_prior_ratio           = logprior_t[i] - logprior_t_minus_1_i
-            else
-                log_prior_ratio           = logprior_t[i] - logprior_t_minus_1[i]
-            end
-            new_log_weights[i]            = log(smc_weights[i]) + log_prior_ratio;
+            particle_sieve_i = thetas_sieve[i,:]
+            logprior_t[i]    = logpenalty_smc(particle_sieve_i, penalty_new, problem)
+            log_prior_ratio  = recompute_prev ?
+                logprior_t[i] - logpenalty_smc(particle_sieve_i, penalty_prev, problem) :
+                logprior_t[i] - logprior_t_minus_1[i]
+            new_log_weights[i] = log(smc_weights[i]) + log_prior_ratio
         end
     end
     # println("weights before normalizing")
@@ -1031,11 +1029,11 @@ function make_prior_dists(prior, gamma_length)
 end
 
 # function logprior_smc(particle_betastar::AbstractArray{T}, particle_gamma::AbstractArray{T}, beta_dist, gamma_dist) where T
-function logprior_smc(particle_betastar, particle_gamma, beta_μ, beta_Σ, gamma_μ, gamma_Σ)
-    out_beta    = logpdf_mvn(beta_μ, beta_Σ, particle_betastar)
-    out_gamma   = logpdf_mvn(gamma_μ, gamma_Σ, particle_gamma)
-    return out_beta + out_gamma
-end
+# function logprior_smc(particle_betastar, particle_gamma, beta_μ, beta_Σ, gamma_μ, gamma_Σ)
+#     out_beta    = logpdf_mvn(beta_μ, beta_Σ, particle_betastar)
+#     out_gamma   = logpdf_mvn(gamma_μ, gamma_Σ, particle_gamma)
+#     return out_beta + out_gamma
+# end
 
 function logprior_smc(particle_betastar, particle_gamma,
                       beta_μ, chol_beta::Cholesky, logdet_beta::Real,
@@ -1078,8 +1076,8 @@ end
 
 function logpenalty_smc(particle_sieve::Array{T}, penalty::Real, problem::NPDemand.NPDProblem) where T
     distance    = report_constraint_violations_inner(problem, params = particle_sieve, verbose = false, output = "frac")
-    # out         = 1 * sum(log.(cdf.(Normal(0,1), -2 * penalty * distance)))
-    out         = 1 * sum(log.(approx_cdf_normal01.(-2 * penalty * distance)))
+    # out         = 1 * sum(log.(approx_cdf_normal01.(-2 * penalty * distance)))
+    out         = sum(log.(2 .* approx_cdf_normal01.(-penalty .* distance)))
     return out
 end
 
