@@ -620,7 +620,8 @@ function smc(problem::NPDemand.NPDProblem;
     max_iter            = 1000, 
     adaptive_tolerance  = false, 
     max_violations      = 0.01,
-    modulo_num          = 1, 
+    modulo_num          = 1,
+    penalize::String    = "frac",
     approximation_details::Dict{Symbol, Any} = Dict()
     )
 
@@ -728,12 +729,12 @@ function smc(problem::NPDemand.NPDProblem;
                     new_penalty = find_zero(f_ess, (prev_penalty, max_penalty), Bisection(); xatol = get_tolerance(prev_penalty))
                 else
                     if t>1
-                        ~, logprior_t_minus_1 = get_importance_weights(thetas_sieve, smc_weights, Float64(prev_penalty), Float64(prev_penalty), problem, logprior_t_minus_1 = logprior_t_minus_1);
+                        ~, logprior_t_minus_1 = get_importance_weights(thetas_sieve, smc_weights, Float64(prev_penalty), Float64(prev_penalty), problem; logprior_t_minus_1 = logprior_t_minus_1, penalize = penalize);
                     end
                     custom_ub = max(prev_penalty * 10.0, prev_penalty + 0.01);
                     xatol = 0.0002;
                     try 
-                        new_penalty = find_zero(x -> f_ess(x, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold, logprior_t_minus_1=logprior_t_minus_1), (prev_penalty, min(custom_ub, max_penalty)), Bisection(); xatol = xatol, verbose = false)
+                        new_penalty = find_zero(x -> f_ess(x, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold; logprior_t_minus_1 = logprior_t_minus_1, penalize = penalize), (prev_penalty, min(custom_ub, max_penalty)), Bisection(); xatol = xatol, verbose = false)
                         new_penalty = new_penalty - xatol;
                     catch 
                         new_penalty = custom_ub;
@@ -752,7 +753,7 @@ function smc(problem::NPDemand.NPDProblem;
         end
         
         # Calculate normalized importance weights
-        log_smc_weights, ~ = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, new_penalty, problem)
+        log_smc_weights, ~ = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, new_penalty, problem; penalize = penalize)
 
         smc_weights .= exp.(log_smc_weights .- maximum(log_smc_weights))
         smc_weights .= smc_weights ./ sum(smc_weights)
@@ -837,9 +838,9 @@ function smc(problem::NPDemand.NPDProblem;
                     thetai_sieve_new = NPDemand.map_to_sieve(betai_new, thetai_new[(nbeta+1):end], problem.exchange, nbetas, problem, sieve_type=st)
 
                     # Evaluate prior
-                    logprior_new     = logprior_smc(thetai_new[1:nbeta], thetai_new[(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetai_sieve_new, new_penalty, problem)
+                    logprior_new     = logprior_smc(thetai_new[1:nbeta], thetai_new[(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetai_sieve_new, new_penalty, problem; penalize)
                     if mh_iter == 1
-                        logprior_old = logprior_smc(thetas[i,1:nbeta], thetas[i,(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetas_sieve[i,:], new_penalty, problem)
+                        logprior_old = logprior_smc(thetas[i,1:nbeta], thetas[i,(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetas_sieve[i,:], new_penalty, problem; penalize)
                     else
                         logprior_old = logprior_storage[i]
                     end
@@ -947,15 +948,17 @@ end
 #     return ess - ess_threshold
 # end
 
-function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T}, 
-    prev_penalty::Real, problem::NPDemand.NPDProblem, 
+function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T},
+    prev_penalty::Real, problem::NPDemand.NPDProblem,
     ess_threshold::Real;
-    logprior_t_minus_1 = zeros(T, size(thetas_sieve,1))) where T
+    logprior_t_minus_1 = zeros(T, size(thetas_sieve,1)),
+    penalize::String   = "frac") where T
 
-    logwts, ~ = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, p[1], 
-            problem, 
-            logprior_t_minus_1 = logprior_t_minus_1, 
-            multithread = true)
+    logwts, ~ = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, p[1],
+            problem;
+            logprior_t_minus_1 = logprior_t_minus_1,
+            multithread = true,
+            penalize = penalize)
 
     num = 2*maximum(logwts) + 2*log(sum(exp.(logwts .- maximum(logwts))))
     denom = maximum(2*logwts) + log(sum(exp.(2*logwts .- maximum(2*logwts))))
@@ -973,7 +976,8 @@ function get_importance_weights(thetas_sieve::Matrix{T}, smc_weights::Vector{T},
     new_log_weights     = similar(smc_weights),
     logprior_t          = zeros(T, size(thetas_sieve,1)),
     logprior_t_minus_1  = Float64[],
-    multithread         = false) where T<:Real
+    multithread         = false,
+    penalize::String    = "frac") where T<:Real
 
     # Use isempty rather than == zeros to avoid an O(n) allocation + comparison on every call,
     # and removes the ambiguity when legitimately-zero penalties coincide with the sentinel value.
@@ -982,18 +986,18 @@ function get_importance_weights(thetas_sieve::Matrix{T}, smc_weights::Vector{T},
     if multithread == false
         for i in axes(thetas_sieve,1)
             particle_sieve_i = thetas_sieve[i,:]
-            logprior_t[i]    = logpenalty_smc(particle_sieve_i, penalty_new, problem)
+            logprior_t[i]    = logpenalty_smc(particle_sieve_i, penalty_new, problem; penalize = penalize)
             log_prior_ratio  = recompute_prev ?
-                logprior_t[i] - logpenalty_smc(particle_sieve_i, penalty_prev, problem) :
+                logprior_t[i] - logpenalty_smc(particle_sieve_i, penalty_prev, problem; penalize = penalize) :
                 logprior_t[i] - logprior_t_minus_1[i]
             new_log_weights[i] = log(smc_weights[i]) + log_prior_ratio
         end
     else
         Threads.@threads for i in axes(thetas_sieve,1)
             particle_sieve_i = thetas_sieve[i,:]
-            logprior_t[i]    = logpenalty_smc(particle_sieve_i, penalty_new, problem)
+            logprior_t[i]    = logpenalty_smc(particle_sieve_i, penalty_new, problem; penalize = penalize)
             log_prior_ratio  = recompute_prev ?
-                logprior_t[i] - logpenalty_smc(particle_sieve_i, penalty_prev, problem) :
+                logprior_t[i] - logpenalty_smc(particle_sieve_i, penalty_prev, problem; penalize = penalize) :
                 logprior_t[i] - logprior_t_minus_1[i]
             new_log_weights[i] = log(smc_weights[i]) + log_prior_ratio
         end
@@ -1074,11 +1078,10 @@ function get_tolerance(p::Float64)
     return out
 end
 
-function logpenalty_smc(particle_sieve::Array{T}, penalty::Real, problem::NPDemand.NPDProblem) where T
-    distance    = report_constraint_violations_inner(problem, params = particle_sieve, verbose = false, output = "frac")
-    # out         = 1 * sum(log.(approx_cdf_normal01.(-2 * penalty * distance)))
-    out         = sum(log.(2 .* approx_cdf_normal01.(-penalty .* distance)))
-    return out
+function logpenalty_smc(particle_sieve::Array{T}, penalty::Real, problem::NPDemand.NPDProblem;
+    penalize::String = "frac") where T
+    distance = report_constraint_violations_inner(problem; params = particle_sieve, verbose = false, output = penalize)
+    return sum(log.(2 .* approx_cdf_normal01.(-penalty .* distance)))
 end
 
 function loglikelihood(problem::NPDemand.NPDProblem, particle_betastar::Vector{T}, particle_gamma::Vector{T}, nbetas) where T

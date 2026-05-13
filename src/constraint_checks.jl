@@ -92,6 +92,49 @@ function report_constraint_violations_inner(problem;
     jacobians = elast_mat_zygote(param_vec, problem, problem.tempmats; at = Matrix(problem.data[!,r"prices"]), s = Matrix(problem.data[!,r"shares"]));
     reshaped_jacobians = [jacobians[i][j1,j2] for j1=1:J, j2 = 1:J, i = 1:size(problem.data,1)];
 
+    # Continuous magnitude output: mean positive-part violation per market, averaged across
+    # active constraint types.  Returns a non-negative vector of length n_markets.
+    # Each element is 0 when all constraints satisfied in that market, and grows proportionally
+    # to the severity of violations — unlike "frac" which is binary per constraint type.
+    if output == "magnitude"
+        n_markets = size(reshaped_jacobians, 3)
+        mags      = zeros(n_markets)
+        n_active  = 0
+        if :monotone in constraints_to_check
+            n_active += 1
+            mags .+= [magnitude_monotone(reshaped_jacobians[:,:,i])              for i in 1:n_markets]
+        end
+        if :all_substitutes in constraints_to_check
+            n_active += 1
+            mags .+= [magnitude_all_subs(reshaped_jacobians[:,:,i])               for i in 1:n_markets]
+        end
+        if :diagonal_dominance_all in constraints_to_check
+            n_active += 1
+            mags .+= [magnitude_diagonal_dominance(reshaped_jacobians[:,:,i])     for i in 1:n_markets]
+        end
+        if :subs_in_group in constraints_to_check
+            n_active += 1
+            mags .+= [magnitude_subs_in_group(reshaped_jacobians[:,:,i], problem.exchange)    for i in 1:n_markets]
+        end
+        if :subs_across_group in constraints_to_check
+            n_active += 1
+            mags .+= [magnitude_subs_across_group(reshaped_jacobians[:,:,i], problem.exchange) for i in 1:n_markets]
+        end
+        if :all_complements in constraints_to_check
+            n_active += 1
+            mags .+= [magnitude_all_complements(reshaped_jacobians[:,:,i])        for i in 1:n_markets]
+        end
+        if :complements_in_group in constraints_to_check
+            n_active += 1
+            mags .+= [magnitude_comps_in_group(reshaped_jacobians[:,:,i], problem.exchange)    for i in 1:n_markets]
+        end
+        if :complements_across_group in constraints_to_check
+            n_active += 1
+            mags .+= [magnitude_comps_across_group(reshaped_jacobians[:,:,i], problem.exchange) for i in 1:n_markets]
+        end
+        return n_active > 0 ? mags ./ n_active : mags
+    end
+
     violations = Dict();
     all_satisfied = ones(Bool, size(problem.data,1));
     num_violated_per_market = zeros(Int64, size(problem.data,1));
@@ -295,6 +338,81 @@ function check_comps_across_group(elast_one_market, exchange)
            all(elast_one_market_group2_1 .<=0)
 end
 
+
+# ---------------------------------------------------------------------------
+# Magnitude helpers — return normalized violation severity in [0, 1].
+# Each function computes mean(max(0, violation_i)) / (mean(|element_i|) + ε),
+# where the denominator is the mean absolute value of the elements being
+# checked.  This makes the scale problem-invariant: 0 = fully satisfied,
+# values approaching 1 = elements are as far wrong as they are large.
+# ---------------------------------------------------------------------------
+
+const _MAG_EPS = 1e-10
+
+function magnitude_monotone(elast_one_market)
+    d = diag(elast_one_market)
+    return mean(max.(0, d)) / (mean(abs.(d)) + _MAG_EPS)
+end
+
+function magnitude_all_subs(elast_one_market)
+    J = size(elast_one_market, 1)
+    J <= 1 && return 0.0
+    off_diag = [elast_one_market[i,j] for i in 1:J for j in setdiff(1:J,i)]
+    return mean(max.(0, -off_diag)) / (mean(abs.(off_diag)) + _MAG_EPS)
+end
+
+function magnitude_diagonal_dominance(elast_one_market)
+    J = size(elast_one_market, 1)
+    col_sums_minus_diag = [sum(elast_one_market[setdiff(1:J,i), i]) for i in 1:J]
+    d = abs.(diag(elast_one_market))
+    excess = abs.(col_sums_minus_diag) .- d
+    return mean(max.(0, excess)) / (mean(d) + _MAG_EPS)
+end
+
+function magnitude_subs_in_group(elast_one_market, exchange)
+    if length(exchange) == 1
+        return magnitude_all_subs(elast_one_market)
+    else
+        g1 = elast_one_market[exchange[1][1]:exchange[1][2], exchange[1][1]:exchange[1][2]]
+        g2 = elast_one_market[exchange[2][1]:exchange[2][2], exchange[2][1]:exchange[2][2]]
+        return (magnitude_all_subs(g1) + magnitude_all_subs(g2)) / 2
+    end
+end
+
+function magnitude_subs_across_group(elast_one_market, exchange)
+    length(exchange) == 2 || error("Cannot use `across_group` constraints with only one exchangeable group")
+    J = maximum(union(exchange[1], exchange[2]))
+    all_cross = vcat(vec(elast_one_market[exchange[1], setdiff(1:J, exchange[1])]),
+                     vec(elast_one_market[exchange[2], setdiff(1:J, exchange[2])]))
+    isempty(all_cross) && return 0.0
+    return mean(max.(0, -all_cross)) / (mean(abs.(all_cross)) + _MAG_EPS)
+end
+
+function magnitude_all_complements(elast_one_market)
+    J = size(elast_one_market, 1)
+    J <= 1 && return 0.0
+    off_diag = [elast_one_market[i,j] for i in 1:J for j in setdiff(1:J,i)]
+    return mean(max.(0, off_diag)) / (mean(abs.(off_diag)) + _MAG_EPS)
+end
+
+function magnitude_comps_in_group(elast_one_market, exchange)
+    if length(exchange) == 1
+        return magnitude_all_complements(elast_one_market)
+    else
+        g1 = elast_one_market[exchange[1][1]:exchange[1][2], exchange[1][1]:exchange[1][2]]
+        g2 = elast_one_market[exchange[2][1]:exchange[2][2], exchange[2][1]:exchange[2][2]]
+        return (magnitude_all_complements(g1) + magnitude_all_complements(g2)) / 2
+    end
+end
+
+function magnitude_comps_across_group(elast_one_market, exchange)
+    length(exchange) == 2 || error("Cannot use `across_group` constraints with only one exchangeable group")
+    J = maximum(union(exchange[1], exchange[2]))
+    all_cross = vcat(vec(elast_one_market[exchange[1], setdiff(1:J, exchange[1])]),
+                     vec(elast_one_market[exchange[2], setdiff(1:J, exchange[2])]))
+    isempty(all_cross) && return 0.0
+    return mean(max.(0, all_cross)) / (mean(abs.(all_cross)) + _MAG_EPS)
+end
 
 function check_linear_constraints(npd_problem)
     if npd_problem.Aineq != []

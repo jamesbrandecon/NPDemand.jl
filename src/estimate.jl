@@ -439,9 +439,10 @@ function smc!(problem::NPDemand.NPDProblem;
     seed                = 4132,
     smc_method          = :adaptive,
     max_iter            = 1000,
-    adaptive_tolerance  = false, 
+    adaptive_tolerance  = false,
     max_violations      = 0.01,
-    extra_mh_loops      = 0
+    extra_mh_loops      = 0,
+    penalize::String    = "frac"
     )
 
     try 
@@ -468,8 +469,9 @@ function smc!(problem::NPDemand.NPDProblem;
         smc_method          = smc_method, 
         max_iter            = max_iter, 
         adaptive_tolerance  = adaptive_tolerance, 
-        max_violations      = max_violations, 
-        modulo_num          = modulo_num, 
+        max_violations      = max_violations,
+        modulo_num          = modulo_num,
+        penalize            = penalize,
         approximation_details = approximation_details
         );
     
