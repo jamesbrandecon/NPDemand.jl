@@ -154,7 +154,66 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
         end
     end
 
-    # diagonal dominance 
+    if :subs_in_group ∈ constraints
+        for e ∈ eachindex(exchange)
+            inv_j    = first_in_exchange[e]
+            init_ind = inv_j > 1 ? sum(lengths[1:inv_j-1]) : 0
+            orders   = order_vec[inv_j]
+            for j_loop ∈ exchange[e]
+                other_orders = setdiff(collect(1:J), j_loop)
+                for i ∈ eachindex(orders[:,1])
+                    rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .&
+                                   (orders[:,j_loop] .== orders[i,j_loop]+1))
+                    rows = getindex.(rows, 1)
+                    if length(rows) >= 1
+                        Aineq = add_constraint(Aineq, init_ind + i, init_ind + rows[1])
+                    end
+                end
+            end
+        end
+    end
+
+    if :subs_across_group ∈ constraints
+        length(exchange) == 2 || error("Cannot use `subs_across_group` constraint with only one exchangeable group")
+        for e ∈ eachindex(exchange)
+            inv_j    = first_in_exchange[e]
+            init_ind = inv_j > 1 ? sum(lengths[1:inv_j-1]) : 0
+            orders   = order_vec[inv_j]
+            for j_loop ∈ setdiff(collect(1:J), exchange[e])
+                other_orders = setdiff(collect(1:J), j_loop)
+                for i ∈ eachindex(orders[:,1])
+                    rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .&
+                                   (orders[:,j_loop] .== orders[i,j_loop]+1))
+                    rows = getindex.(rows, 1)
+                    if length(rows) >= 1
+                        Aineq = add_constraint(Aineq, init_ind + i, init_ind + rows[1])
+                    end
+                end
+            end
+        end
+    end
+
+    if :complements_across_group ∈ constraints
+        length(exchange) == 2 || error("Cannot use `complements_across_group` constraint with only one exchangeable group")
+        for e ∈ eachindex(exchange)
+            inv_j    = first_in_exchange[e]
+            init_ind = inv_j > 1 ? sum(lengths[1:inv_j-1]) : 0
+            orders   = order_vec[inv_j]
+            for j_loop ∈ setdiff(collect(1:J), exchange[e])
+                other_orders = setdiff(collect(1:J), j_loop)
+                for i ∈ eachindex(orders[:,1])
+                    rows = findall(minimum((orders[i,other_orders]' .== orders[:,other_orders]), dims=2) .&
+                                   (orders[:,j_loop] .== orders[i,j_loop]+1))
+                    rows = getindex.(rows, 1)
+                    if length(rows) >= 1
+                        Aineq = add_constraint(Aineq, init_ind + rows[1], init_ind + i)
+                    end
+                end
+            end
+        end
+    end
+
+    # diagonal dominance
         # currently only within group
     if :diagonal_dominance_group ∈ constraints
         if (J==2) & length(exchange)==1
