@@ -304,34 +304,7 @@ function estimate!(problem::NPDProblem;
         end
 
         J = length(Xvec);
-        matrix_storage_dict = Dict();
-        augmented_X = [hcat(Xvec[i], -1 .* Bvec[i][:,2:end]) for i in 1:J]
-        matrix_storage_dict["yZX"] = [(-1 .* df[!,"prices$i"])' * weight_matrices[i+1] * augmented_X[i+1] for i in 0:J-1]
-        matrix_storage_dict["XX"] = [augmented_X[i+1]'* weight_matrices[i+1] * augmented_X[i+1] for i in 0:J-1]
-        matrix_storage_dict["XZy"] = [augmented_X[i+1]' * weight_matrices[i+1]' * (-1 .* df[!,"prices$i"]) for i in 0:J-1]
-
-        # Partitioned matrices for gmm_fast_v2 (avoids map_to_sieve + concatenation in AD path)
-        nθ_v2    = size.(Xvec, 2)
-        yZX_raw  = matrix_storage_dict["yZX"]
-        XX_raw   = matrix_storage_dict["XX"]
-        XZy_raw  = matrix_storage_dict["XZy"]
-        yZX_β_v2 = [copy(parent(yZX_raw[i])[1:nθ_v2[i]])              for i in 1:J]
-        yZX_γ_v2 = [copy(parent(yZX_raw[i])[nθ_v2[i]+1:end])          for i in 1:J]
-        XZy_β_v2 = [XZy_raw[i][1:nθ_v2[i]]                            for i in 1:J]
-        XZy_γ_v2 = [XZy_raw[i][nθ_v2[i]+1:end]                        for i in 1:J]
-        XX_ββ_v2 = [XX_raw[i][1:nθ_v2[i], 1:nθ_v2[i]]                for i in 1:J]
-        XX_βγ_v2 = [XX_raw[i][1:nθ_v2[i], nθ_v2[i]+1:end]            for i in 1:J]
-        XX_γγ_v2 = [XX_raw[i][nθ_v2[i]+1:end, nθ_v2[i]+1:end]        for i in 1:J]
-        matrix_storage_dict["yZX_β"]           = yZX_β_v2
-        matrix_storage_dict["XZy_β"]           = XZy_β_v2
-        matrix_storage_dict["XX_ββ"]           = XX_ββ_v2
-        matrix_storage_dict["XX_βγ"]           = XX_βγ_v2
-        matrix_storage_dict["yZX_γ_sum"]       = sum(yZX_γ_v2)
-        matrix_storage_dict["XZy_γ_sum"]       = sum(XZy_γ_v2)
-        matrix_storage_dict["XX_γγ_sum"]       = sum(XX_γγ_v2)
-        matrix_storage_dict["starts_params_v2"] = [1; cumsum(nbetas)[1:end-1] .+ 1]
-        matrix_storage_dict["ends_params_v2"]   = Vector(cumsum(nbetas))
-        matrix_storage_dict["group_for_product"] = [findfirst(j .∈ exchange) for j in 1:J]
+        matrix_storage_dict = gmm_fast_blocks(problem, nbetas)
 
         # Sample
         verbose && println("Beginning sampling....")
@@ -421,6 +394,8 @@ Run sequentially constrained Monte Carlo (SMC) on the problem.
 - `max_iter`: The maximum number of iterations for the SMC algorithm. Default is 1000.
 - `adaptive_tolerance`: Whether to use adaptive tolerance for the SMC algorithm. Default is false.
 - `max_violations`: The maximum allowed fraction of markets with violations. Default is 0.01.
+- `smc_kernel`: Particle rejuvenation kernel. Use `:mh` for the original random walk or `:hmc` for the differentiable smooth-penalty target.
+- `penalty_type`: Penalty target. Defaults to `:smooth` for `:hmc` and `:count` for `:mh`.
 
 The function will overwrite the results in the problem object with the resulting chain.
 
@@ -441,13 +416,32 @@ function smc!(problem::NPDemand.NPDProblem;
     max_iter            = 1000,
     adaptive_tolerance  = false, 
     max_violations      = 0.01,
-    extra_mh_loops      = 0
+    extra_mh_loops      = 0,
+    smc_kernel          = :mh,
+    penalty_type        = nothing,
+    hmc_step_size       = nothing,
+    hmc_leapfrog_steps::Int = 5,
+    smoothness::Real    = 20.0
     )
 
     try 
         @assert smc_method ∈ [:adaptive, :linear_grid, :geometric_grid, :logit_grid]
     catch
         error("`smc_method` must be one of [:adaptive, :linear_grid, :geometric_grid, :logit_grid]")
+    end
+    try
+        @assert smc_kernel ∈ [:mh, :hmc]
+    catch
+        error("`smc_kernel` must be one of [:mh, :hmc]")
+    end
+    penalty_kind = isnothing(penalty_type) ? (smc_kernel == :hmc ? :smooth : :count) : penalty_type
+    try
+        @assert penalty_kind ∈ [:count, :smooth]
+    catch
+        error("`penalty_type` must be one of [:count, :smooth]")
+    end
+    if smc_kernel == :hmc && penalty_kind != :smooth
+        error("`smc_kernel = :hmc` requires `penalty_type = :smooth`")
     end
 
     burn_in_int = Int(burn_in * size(problem.chain,1));
@@ -470,6 +464,11 @@ function smc!(problem::NPDemand.NPDProblem;
         adaptive_tolerance  = adaptive_tolerance, 
         max_violations      = max_violations, 
         modulo_num          = modulo_num, 
+        smc_kernel          = smc_kernel,
+        penalty_type        = penalty_kind,
+        hmc_step_size       = isnothing(hmc_step_size) ? step : hmc_step_size,
+        hmc_leapfrog_steps  = hmc_leapfrog_steps,
+        smoothness          = smoothness,
         approximation_details = approximation_details
         );
     

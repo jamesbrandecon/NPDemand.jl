@@ -66,8 +66,11 @@ end
 
 function inner_elast_loop(dsids_i::AbstractMatrix{T}, J::Int, at::AbstractVector{Float64}, svec::AbstractVector{Float64}; type::String = "jacobian") where T
     # J_s = [dsids_i[j1,j2] for j1 in 1:J, j2 in 1:J]
-    # temp = -1*pinv(J_s);
-    temp = -1*pinv(dsids_i)
+    temp = try
+        -inv(dsids_i)
+    catch
+        -pinv(dsids_i)
+    end
 
     if type == "jacobian"
         return temp 
@@ -272,6 +275,30 @@ function map_to_sieve(beta::AbstractArray{T}, gamma::AbstractArray{T}, exchange:
 
         return all_params
     end
+end
+
+function gmm_fast_blocks(problem::NPDemand.NPDProblem, nbetas)
+    J = length(problem.Xvec)
+    Xvec, Bvec, df = problem.Xvec, problem.Bvec, problem.data
+    augmented_X = [hcat(Xvec[i], -1 .* Bvec[i][:,2:end]) for i in 1:J]
+    yZX = [(-1 .* df[!,"prices$i"])' * problem.weight_matrices[i+1] * augmented_X[i+1] for i in 0:J-1]
+    XX  = [augmented_X[i+1]' * problem.weight_matrices[i+1] * augmented_X[i+1] for i in 0:J-1]
+    XZy = [augmented_X[i+1]' * problem.weight_matrices[i+1]' * (-1 .* df[!,"prices$i"]) for i in 0:J-1]
+    nθ  = size.(Xvec, 2)
+    yZX_γ = [copy(parent(yZX[i])[nθ[i]+1:end]) for i in 1:J]
+    XZy_γ = [XZy[i][nθ[i]+1:end] for i in 1:J]
+    XX_γγ = [XX[i][nθ[i]+1:end, nθ[i]+1:end] for i in 1:J]
+    return Dict(
+        "yZX_β" => [copy(parent(yZX[i])[1:nθ[i]]) for i in 1:J],
+        "XZy_β" => [XZy[i][1:nθ[i]] for i in 1:J],
+        "XX_ββ" => [XX[i][1:nθ[i], 1:nθ[i]] for i in 1:J],
+        "XX_βγ" => [XX[i][1:nθ[i], nθ[i]+1:end] for i in 1:J],
+        "yZX_γ_sum" => sum(yZX_γ),
+        "XZy_γ_sum" => sum(XZy_γ),
+        "XX_γγ_sum" => sum(XX_γγ),
+        "starts_params_v2" => [1; cumsum(nbetas)[1:end-1] .+ 1],
+        "ends_params_v2" => Vector(cumsum(nbetas)),
+        "group_for_product" => [findfirst(j .∈ problem.exchange) for j in 1:J])
 end
 
 function pick_step_size(problem, prior, tempmats, bigA; target = 0.2, n_samples = 100)
@@ -607,6 +634,185 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
         param_names)
 end
 
+function smc_logtarget_z(z, problem::NPDemand.NPDProblem, nbetas, lbs, parameter_order,
+        beta_mean, sqrt_vbeta, gamma_mean, sqrt_vgamma, gmm_loglike,
+        penalty::Real, smoothness::Real, sieve_type, prices, shares)
+    nbeta = length(beta_mean)
+    z_beta = @view z[1:nbeta]
+    z_gamma = @view z[(nbeta+1):length(z)]
+    betastar = beta_mean .+ sqrt_vbeta .* z_beta
+    gamma = gamma_mean .+ sqrt_vgamma .* z_gamma
+    beta = sieve_type == "bernstein" ? reparameterization(betastar, lbs, parameter_order) : betastar
+    sieve = map_to_sieve(beta, gamma, problem.exchange, nbetas, problem; sieve_type = sieve_type)
+    return gmm_loglike(beta, gamma) - 0.5 * dot(z, z) +
+           logpenalty_smc(smooth_constraint_distances(sieve, problem, prices, shares; smoothness = smoothness), penalty)
+end
+
+function smc_hmc_rejuvenate!(z, logtarget_grad!, rng, n_steps::Int, step_size::Real, n_leapfrog::Int)
+    grad = similar(z)
+    grad_prop = similar(z)
+    z_prop = similar(z)
+    momentum = similar(z)
+    logp = logtarget_grad!(grad, z)
+    isfinite(logp) || return logp, 0
+
+    n_accept = 0
+    for _ in 1:n_steps
+        randn!(rng, momentum)
+        h_old = -logp + 0.5 * dot(momentum, momentum)
+        z_prop .= z
+        grad_prop .= grad
+        logp_prop = logp
+
+        momentum .+= 0.5 .* step_size .* grad_prop
+        valid = true
+        for leapfrog_step in 1:n_leapfrog
+            z_prop .+= step_size .* momentum
+            logp_prop = logtarget_grad!(grad_prop, z_prop)
+            if !isfinite(logp_prop)
+                valid = false
+                break
+            end
+            momentum .+= (leapfrog_step < n_leapfrog ? step_size : 0.5 * step_size) .* grad_prop
+        end
+
+        if valid
+            h_new = -logp_prop + 0.5 * dot(momentum, momentum)
+            log_accept = h_old - h_new
+            if isfinite(log_accept) && log(rand(rng)) < log_accept
+                z .= z_prop
+                grad .= grad_prop
+                logp = logp_prop
+                n_accept += 1
+            end
+        end
+    end
+    return logp, n_accept
+end
+
+function smc_z_to_state!(theta_row, sieve_row, z, problem::NPDemand.NPDProblem, nbetas,
+        lbs, parameter_order, beta_mean, sqrt_vbeta, gamma_mean, sqrt_vgamma, sieve_type)
+    nbeta = length(beta_mean)
+    @views begin
+        theta_row[1:nbeta] .= beta_mean .+ sqrt_vbeta .* z[1:nbeta]
+        theta_row[(nbeta+1):length(theta_row)] .= gamma_mean .+ sqrt_vgamma .* z[(nbeta+1):length(z)]
+        beta = sieve_type == "bernstein" ? reparameterization(theta_row[1:nbeta], lbs, parameter_order) : theta_row[1:nbeta]
+        sieve_row .= vec(map_to_sieve(beta, theta_row[(nbeta+1):length(theta_row)], problem.exchange, nbetas, problem; sieve_type = sieve_type))
+    end
+    return nothing
+end
+
+function smc_gradient_workspace(problem::NPDemand.NPDProblem, nbeta::Int, ngamma::Int, nsieve::Int)
+    J = length(problem.Xvec)
+    return (;
+        betastar = zeros(nbeta),
+        gamma = zeros(ngamma),
+        grad_beta = zeros(nbeta),
+        grad_gamma = zeros(ngamma),
+        sieve = zeros(nsieve),
+        grad_sieve = zeros(nsieve),
+        inverse_derivative = zeros(J, J),
+        jacobian_inverse = zeros(J, J),
+        grad_jacobian = zeros(J, J),
+        grad_inverse = zeros(J, J),
+        grad_A = zeros(J, J),
+        tmp_A = zeros(J, J))
+end
+
+function gmm_loglike_grad!(grad_beta, grad_gamma, beta, gamma,
+        yZX_β, XZy_β, XX_ββ, XX_βγ,
+        yZX_γ_sum, XZy_γ_sum, XX_γγ_sum,
+        starts_params, ends_params, group_for_product, J;
+        workspace = nothing)
+
+    value, pullback = ChainRulesCore.rrule(gmm_fast_v2, beta, gamma,
+        yZX_β, XZy_β, XX_ββ, XX_βγ,
+        yZX_γ_sum, XZy_γ_sum, XX_γγ_sum,
+        starts_params, ends_params, group_for_product, J)
+    partials = pullback(-0.5)
+    grad_beta .= partials[2]
+    grad_gamma .= partials[3]
+    return -0.5 * value
+end
+
+function add_sieve_gradient_to_beta!(grad_beta, grad_sieve, problem::NPDemand.NPDProblem, nbetas, group_for_product)
+    starts_sieve = [1; cumsum(size.(problem.Xvec, 2))[1:end-1] .+ 1]
+    ends_sieve = cumsum(size.(problem.Xvec, 2))
+    starts_params = [1; cumsum(nbetas)[1:end-1] .+ 1]
+    ends_params = cumsum(nbetas)
+
+    for product in 1:length(problem.Xvec)
+        group = group_for_product[product]
+        @views grad_beta[starts_params[group]:ends_params[group]] .+=
+            grad_sieve[starts_sieve[product]:ends_sieve[product]]
+    end
+    return grad_beta
+end
+
+function smc_logtarget_grad!(grad_z, z, problem::NPDemand.NPDProblem, nbetas, lbs, parameter_order,
+        beta_mean, sqrt_vbeta, gamma_mean, sqrt_vgamma,
+        yZX_β, XZy_β, XX_ββ, XX_βγ,
+        yZX_γ_sum, XZy_γ_sum, XX_γγ_sum,
+        starts_params, ends_params, group_for_product, J,
+        penalty::Real, smoothness::Real, sieve_type, prices, shares,
+        workspace = nothing)
+
+    nbeta = length(beta_mean)
+    z_beta = @view z[1:nbeta]
+    z_gamma = @view z[(nbeta+1):length(z)]
+    if workspace === nothing
+        betastar = beta_mean .+ sqrt_vbeta .* z_beta
+        gamma = gamma_mean .+ sqrt_vgamma .* z_gamma
+    else
+        betastar = workspace.betastar
+        gamma = workspace.gamma
+        @. betastar = beta_mean + sqrt_vbeta * z_beta
+        @. gamma = gamma_mean + sqrt_vgamma * z_gamma
+    end
+
+    beta = betastar
+    reparameterization_pullback = nothing
+    if sieve_type == "bernstein"
+        beta, reparameterization_pullback = ChainRulesCore.rrule(reparameterization, betastar, lbs, parameter_order)
+    end
+
+    grad_beta = workspace === nothing ? zeros(eltype(z), length(beta)) : workspace.grad_beta
+    grad_gamma = workspace === nothing ? zeros(eltype(z), length(gamma)) : workspace.grad_gamma
+    value = gmm_loglike_grad!(grad_beta, grad_gamma, beta, gamma,
+        yZX_β, XZy_β, XX_ββ, XX_βγ,
+        yZX_γ_sum, XZy_γ_sum, XX_γγ_sum,
+        starts_params, ends_params, group_for_product, J;
+        workspace = workspace)
+
+    if workspace === nothing
+        sieve = vec(map_to_sieve(beta, gamma, problem.exchange, nbetas, problem; sieve_type = sieve_type))
+        grad_sieve = zeros(eltype(z), length(sieve))
+    else
+        sieve = workspace.sieve
+        sieve .= vec(map_to_sieve(beta, gamma, problem.exchange, nbetas, problem; sieve_type = sieve_type))
+        grad_sieve = workspace.grad_sieve
+    end
+    logpenalty = smooth_logpenalty_grad!(grad_sieve, sieve, problem, prices, shares, penalty;
+        smoothness = smoothness, workspace = workspace)
+    if !isfinite(logpenalty)
+        fill!(grad_z, 0)
+        return -Inf
+    end
+    value += logpenalty - 0.5 * dot(z, z)
+
+    add_sieve_gradient_to_beta!(grad_beta, grad_sieve, problem, nbetas, group_for_product)
+    grad_betastar = grad_beta
+    if reparameterization_pullback !== nothing
+        _, grad_betastar, _, _ = reparameterization_pullback(grad_beta)
+    end
+
+    @views begin
+        grad_z[1:nbeta] .= -z_beta .+ sqrt_vbeta .* grad_betastar
+        grad_z[(nbeta+1):length(z)] .= -z_gamma .+ sqrt_vgamma .* grad_gamma
+    end
+    return value
+end
+
 function smc(problem::NPDemand.NPDProblem;
     grid_points::Int    = 50, 
     max_penalty::Real   = 5, 
@@ -621,6 +827,11 @@ function smc(problem::NPDemand.NPDProblem;
     adaptive_tolerance  = false, 
     max_violations      = 0.01,
     modulo_num          = 1, 
+    smc_kernel          = :mh,
+    penalty_type        = smc_kernel == :hmc ? :smooth : :count,
+    hmc_step_size::Real = step_size,
+    hmc_leapfrog_steps::Int = 5,
+    smoothness::Real    = 20.0,
     approximation_details::Dict{Symbol, Any} = Dict()
     )
 
@@ -673,6 +884,19 @@ function smc(problem::NPDemand.NPDProblem;
                             problem;
                             sieve_type=st)
                          for i in 1:nparticles]...)
+    matrix_storage_dict = gmm_fast_blocks(problem, nbetas)
+    nproducts = length(problem.Avec)
+    yZX_β, XZy_β = matrix_storage_dict["yZX_β"], matrix_storage_dict["XZy_β"]
+    XX_ββ, XX_βγ = matrix_storage_dict["XX_ββ"], matrix_storage_dict["XX_βγ"]
+    yZX_γ_sum, XZy_γ_sum = matrix_storage_dict["yZX_γ_sum"], matrix_storage_dict["XZy_γ_sum"]
+    XX_γγ_sum = matrix_storage_dict["XX_γγ_sum"]
+    starts_params = matrix_storage_dict["starts_params_v2"]
+    ends_params = matrix_storage_dict["ends_params_v2"]
+    group_for_product = matrix_storage_dict["group_for_product"]
+    gmm_loglike(beta, gamma) = -0.5 * gmm_fast_v2(beta, gamma, yZX_β, XZy_β, XX_ββ, XX_βγ,
+        yZX_γ_sum, XZy_γ_sum, XX_γγ_sum, starts_params, ends_params, group_for_product, nproducts)
+    smc_prices = Matrix(problem.data[!,r"prices"])
+    smc_shares = Matrix(problem.data[!,r"shares"])
     
     # 2. Set initial weights
     smc_weights     = fill(1.0 / nparticles, nparticles)
@@ -708,35 +932,44 @@ function smc(problem::NPDemand.NPDProblem;
     end
 
     t = 1;
-    beta_dist, gamma_dist = make_prior_dists(prior, gamma_length);
-    beta_μ = beta_dist.μ;
-    gamma_μ = gamma_dist.μ;
-    chol_beta   = cholesky(Matrix(beta_dist.Σ));  logdet_beta  = 2.0 * sum(log.(diag(chol_beta.L)))
-    chol_gamma  = cholesky(Matrix(gamma_dist.Σ)); logdet_gamma = 2.0 * sum(log.(diag(chol_gamma.L)))
-    logprior_t_minus_1 = zeros(nparticles);
-
+    beta_μ, gamma_μ = _betabar, _gammabar
+    beta_inv_var, beta_logdet = inv.(_vbeta), sum(log.(_vbeta))
+    gamma_inv_var, gamma_logdet = fill(inv(_vgamma), gamma_length-1), (gamma_length-1) * log(_vgamma)
+    sqrt_vbeta, sqrt_vgamma = sqrt.(_vbeta), sqrt(_vgamma)
+    n_kernel_steps = Int(mh_steps)
+    gradient_workspaces = smc_kernel == :hmc ?
+        [smc_gradient_workspace(problem, nbeta, length(gamma_μ), size(thetas_sieve, 2)) for _ in 1:Threads.maxthreadid()] :
+        nothing
     failure_count = 0;
     while (violation_dict[:any] > max_violations) & (prev_penalty < max_penalty) & (t < max_iter)
         t = t+1
         print("\n Iteration "*string(t-1)*"...\r")
+        penalty_distances = smc_penalty_distances(thetas_sieve, problem;
+            multithread = true, penalty_type = penalty_type, smoothness = smoothness)
+        current_logprior = zeros(eltype(thetas_sieve), nparticles)
 
         if (smc_method == :adaptive) & (mod(t,modulo_num) == 0)
             # Solve for next step penalty
             print("\n Optimizing penalty... \r")
             # try 
+                _unused, current_logprior = get_importance_weights(thetas_sieve, smc_weights, Float64(prev_penalty), Float64(prev_penalty), problem,
+                    penalty_distances = penalty_distances, penalty_type = penalty_type, smoothness = smoothness);
                 if adaptive_tolerance 
-                    new_penalty = find_zero(f_ess, (prev_penalty, max_penalty), Bisection(); xatol = get_tolerance(prev_penalty))
+                    new_penalty = find_zero(x -> f_ess(x, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold,
+                        logprior_t_minus_1 = current_logprior, penalty_distances = penalty_distances,
+                        penalty_type = penalty_type, smoothness = smoothness),
+                        (prev_penalty, max_penalty), Bisection(); xatol = get_tolerance(prev_penalty))
                 else
-                    if t>1
-                        ~, logprior_t_minus_1 = get_importance_weights(thetas_sieve, smc_weights, Float64(prev_penalty), Float64(prev_penalty), problem, logprior_t_minus_1 = logprior_t_minus_1);
-                    end
                     custom_ub = max(prev_penalty * 10.0, prev_penalty + 0.01);
                     xatol = 0.0002;
                     try 
-                        new_penalty = find_zero(x -> f_ess(x, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold, logprior_t_minus_1=logprior_t_minus_1), (prev_penalty, min(custom_ub, max_penalty)), Bisection(); xatol = xatol, verbose = false)
+                        new_penalty = find_zero(x -> f_ess(x, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold,
+                            logprior_t_minus_1 = current_logprior, penalty_distances = penalty_distances,
+                            penalty_type = penalty_type, smoothness = smoothness),
+                            (prev_penalty, min(custom_ub, max_penalty)), Bisection(); xatol = xatol, verbose = false)
                         new_penalty = new_penalty - xatol;
                     catch 
-                        new_penalty = custom_ub;
+                        new_penalty = min(custom_ub, max_penalty);
                     end
                     if abs(prev_penalty - new_penalty) > 2 * xatol # adjustment to make sure tolerance isn't an issue
                         new_penalty = new_penalty - xatol;
@@ -752,7 +985,9 @@ function smc(problem::NPDemand.NPDProblem;
         end
         
         # Calculate normalized importance weights
-        log_smc_weights, ~ = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, new_penalty, problem)
+        log_smc_weights, _logprior_t = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, new_penalty, problem,
+            logprior_t_minus_1 = current_logprior, penalty_distances = penalty_distances,
+            penalty_type = penalty_type, smoothness = smoothness)
 
         smc_weights .= exp.(log_smc_weights .- maximum(log_smc_weights))
         smc_weights .= smc_weights ./ sum(smc_weights)
@@ -778,21 +1013,19 @@ function smc(problem::NPDemand.NPDProblem;
         thetas_sieve = thetas_sieve[indices,:]
         smc_weights .= 1.0 / nparticles
 
-        # Stoage
-        logprior_storage = zeros(eltype(thetas), nparticles)
-        loglike_storage = zeros(eltype(thetas), nparticles)
-
         # 3.4 Perturb particles via MH step(s)
         n_accept = zeros(nparticles);
-        proposal_distribution = [];
-        try 
-            Sigma = cov(thetas); # covariance matrix parameters, used to improve proposals
-            Sigma = Sigma .* 2.38^2 ./ size(Sigma,1); # scale covariance matrix
-            proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
-        catch
-            @warn "Covariance matrix is not positive definite. Using identity matrix instead. If using a non-adaptive grid, you may wish to increase `grid_points`."
-            Sigma = Diagonal(ones(size(cov(thetas),1)))
-            proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
+        proposal_distribution = nothing;
+        if smc_kernel == :mh
+            try
+                Sigma = cov(thetas); # covariance matrix parameters, used to improve proposals
+                Sigma = Sigma .* 2.38^2 ./ size(Sigma,1); # scale covariance matrix
+                proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
+            catch
+                @warn "Covariance matrix is not positive definite. Using identity matrix instead. If using a non-adaptive grid, you may wish to increase `grid_points`."
+                Sigma = Diagonal(ones(size(cov(thetas),1)))
+                proposal_distribution = MvNormal(zeros(length(thetas[1,:])), step_size .* Sigma);
+            end
         end
         
         # One RNG per thread — created before the parallel region so each thread
@@ -803,11 +1036,11 @@ function smc(problem::NPDemand.NPDProblem;
 
         prog = Threads.Atomic{Int}(0)
 
-        # Async monitor: reads the atomic counter every 0.5s and overwrites the progress line.
+        # Async monitor: reads the atomic counter and overwrites the progress line.
         monitor = @async begin
             while (n_done = prog[]) < nparticles
                 print(@sprintf("\r  MH steps: %d/%d (%.0f%%)", n_done, nparticles, 100.0*n_done/nparticles))
-                sleep(0.5)
+                sleep(0.05)
             end
             println(@sprintf("\r  MH steps: %d/%d (100%%)  ", nparticles, nparticles))
         end
@@ -816,51 +1049,75 @@ function smc(problem::NPDemand.NPDProblem;
             tid  = Threads.threadid()
             rng  = thread_rngs[tid]
             reparameterization_storage = reparameterization_bufs[tid]
-            for mh_iter in 1:mh_steps
-                # Re-seed per (particle, step) so each draw is independent
-                Random.seed!(rng, seed + i + mh_iter * nparticles)
-
-                # Propose new values + reparameterize + map to sieve
-                thetai_new       = thetas[i,:] + rand(rng, proposal_distribution)
-                betai_new        = NPDemand.reparameterization(thetai_new[1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
-                thetai_sieve_new = NPDemand.map_to_sieve(betai_new, thetai_new[(nbeta+1):end], problem.exchange, nbetas, problem, sieve_type=st)
-
-                # Evaluate prior
-                logprior_new     = logprior_smc(thetai_new[1:nbeta], thetai_new[(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetai_sieve_new, new_penalty, problem)
-                if mh_iter == 1
-                    logprior_old = logprior_smc(thetas[i,1:nbeta], thetas[i,(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetas_sieve[i,:], new_penalty, problem)
-                else
-                    logprior_old = logprior_storage[i]
+            if smc_kernel == :hmc
+                gradient_workspace = gradient_workspaces[tid]
+                Random.seed!(rng, seed + i)
+                z = Vector{Float64}(undef, size(thetas, 2))
+                @views begin
+                    z[1:nbeta] .= (thetas[i,1:nbeta] .- beta_μ) ./ sqrt_vbeta
+                    z[(nbeta+1):length(z)] .= (thetas[i,(nbeta+1):size(thetas,2)] .- gamma_μ) ./ sqrt_vgamma
                 end
+                logtarget_grad! = (grad_current, z_current) -> smc_logtarget_grad!(grad_current, z_current,
+                    problem, nbetas, lbs, parameter_order,
+                    beta_μ, sqrt_vbeta, gamma_μ, sqrt_vgamma,
+                    yZX_β, XZy_β, XX_ββ, XX_βγ,
+                    yZX_γ_sum, XZy_γ_sum, XX_γγ_sum,
+                    starts_params, ends_params, group_for_product, nproducts,
+                    new_penalty, smoothness, st, smc_prices, smc_shares,
+                    gradient_workspace)
+                _logp, accepted = smc_hmc_rejuvenate!(z, logtarget_grad!, rng, n_kernel_steps, hmc_step_size, hmc_leapfrog_steps)
+                smc_z_to_state!(@view(thetas[i,:]), @view(thetas_sieve[i,:]), z, problem, nbetas,
+                    lbs, parameter_order, beta_μ, sqrt_vbeta, gamma_μ, sqrt_vgamma, st)
+                n_accept[i] = accepted
+            else
+                betai_old = NPDemand.reparameterization(thetas[i,1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
+                gamma_old = @view thetas[i,(nbeta+1):size(thetas,2)]
+                logprior_old = logprior_smc(thetas[i,1:nbeta], gamma_old, beta_μ, beta_inv_var, beta_logdet, gamma_μ, gamma_inv_var, gamma_logdet) +
+                               logpenalty_smc(thetas_sieve[i,:], new_penalty, problem;
+                                   penalty_type = penalty_type, smoothness = smoothness,
+                                   prices = smc_prices, shares = smc_shares)
+                loglike_old = gmm_loglike(betai_old, gamma_old)
 
-                # Evaluate likelihood
-                loglike_new     = -0.5 * gmm(reshape(thetai_sieve_new, size(thetas_sieve,2), 1), problem, problem.weight_matrices)
-                if mh_iter == 1
-                    loglike_old = -0.5 * gmm(reshape(thetas_sieve[i,:], size(thetas_sieve,2), 1), problem, problem.weight_matrices)
-                else
-                    loglike_old = loglike_storage[i]
-                end
+                for mh_iter in 1:n_kernel_steps
+                    # Re-seed per (particle, step) so each draw is independent
+                    Random.seed!(rng, seed + i + mh_iter * nparticles)
 
-                # Calculate MH acceptance ratio
-                logratio = loglike_new + logprior_new - loglike_old - logprior_old
-                if rand(rng) < exp(logratio)
-                    thetas[i,:]         = thetai_new
-                    thetas_sieve[i,:]   = thetai_sieve_new
-                    logprior_storage[i] = logprior_new
-                    loglike_storage[i]  = loglike_new
-                    n_accept[i]        += 1
+                    # Propose new values + reparameterize + map to sieve
+                    thetai_new       = thetas[i,:] + rand(rng, proposal_distribution)
+                    betai_new        = NPDemand.reparameterization(thetai_new[1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
+                    gamma_new        = @view thetai_new[(nbeta+1):length(thetai_new)]
+                    thetai_sieve_new = NPDemand.map_to_sieve(betai_new, gamma_new, problem.exchange, nbetas, problem, sieve_type=st)
+
+                    # Evaluate prior
+                    logprior_new     = logprior_smc(thetai_new[1:nbeta], gamma_new, beta_μ, beta_inv_var, beta_logdet, gamma_μ, gamma_inv_var, gamma_logdet) +
+                                       logpenalty_smc(thetai_sieve_new, new_penalty, problem;
+                                           penalty_type = penalty_type, smoothness = smoothness,
+                                           prices = smc_prices, shares = smc_shares)
+
+                    # Evaluate likelihood
+                    loglike_new = gmm_loglike(betai_new, gamma_new)
+
+                    # Calculate MH acceptance ratio
+                    logratio = loglike_new + logprior_new - loglike_old - logprior_old
+                    if log(rand(rng)) < logratio
+                        thetas[i,:]         = thetai_new
+                        thetas_sieve[i,:]   = thetai_sieve_new
+                        logprior_old        = logprior_new
+                        loglike_old         = loglike_new
+                        n_accept[i]        += 1
+                    end
+                    GC.safepoint()
                 end
-                GC.safepoint()
             end
             Threads.atomic_add!(prog, 1)
         end
         wait(monitor)
-        n_accept = n_accept ./ mh_steps
+        n_accept = n_accept ./ n_kernel_steps
         accept_rate = round(mean(n_accept), digits = 2);
         # println("\n Average MH acceptance rate: $(accept_rate)")
 
         # Check constraints 
-        violation_dict_array = [report_constraint_violations(problem, params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)];
+        violation_dict_array = [report_constraint_violations_inner(problem, params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)];
         violation_dict = Dict{Symbol, Float64}()
         for k in keys(violation_dict_array[1])
             push!(violation_dict, k => 
@@ -914,6 +1171,25 @@ function logpdf_mvn(mu::Vector, chol::Cholesky, logdet_sigma::Real, theta::Abstr
     return -0.5 * (length(mu) * log(2π) + logdet_sigma + quadratic_form)
 end
 
+function logpdf_diag_mvn(mu::AbstractVector, inv_var::AbstractVector, logdet_sigma::Real, theta::AbstractVector)
+    q = zero(promote_type(eltype(theta), eltype(inv_var)))
+    @inbounds for i in eachindex(mu, inv_var, theta)
+        d = theta[i] - mu[i]
+        q += d * d * inv_var[i]
+    end
+    return -0.5 * (length(mu) * log(2π) + logdet_sigma + q)
+end
+
+function particle_logpenalty(thetas_sieve, penalty_distances, i, penalty, problem;
+    penalty_type = :count,
+    smoothness::Real = 20.0)
+    if penalty_distances === nothing
+        return logpenalty_smc(thetas_sieve[i,:], penalty, problem;
+            penalty_type = penalty_type, smoothness = smoothness)
+    end
+    return logpenalty_smc(view(penalty_distances, i, :), penalty)
+end
+
 # function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T}, 
 #     prev_penalty::Real, problem::NPDemand.NPDProblem, 
 #     ess_threshold::Real;
@@ -935,12 +1211,18 @@ end
 function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T}, 
     prev_penalty::Real, problem::NPDemand.NPDProblem, 
     ess_threshold::Real;
-    logprior_t_minus_1 = zeros(T, size(thetas_sieve,1))) where T
+    logprior_t_minus_1 = zeros(T, size(thetas_sieve,1)),
+    penalty_distances = nothing,
+    penalty_type = :count,
+    smoothness::Real = 20.0) where T
 
-    logwts, ~ = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, p[1], 
+    logwts, _unused = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, p[1],
             problem, 
             logprior_t_minus_1 = logprior_t_minus_1, 
-            multithread = true)
+            multithread = true,
+            penalty_distances = penalty_distances,
+            penalty_type = penalty_type,
+            smoothness = smoothness)
 
     num = 2*maximum(logwts) + 2*log(sum(exp.(logwts .- maximum(logwts))))
     denom = maximum(2*logwts) + log(sum(exp.(2*logwts .- maximum(2*logwts))))
@@ -953,35 +1235,33 @@ function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T},
     end
 end
 
-function get_importance_weights(thetas_sieve::Matrix{T}, smc_weights::Vector{T}, 
-    penalty_prev::Real, penalty_new::Float64, problem::NPDemand.NPDProblem; 
+function get_importance_weights(thetas_sieve::Matrix{T}, smc_weights::Vector{T},
+    penalty_prev::Real, penalty_new::Real, problem::NPDemand.NPDProblem;
     new_log_weights     = similar(smc_weights),
     logprior_t          = zeros(T, size(thetas_sieve,1)),
     logprior_t_minus_1  = zeros(T, size(thetas_sieve,1)),
-    multithread         = false) where T<:Real
+    multithread         = false,
+    penalty_distances   = nothing,
+    penalty_type        = :count,
+    smoothness::Real    = 20.0) where T<:Real
 
+    has_old_logprior = any(!iszero, logprior_t_minus_1)
     if multithread == false 
         for i in axes(thetas_sieve,1)
-            particle_sieve_i          = thetas_sieve[i,:]
-            logprior_t[i]             = logpenalty_smc(particle_sieve_i, penalty_new, problem)
-            if logprior_t_minus_1     == zeros(T, size(thetas_sieve,1))
-                logprior_t_minus_1_i  = logpenalty_smc(particle_sieve_i, penalty_prev, problem)
-                log_prior_ratio           = logprior_t[i] - logprior_t_minus_1_i
-            else
-                log_prior_ratio           = logprior_t[i] - logprior_t_minus_1[i]
-            end
+            logprior_t[i]             = particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_new, problem;
+                penalty_type = penalty_type, smoothness = smoothness)
+            logprior_old              = has_old_logprior ? logprior_t_minus_1[i] : particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_prev, problem;
+                penalty_type = penalty_type, smoothness = smoothness)
+            log_prior_ratio           = logprior_t[i] - logprior_old
             new_log_weights[i]            = log(smc_weights[i]) + log_prior_ratio;
         end
     else
         Threads.@threads for i in axes(thetas_sieve,1)
-            particle_sieve_i          = thetas_sieve[i,:]
-            logprior_t[i]             = logpenalty_smc(particle_sieve_i, penalty_new, problem)
-            if logprior_t_minus_1     == zeros(T, size(thetas_sieve,1))
-                logprior_t_minus_1_i  = logpenalty_smc(particle_sieve_i, penalty_prev, problem)
-                log_prior_ratio           = logprior_t[i] - logprior_t_minus_1_i
-            else
-                log_prior_ratio           = logprior_t[i] - logprior_t_minus_1[i]
-            end
+            logprior_t[i]             = particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_new, problem;
+                penalty_type = penalty_type, smoothness = smoothness)
+            logprior_old              = has_old_logprior ? logprior_t_minus_1[i] : particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_prev, problem;
+                penalty_type = penalty_type, smoothness = smoothness)
+            log_prior_ratio           = logprior_t[i] - logprior_old
             new_log_weights[i]            = log(smc_weights[i]) + log_prior_ratio;
         end
     end
@@ -1030,7 +1310,265 @@ function logprior_smc(particle_betastar, particle_gamma,
     return out_beta + out_gamma
 end
 
-function approx_cdf_normal01(x::Real)::Float64
+function logprior_smc(particle_betastar, particle_gamma,
+                      beta_μ, beta_inv_var::AbstractVector, beta_logdet::Real,
+                      gamma_μ, gamma_inv_var::AbstractVector, gamma_logdet::Real)
+    return logpdf_diag_mvn(beta_μ, beta_inv_var, beta_logdet, particle_betastar) +
+           logpdf_diag_mvn(gamma_μ, gamma_inv_var, gamma_logdet, particle_gamma)
+end
+
+function smooth_positive(x::Real, smoothness::Real)
+    sx = smoothness * x
+    if sx > 0
+        return x + log1p(exp(-sx)) / smoothness
+    else
+        return log1p(exp(sx)) / smoothness
+    end
+end
+
+smooth_abs(x::Real, eps::Real) = sqrt(x * x + eps * eps)
+
+function smooth_positive_derivative(x::Real, smoothness::Real)
+    sx = smoothness * x
+    if sx >= 0
+        return inv(1 + exp(-sx))
+    else
+        exp_sx = exp(sx)
+        return exp_sx / (1 + exp_sx)
+    end
+end
+
+smooth_abs_derivative(x::Real, eps::Real) = x / smooth_abs(x, eps)
+
+function smooth_constraint_distance_grad!(grad_jacobian, jacobian::AbstractMatrix,
+        constraints, exchange, smoothness::Real, abs_eps::Real)
+    fill!(grad_jacobian, 0)
+    distance = zero(eltype(jacobian))
+    denom = length(constraints)
+    denom == 0 && return distance
+    J = size(jacobian, 1)
+
+    if :monotone in constraints
+        scale = inv(denom * J)
+        @inbounds for j in 1:J
+            x = jacobian[j,j]
+            distance += scale * smooth_positive(x, smoothness)
+            grad_jacobian[j,j] += scale * smooth_positive_derivative(x, smoothness)
+        end
+    end
+
+    if :all_substitutes in constraints
+        distance += smooth_signed_offdiag_grad!(grad_jacobian, jacobian, smoothness, -1.0, denom)
+    end
+    if :all_complements in constraints
+        distance += smooth_signed_offdiag_grad!(grad_jacobian, jacobian, smoothness, 1.0, denom)
+    end
+    if :subs_in_group in constraints
+        distance += smooth_signed_group_grad!(grad_jacobian, jacobian, exchange, smoothness, -1.0, denom)
+    end
+    if :complements_in_group in constraints
+        distance += smooth_signed_group_grad!(grad_jacobian, jacobian, exchange, smoothness, 1.0, denom)
+    end
+    if :subs_across_group in constraints
+        distance += smooth_signed_across_group_grad!(grad_jacobian, jacobian, exchange, smoothness, -1.0, denom)
+    end
+    if :complements_across_group in constraints
+        distance += smooth_signed_across_group_grad!(grad_jacobian, jacobian, exchange, smoothness, 1.0, denom)
+    end
+
+    if :diagonal_dominance_all in constraints
+        scale = inv(denom * J)
+        @inbounds for col in 1:J
+            offdiag_sum = zero(eltype(jacobian))
+            for row in 1:J
+                row == col || (offdiag_sum += jacobian[row,col])
+            end
+            offdiag_abs = smooth_abs(offdiag_sum, abs_eps)
+            diag_abs = smooth_abs(jacobian[col,col], abs_eps)
+            margin = offdiag_abs - diag_abs
+            slope = scale * smooth_positive_derivative(margin, smoothness)
+            distance += scale * smooth_positive(margin, smoothness)
+
+            offdiag_derivative = smooth_abs_derivative(offdiag_sum, abs_eps)
+            for row in 1:J
+                row == col || (grad_jacobian[row,col] += slope * offdiag_derivative)
+            end
+            grad_jacobian[col,col] -= slope * smooth_abs_derivative(jacobian[col,col], abs_eps)
+        end
+    end
+    return distance
+end
+
+function smooth_signed_offdiag_grad!(grad_jacobian, jacobian, smoothness::Real, sign::Real, denom::Int)
+    J = size(jacobian, 1)
+    n = J * (J - 1)
+    n == 0 && return zero(eltype(jacobian))
+    scale = inv(denom * n)
+    distance = zero(eltype(jacobian))
+    @inbounds for col in 1:J, row in 1:J
+        row == col && continue
+        x = sign * jacobian[row,col]
+        distance += scale * smooth_positive(x, smoothness)
+        grad_jacobian[row,col] += scale * sign * smooth_positive_derivative(x, smoothness)
+    end
+    return distance
+end
+
+function smooth_signed_group_grad!(grad_jacobian, jacobian, exchange, smoothness::Real, sign::Real, denom::Int)
+    n = sum(length(group) * (length(group) - 1) for group in exchange)
+    n == 0 && return zero(eltype(jacobian))
+    scale = inv(denom * n)
+    distance = zero(eltype(jacobian))
+    @inbounds for group in exchange, col in group, row in group
+        row == col && continue
+        x = sign * jacobian[row,col]
+        distance += scale * smooth_positive(x, smoothness)
+        grad_jacobian[row,col] += scale * sign * smooth_positive_derivative(x, smoothness)
+    end
+    return distance
+end
+
+function smooth_signed_across_group_grad!(grad_jacobian, jacobian, exchange, smoothness::Real, sign::Real, denom::Int)
+    if length(exchange) != 2
+        error("Cannot use `across_group` constraints with only one exchangeable group")
+    end
+    J = maximum(union(exchange[1], exchange[2]))
+    n = sum(length(group) * (J - length(group)) for group in exchange)
+    n == 0 && return zero(eltype(jacobian))
+    scale = inv(denom * n)
+    distance = zero(eltype(jacobian))
+    @inbounds for group in exchange, row in group, col in 1:J
+        col in group && continue
+        x = sign * jacobian[row,col]
+        distance += scale * smooth_positive(x, smoothness)
+        grad_jacobian[row,col] += scale * sign * smooth_positive_derivative(x, smoothness)
+    end
+    return distance
+end
+
+function smooth_diag_distance(jacobian::AbstractMatrix, smoothness::Real)
+    total = zero(eltype(jacobian))
+    J = size(jacobian, 1)
+    @inbounds for j in 1:J
+        total += smooth_positive(jacobian[j,j], smoothness)
+    end
+    return total / J
+end
+
+function smooth_offdiag_distance(jacobian::AbstractMatrix, smoothness::Real, sign::Real)
+    total = zero(eltype(jacobian))
+    J = size(jacobian, 1)
+    n = 0
+    @inbounds for col in 1:J, row in 1:J
+        row == col && continue
+        total += smooth_positive(sign * jacobian[row,col], smoothness)
+        n += 1
+    end
+    return n == 0 ? total : total / n
+end
+
+function smooth_group_distance(jacobian::AbstractMatrix, exchange, smoothness::Real, sign::Real)
+    total = zero(eltype(jacobian))
+    n = 0
+    @inbounds for group in exchange, col in group, row in group
+        row == col && continue
+        total += smooth_positive(sign * jacobian[row,col], smoothness)
+        n += 1
+    end
+    return n == 0 ? total : total / n
+end
+
+function smooth_across_group_distance(jacobian::AbstractMatrix, exchange, smoothness::Real, sign::Real)
+    if length(exchange) != 2
+        error("Cannot use `across_group` constraints with only one exchangeable group")
+    end
+    total = zero(eltype(jacobian))
+    J = maximum(union(exchange[1], exchange[2]))
+    n = 0
+    @inbounds for group in exchange, row in group, col in 1:J
+        col in group && continue
+        total += smooth_positive(sign * jacobian[row,col], smoothness)
+        n += 1
+    end
+    return n == 0 ? total : total / n
+end
+
+function smooth_diagonal_dominance_distance(jacobian::AbstractMatrix, smoothness::Real, abs_eps::Real)
+    total = zero(eltype(jacobian))
+    J = size(jacobian, 1)
+    @inbounds for col in 1:J
+        offdiag_sum = zero(eltype(jacobian))
+        for row in 1:J
+            row == col || (offdiag_sum += jacobian[row,col])
+        end
+        margin = smooth_abs(offdiag_sum, abs_eps) - smooth_abs(jacobian[col,col], abs_eps)
+        total += smooth_positive(margin, smoothness)
+    end
+    return total / J
+end
+
+function smooth_constraint_distances(particle_sieve::AbstractArray{T},
+        problem::NPDemand.NPDProblem,
+        prices::AbstractMatrix,
+        shares::AbstractMatrix;
+        smoothness::Real = 20.0,
+        abs_eps::Real = 1e-8) where T
+    constraints = problem.constraints
+    distances = Vector{promote_type(T, Float64)}(undef, size(problem.data, 1))
+    if isempty(constraints) || constraints == [:exchangeability]
+        fill!(distances, zero(eltype(distances)))
+        return distances
+    end
+
+    jacobians = elast_mat_zygote(particle_sieve, problem, problem.tempmats;
+        at = prices,
+        s = shares)
+    denom = length(constraints)
+
+    @inbounds for i in eachindex(jacobians)
+        jacobian = jacobians[i]
+        distance = zero(eltype(distances))
+        if :monotone in constraints
+            distance += smooth_diag_distance(jacobian, smoothness)
+        end
+        if :all_substitutes in constraints
+            distance += smooth_offdiag_distance(jacobian, smoothness, -1.0)
+        end
+        if :diagonal_dominance_all in constraints
+            distance += smooth_diagonal_dominance_distance(jacobian, smoothness, abs_eps)
+        end
+        if :subs_in_group in constraints
+            distance += smooth_group_distance(jacobian, problem.exchange, smoothness, -1.0)
+        end
+        if :subs_across_group in constraints
+            distance += smooth_across_group_distance(jacobian, problem.exchange, smoothness, -1.0)
+        end
+        if :all_complements in constraints
+            distance += smooth_offdiag_distance(jacobian, smoothness, 1.0)
+        end
+        if :complements_in_group in constraints
+            distance += smooth_group_distance(jacobian, problem.exchange, smoothness, 1.0)
+        end
+        if :complements_across_group in constraints
+            distance += smooth_across_group_distance(jacobian, problem.exchange, smoothness, 1.0)
+        end
+        distances[i] = distance / denom
+    end
+    return distances
+end
+
+function smooth_constraint_distances(particle_sieve::AbstractArray{T},
+        problem::NPDemand.NPDProblem;
+        smoothness::Real = 20.0,
+        abs_eps::Real = 1e-8) where T
+    return smooth_constraint_distances(particle_sieve, problem,
+        Matrix(problem.data[!,r"prices"]),
+        Matrix(problem.data[!,r"shares"]);
+        smoothness = smoothness,
+        abs_eps = abs_eps)
+end
+
+function approx_cdf_normal01(x::Real)
     # Constants
     a1 = 0.254829592
     a2 = -0.284496736
@@ -1050,6 +1588,32 @@ function approx_cdf_normal01(x::Real)::Float64
     return 0.5 * (1.0 + sign * erf_approx)
 end
 
+function approx_logcdf_normal01_grad(x::Real)
+    a1 = 0.254829592
+    a2 = -0.284496736
+    a3 = 1.421413741
+    a4 = -1.453152027
+    a5 = 1.061405429
+    p  = 0.3275911
+
+    sign = x < 0 ? -1 : 1
+    abs_x = abs(x) / sqrt(2.0)
+    t = 1.0 / (1.0 + p * abs_x)
+    y = (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t
+    exp_term = exp(-abs_x^2)
+    erf_approx = 1.0 - y * exp_term
+    cdf = 0.5 * (1.0 + sign * erf_approx)
+    if cdf <= 0 || !isfinite(cdf)
+        return -Inf, zero(x)
+    end
+
+    dy_dt = a1 + 2 * a2 * t + 3 * a3 * t^2 + 4 * a4 * t^3 + 5 * a5 * t^4
+    dy_dabs = -p * t^2 * dy_dt
+    dq_dabs = exp_term * (dy_dabs - 2 * abs_x * y)
+    dcdf_dx = -0.5 * dq_dabs / sqrt(2.0)
+    return log(cdf), dcdf_dx / cdf
+end
+
 function get_tolerance(p::Float64)
     mintol = 1e-4
     if p==0
@@ -1061,11 +1625,110 @@ function get_tolerance(p::Float64)
     return out
 end
 
-function logpenalty_smc(particle_sieve::Array{T}, penalty::Real, problem::NPDemand.NPDProblem) where T
-    distance    = report_constraint_violations_inner(problem, params = particle_sieve, verbose = false, output = "frac")
-    # out         = 1 * sum(log.(cdf.(Normal(0,1), -2 * penalty * distance)))
-    out         = 1 * sum(log.(approx_cdf_normal01.(-2 * penalty * distance)))
+function smc_penalty_distances(thetas_sieve::Matrix, problem::NPDemand.NPDProblem;
+    multithread = false,
+    penalty_type = :count,
+    smoothness::Real = 20.0)
+    out = Matrix{Float64}(undef, size(thetas_sieve, 1), size(problem.data, 1))
+    prices = penalty_type == :smooth ? Matrix(problem.data[!,r"prices"]) : nothing
+    shares = penalty_type == :smooth ? Matrix(problem.data[!,r"shares"]) : nothing
+    loop = axes(thetas_sieve, 1)
+    if multithread
+        Threads.@threads for i in loop
+            out[i,:] .= penalty_type == :smooth ?
+                smooth_constraint_distances(thetas_sieve[i,:], problem, prices, shares; smoothness = smoothness) :
+                report_constraint_violations_inner(problem, params = thetas_sieve[i,:], verbose = false, output = "frac")
+        end
+    else
+        for i in loop
+            out[i,:] .= penalty_type == :smooth ?
+                smooth_constraint_distances(thetas_sieve[i,:], problem, prices, shares; smoothness = smoothness) :
+                report_constraint_violations_inner(problem, params = thetas_sieve[i,:], verbose = false, output = "frac")
+        end
+    end
     return out
+end
+
+function logpenalty_smc(distance::AbstractVector, penalty::Real)
+    return sum(log.(approx_cdf_normal01.(-2 .* penalty .* distance)))
+end
+
+function smooth_logpenalty_grad!(grad_sieve, particle_sieve::AbstractArray,
+        problem::NPDemand.NPDProblem, prices::AbstractMatrix, shares::AbstractMatrix,
+        penalty::Real; smoothness::Real = 20.0, abs_eps::Real = 1e-8,
+        workspace = nothing)
+    fill!(grad_sieve, 0)
+    constraints = problem.constraints
+    if isempty(constraints) || constraints == [:exchangeability]
+        return size(problem.data, 1) * log(approx_cdf_normal01(0.0))
+    end
+
+    J = length(problem.Xvec)
+    indexes = [0; cumsum(size.(problem.Xvec, 2))]
+    if workspace === nothing
+        jacobian_inverse = Matrix{eltype(particle_sieve)}(undef, J, J)
+        inverse_derivative = similar(jacobian_inverse)
+        grad_jacobian = similar(jacobian_inverse)
+        grad_inverse = similar(jacobian_inverse)
+        grad_A = similar(jacobian_inverse)
+        tmp_A = similar(jacobian_inverse)
+    else
+        jacobian_inverse = workspace.jacobian_inverse
+        inverse_derivative = workspace.inverse_derivative
+        grad_jacobian = workspace.grad_jacobian
+        grad_inverse = workspace.grad_inverse
+        grad_A = workspace.grad_A
+        tmp_A = workspace.tmp_A
+    end
+    logpenalty = zero(eltype(particle_sieve))
+
+    for market in axes(prices, 1)
+        @inbounds for row in 1:J, col in 1:J
+            theta_block = @view particle_sieve[(indexes[row]+1):indexes[row+1]]
+            temp_row = @view problem.tempmats[row,col][market,:]
+            inverse_derivative[row,col] = dot(temp_row, theta_block)
+        end
+
+        try
+            jacobian_inverse .= -inv(inverse_derivative)
+        catch
+            fill!(grad_sieve, 0)
+            return -Inf
+        end
+
+        distance = smooth_constraint_distance_grad!(grad_jacobian, jacobian_inverse,
+            constraints, problem.exchange, smoothness, abs_eps)
+        logcdf, dlogcdf_dx = approx_logcdf_normal01_grad(-2 * penalty * distance)
+        if !isfinite(logcdf)
+            fill!(grad_sieve, 0)
+            return -Inf
+        end
+        logpenalty += logcdf
+
+        grad_inverse .= (-2 * penalty * dlogcdf_dx) .* grad_jacobian
+        mul!(tmp_A, transpose(jacobian_inverse), grad_inverse)
+        mul!(grad_A, tmp_A, transpose(jacobian_inverse))
+
+        @inbounds for row in 1:J, col in 1:J
+            theta_grad = @view grad_sieve[(indexes[row]+1):indexes[row+1]]
+            temp_row = @view problem.tempmats[row,col][market,:]
+            theta_grad .+= grad_A[row,col] .* temp_row
+        end
+    end
+    return logpenalty
+end
+
+function logpenalty_smc(particle_sieve::Array{T}, penalty::Real, problem::NPDemand.NPDProblem;
+    penalty_type = :count,
+    smoothness::Real = 20.0,
+    prices = nothing,
+    shares = nothing) where T
+    distance = penalty_type == :smooth ?
+        (prices === nothing || shares === nothing ?
+            smooth_constraint_distances(particle_sieve, problem; smoothness = smoothness) :
+            smooth_constraint_distances(particle_sieve, problem, prices, shares; smoothness = smoothness)) :
+        report_constraint_violations_inner(problem, params = particle_sieve, verbose = false, output = "frac")
+    return logpenalty_smc(distance, penalty)
 end
 
 function loglikelihood(problem::NPDemand.NPDProblem, particle_betastar::Vector{T}, particle_gamma::Vector{T}, nbetas) where T
@@ -1094,7 +1757,7 @@ function fe_posteriors(problem; FE::Union{Array, String} = [])
     num_index_vars = length(problem.index_vars);
     
     df_fe = DataFrame()
-    for (~, i) in enumerate(coefs_for_this_fe)
+    for (_, i) in enumerate(coefs_for_this_fe)
         val = problem.fe_param_mapping[i].value
         column_name = "Value$val"
         if i ==1 
