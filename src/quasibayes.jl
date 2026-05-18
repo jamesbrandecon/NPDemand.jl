@@ -611,6 +611,191 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
         param_names)
 end
 
+function logpdf_mvn(mu::Vector{T}, Sigma::Matrix{T}, theta::Vector{T}) where T<:Real
+    n = length(mu)
+    L = cholesky(Sigma).L
+    diff = theta - mu
+    quadratic_form = sum((L \ diff) .^ 2)
+    logdetSigma = 2.0 * sum(log.(diag(L)))
+    logpdf = -0.5 * (n * log(2 * π) + logdetSigma + quadratic_form)
+    return logpdf
+end
+
+function logpdf_mvn(mu::Vector, chol::Cholesky, logdet_sigma::Real, theta::AbstractVector)
+    diff = theta .- mu
+    quadratic_form = sum((chol.L \ diff) .^ 2)
+    return -0.5 * (length(mu) * log(2π) + logdet_sigma + quadratic_form)
+end
+
+function logpdf_diag_mvn(mu::AbstractVector, inv_var::AbstractVector, logdet_sigma::Real, theta::AbstractVector)
+    q = zero(promote_type(eltype(theta), eltype(inv_var)))
+    @inbounds for i in eachindex(mu, inv_var, theta)
+        d = theta[i] - mu[i]
+        q += d * d * inv_var[i]
+    end
+    return -0.5 * (length(mu) * log(2π) + logdet_sigma + q)
+end
+
+function approx_cdf_normal01(x::Real)::Float64
+    # Constants
+    a1 = 0.254829592
+    a2 = -0.284496736
+    a3 = 1.421413741
+    a4 = -1.453152027
+    a5 = 1.061405429
+    p  = 0.3275911
+
+    sign = x < 0 ? -1 : 1
+    abs_x = abs(x) / sqrt(2.0)
+
+    # Approximation of the error function using a series expansion
+    t = 1.0 / (1.0 + p * abs_x)
+    y = (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t
+    erf_approx = 1.0 - y * exp(-abs_x^2)
+
+    return 0.5 * (1.0 + sign * erf_approx)
+end
+
+function get_tolerance(p::Float64)
+    mintol = 1e-4
+    if p==0
+        out = mintol
+    else
+        ndecimals = floor(log10(p))
+        out = max(mintol, floor(10^ndecimals, digits=Int(abs(ndecimals))))
+    end
+    return out
+end
+
+function geometric_grid(A::Float64, B::Float64, n::Int)
+    r = (B / A)^(1 / (n - 1))  # Common ratio for geometric progression
+    grid = [A * r^(i - 1) for i in 1:n]
+    return grid
+end
+
+function make_prior_dists(prior, gamma_length)
+    betabar     = prior["betabar"]
+    gammabar    = prior["gammabar"]
+    vbeta       = prior["vbeta"]
+    vgamma      = prior["vgamma"]
+    ngamma      = gamma_length-1;
+
+    beta_dist   = MvNormal(betabar, Diagonal(vbeta))
+    gamma_dist  = MvNormal(gammabar, Diagonal(fill(vgamma, ngamma)))
+
+    return beta_dist, gamma_dist
+end
+
+function logprior_smc(particle_betastar, particle_gamma, beta_μ, beta_Σ, gamma_μ, gamma_Σ)
+    out_beta    = logpdf_mvn(beta_μ, beta_Σ, particle_betastar)
+    out_gamma   = logpdf_mvn(gamma_μ, gamma_Σ, particle_gamma)
+    return out_beta + out_gamma
+end
+
+function logprior_smc(particle_betastar, particle_gamma,
+                      beta_μ, beta_inv_var::AbstractVector, beta_logdet::Real,
+                      gamma_μ, gamma_inv_var::AbstractVector, gamma_logdet::Real)
+    out_beta  = logpdf_diag_mvn(beta_μ, beta_inv_var, beta_logdet, particle_betastar)
+    out_gamma = logpdf_diag_mvn(gamma_μ, gamma_inv_var, gamma_logdet, particle_gamma)
+    return out_beta + out_gamma
+end
+
+function logprior_smc(particle_betastar, particle_gamma,
+                      beta_μ, chol_beta::Cholesky, logdet_beta::Real,
+                      gamma_μ, chol_gamma::Cholesky, logdet_gamma::Real)
+    out_beta  = logpdf_mvn(beta_μ, chol_beta,  logdet_beta,  particle_betastar)
+    out_gamma = logpdf_mvn(gamma_μ, chol_gamma, logdet_gamma, particle_gamma)
+    return out_beta + out_gamma
+end
+
+function logpenalty_smc(distance::AbstractVector, penalty::Real)
+    return sum(log.(2 .* approx_cdf_normal01.(-penalty .* distance)))
+end
+
+function logpenalty_smc(particle_sieve::Array{T}, penalty::Real, problem::NPDemand.NPDProblem;
+    penalty_type = :frac) where T
+    distance = report_constraint_violations_inner(problem, params = particle_sieve, verbose = false, output = String(penalty_type))
+    return logpenalty_smc(distance, penalty)
+end
+
+function smc_penalty_distances(thetas_sieve::Matrix, problem::NPDemand.NPDProblem;
+    multithread = false,
+    penalty_type = :frac)
+    out = Matrix{Float64}(undef, size(thetas_sieve, 1), size(problem.data, 1))
+    loop = axes(thetas_sieve, 1)
+    output = String(penalty_type)
+    if multithread
+        Threads.@threads for i in loop
+            out[i,:] .= report_constraint_violations_inner(problem, params = thetas_sieve[i,:], verbose = false, output = output)
+        end
+    else
+        for i in loop
+            out[i,:] .= report_constraint_violations_inner(problem, params = thetas_sieve[i,:], verbose = false, output = output)
+        end
+    end
+    return out
+end
+
+function particle_logpenalty(thetas_sieve, penalty_distances, i, penalty, problem;
+    penalty_type = :frac)
+    if penalty_distances === nothing
+        return logpenalty_smc(thetas_sieve[i,:], penalty, problem; penalty_type = penalty_type)
+    end
+    return logpenalty_smc(view(penalty_distances, i, :), penalty)
+end
+
+function get_importance_weights(thetas_sieve::Matrix{T}, smc_weights::Vector{T},
+    penalty_prev::Real, penalty_new::Real, problem::NPDemand.NPDProblem;
+    new_log_weights    = similar(smc_weights),
+    logprior_t         = zeros(T, size(thetas_sieve,1)),
+    logprior_t_minus_1 = zeros(T, size(thetas_sieve,1)),
+    multithread        = false,
+    penalty_distances  = nothing,
+    penalty_type       = :frac) where T<:Real
+
+    has_old_logprior = any(!iszero, logprior_t_minus_1)
+    if multithread == false
+        for i in axes(thetas_sieve,1)
+            logprior_t[i]  = particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_new, problem; penalty_type = penalty_type)
+            logprior_old   = has_old_logprior ? logprior_t_minus_1[i] : particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_prev, problem; penalty_type = penalty_type)
+            new_log_weights[i] = log(smc_weights[i]) + logprior_t[i] - logprior_old
+        end
+    else
+        Threads.@threads for i in axes(thetas_sieve,1)
+            logprior_t[i]  = particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_new, problem; penalty_type = penalty_type)
+            logprior_old   = has_old_logprior ? logprior_t_minus_1[i] : particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_prev, problem; penalty_type = penalty_type)
+            new_log_weights[i] = log(smc_weights[i]) + logprior_t[i] - logprior_old
+        end
+    end
+
+    return new_log_weights, logprior_t
+end
+
+function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T},
+    prev_penalty::Real, problem::NPDemand.NPDProblem,
+    ess_threshold::Real;
+    logprior_t_minus_1 = zeros(T, size(thetas_sieve,1)),
+    penalty_distances = nothing,
+    penalty_type = :frac) where T
+
+    logwts, _unused = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, p[1],
+            problem,
+            logprior_t_minus_1 = logprior_t_minus_1,
+            multithread = true,
+            penalty_distances = penalty_distances,
+            penalty_type = penalty_type)
+
+    num = 2*maximum(logwts) + 2*log(sum(exp.(logwts .- maximum(logwts))))
+    denom = maximum(2*logwts) + log(sum(exp.(2*logwts .- maximum(2*logwts))))
+    log_ess = num - denom
+    exp_log_ess = exp(log_ess)
+    if isfinite(exp_log_ess)
+        return exp_log_ess - ess_threshold
+    else
+        return -ess_threshold;
+    end
+end
+
 function smc(problem::NPDemand.NPDProblem;
     grid_points::Int    = 50,
     max_penalty::Real   = 5,
@@ -916,209 +1101,6 @@ function smc(problem::NPDemand.NPDProblem;
     end
 
     return (; thetas, smc_weights, violations = viol_store, ess = ess_store, penalties = penalty_vec);
-end
-
-function logpdf_mvn(mu::Vector{T}, Sigma::Matrix{T}, theta::Vector{T}) where T<:Real
-    n = length(mu)
-    L = cholesky(Sigma).L
-    diff = theta - mu
-    quadratic_form = sum((L \ diff) .^ 2)
-    logdetSigma = 2.0 * sum(log.(diag(L)))
-    logpdf = -0.5 * (n * log(2 * π) + logdetSigma + quadratic_form)
-    return logpdf
-end
-
-function logpdf_mvn(mu::Vector, chol::Cholesky, logdet_sigma::Real, theta::AbstractVector)
-    diff = theta .- mu
-    quadratic_form = sum((chol.L \ diff) .^ 2)
-    return -0.5 * (length(mu) * log(2π) + logdet_sigma + quadratic_form)
-end
-
-function logpdf_diag_mvn(mu::AbstractVector, inv_var::AbstractVector, logdet_sigma::Real, theta::AbstractVector)
-    q = zero(promote_type(eltype(theta), eltype(inv_var)))
-    @inbounds for i in eachindex(mu, inv_var, theta)
-        d = theta[i] - mu[i]
-        q += d * d * inv_var[i]
-    end
-    return -0.5 * (length(mu) * log(2π) + logdet_sigma + q)
-end
-
-function particle_logpenalty(thetas_sieve, penalty_distances, i, penalty, problem;
-    penalty_type = :frac)
-    if penalty_distances === nothing
-        return logpenalty_smc(thetas_sieve[i,:], penalty, problem; penalty_type = penalty_type)
-    end
-    return logpenalty_smc(view(penalty_distances, i, :), penalty)
-end
-
-# function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T}, 
-#     prev_penalty::Real, problem::NPDemand.NPDProblem, 
-#     ess_threshold::Real;
-#     logprior_t_minus_1 = zeros(T, size(thetas_sieve,1))) where T<:Real
-
-#     if sum(smc_weights)==0 
-#         ess = 0
-#     else 
-#         wts, ~ = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, p[1], problem, logprior_t_minus_1 = logprior_t_minus_1)
-#         if sum(wts) == 0
-#             ess = Inf; # 0
-#         else 
-#             ess = (1 / sum(wts.^2))
-#         end
-#     end
-#     return ess - ess_threshold
-# end
-
-function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T},
-    prev_penalty::Real, problem::NPDemand.NPDProblem,
-    ess_threshold::Real;
-    logprior_t_minus_1 = zeros(T, size(thetas_sieve,1)),
-    penalty_distances = nothing,
-    penalty_type = :frac) where T
-
-    logwts, _unused = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, p[1],
-            problem,
-            logprior_t_minus_1 = logprior_t_minus_1,
-            multithread = true,
-            penalty_distances = penalty_distances,
-            penalty_type = penalty_type)
-
-    num = 2*maximum(logwts) + 2*log(sum(exp.(logwts .- maximum(logwts))))
-    denom = maximum(2*logwts) + log(sum(exp.(2*logwts .- maximum(2*logwts))))
-    log_ess = num - denom
-    exp_log_ess = exp(log_ess)
-    if isfinite(exp_log_ess)
-        return exp_log_ess - ess_threshold
-    else
-        return -ess_threshold;
-    end
-end
-
-function get_importance_weights(thetas_sieve::Matrix{T}, smc_weights::Vector{T},
-    penalty_prev::Real, penalty_new::Real, problem::NPDemand.NPDProblem;
-    new_log_weights    = similar(smc_weights),
-    logprior_t         = zeros(T, size(thetas_sieve,1)),
-    logprior_t_minus_1 = zeros(T, size(thetas_sieve,1)),
-    multithread        = false,
-    penalty_distances  = nothing,
-    penalty_type       = :frac) where T<:Real
-
-    has_old_logprior = any(!iszero, logprior_t_minus_1)
-    if multithread == false
-        for i in axes(thetas_sieve,1)
-            logprior_t[i]  = particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_new, problem; penalty_type = penalty_type)
-            logprior_old   = has_old_logprior ? logprior_t_minus_1[i] : particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_prev, problem; penalty_type = penalty_type)
-            new_log_weights[i] = log(smc_weights[i]) + logprior_t[i] - logprior_old
-        end
-    else
-        Threads.@threads for i in axes(thetas_sieve,1)
-            logprior_t[i]  = particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_new, problem; penalty_type = penalty_type)
-            logprior_old   = has_old_logprior ? logprior_t_minus_1[i] : particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_prev, problem; penalty_type = penalty_type)
-            new_log_weights[i] = log(smc_weights[i]) + logprior_t[i] - logprior_old
-        end
-    end
-
-    return new_log_weights, logprior_t
-end
-
-function geometric_grid(A::Float64, B::Float64, n::Int)
-    r = (B / A)^(1 / (n - 1))  # Common ratio for geometric progression
-    grid = [A * r^(i - 1) for i in 1:n]
-    return grid
-end
-
-function make_prior_dists(prior, gamma_length)
-    betabar     = prior["betabar"]
-    gammabar    = prior["gammabar"]
-    vbeta       = prior["vbeta"]
-    vgamma      = prior["vgamma"]    
-    ngamma      = gamma_length-1;
-    
-    beta_dist   = MvNormal(betabar, Diagonal(vbeta))
-    gamma_dist  = MvNormal(gammabar, Diagonal(fill(vgamma, ngamma)))
-
-    return beta_dist, gamma_dist
-end
-
-function logprior_smc(particle_betastar, particle_gamma, beta_μ, beta_Σ, gamma_μ, gamma_Σ)
-    out_beta    = logpdf_mvn(beta_μ, beta_Σ, particle_betastar)
-    out_gamma   = logpdf_mvn(gamma_μ, gamma_Σ, particle_gamma)
-    return out_beta + out_gamma
-end
-
-function logprior_smc(particle_betastar, particle_gamma,
-                      beta_μ, beta_inv_var::AbstractVector, beta_logdet::Real,
-                      gamma_μ, gamma_inv_var::AbstractVector, gamma_logdet::Real)
-    out_beta  = logpdf_diag_mvn(beta_μ, beta_inv_var, beta_logdet, particle_betastar)
-    out_gamma = logpdf_diag_mvn(gamma_μ, gamma_inv_var, gamma_logdet, particle_gamma)
-    return out_beta + out_gamma
-end
-
-function logprior_smc(particle_betastar, particle_gamma,
-                      beta_μ, chol_beta::Cholesky, logdet_beta::Real,
-                      gamma_μ, chol_gamma::Cholesky, logdet_gamma::Real)
-    out_beta  = logpdf_mvn(beta_μ, chol_beta,  logdet_beta,  particle_betastar)
-    out_gamma = logpdf_mvn(gamma_μ, chol_gamma, logdet_gamma, particle_gamma)
-    return out_beta + out_gamma
-end
-
-function approx_cdf_normal01(x::Real)::Float64
-    # Constants
-    a1 = 0.254829592
-    a2 = -0.284496736
-    a3 = 1.421413741
-    a4 = -1.453152027
-    a5 = 1.061405429
-    p  = 0.3275911
-    
-    sign = x < 0 ? -1 : 1
-    abs_x = abs(x) / sqrt(2.0)
-    
-    # Approximation of the error function using a series expansion
-    t = 1.0 / (1.0 + p * abs_x)
-    y = (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t
-    erf_approx = 1.0 - y * exp(-abs_x^2)
-    
-    return 0.5 * (1.0 + sign * erf_approx)
-end
-
-function get_tolerance(p::Float64)
-    mintol = 1e-4
-    if p==0
-        out = mintol
-    else
-        ndecimals = floor(log10(p))
-        out = max(mintol, floor(10^ndecimals, digits=Int(abs(ndecimals))))
-    end
-    return out
-end
-
-function smc_penalty_distances(thetas_sieve::Matrix, problem::NPDemand.NPDProblem;
-    multithread = false,
-    penalty_type = :frac)
-    out = Matrix{Float64}(undef, size(thetas_sieve, 1), size(problem.data, 1))
-    loop = axes(thetas_sieve, 1)
-    output = String(penalty_type)
-    if multithread
-        Threads.@threads for i in loop
-            out[i,:] .= report_constraint_violations_inner(problem, params = thetas_sieve[i,:], verbose = false, output = output)
-        end
-    else
-        for i in loop
-            out[i,:] .= report_constraint_violations_inner(problem, params = thetas_sieve[i,:], verbose = false, output = output)
-        end
-    end
-    return out
-end
-
-function logpenalty_smc(distance::AbstractVector, penalty::Real)
-    return sum(log.(2 .* approx_cdf_normal01.(-penalty .* distance)))
-end
-
-function logpenalty_smc(particle_sieve::Array{T}, penalty::Real, problem::NPDemand.NPDProblem;
-    penalty_type = :frac) where T
-    distance = report_constraint_violations_inner(problem, params = particle_sieve, verbose = false, output = String(penalty_type))
-    return logpenalty_smc(distance, penalty)
 end
 
 function loglikelihood(problem::NPDemand.NPDProblem, particle_betastar::Vector{T}, particle_gamma::Vector{T}, nbetas) where T
