@@ -304,34 +304,7 @@ function estimate!(problem::NPDProblem;
         end
 
         J = length(Xvec);
-        matrix_storage_dict = Dict();
-        augmented_X = [hcat(Xvec[i], -1 .* Bvec[i][:,2:end]) for i in 1:J]
-        matrix_storage_dict["yZX"] = [(-1 .* df[!,"prices$i"])' * weight_matrices[i+1] * augmented_X[i+1] for i in 0:J-1]
-        matrix_storage_dict["XX"] = [augmented_X[i+1]'* weight_matrices[i+1] * augmented_X[i+1] for i in 0:J-1]
-        matrix_storage_dict["XZy"] = [augmented_X[i+1]' * weight_matrices[i+1]' * (-1 .* df[!,"prices$i"]) for i in 0:J-1]
-
-        # Partitioned matrices for gmm_fast_v2 (avoids map_to_sieve + concatenation in AD path)
-        nθ_v2    = size.(Xvec, 2)
-        yZX_raw  = matrix_storage_dict["yZX"]
-        XX_raw   = matrix_storage_dict["XX"]
-        XZy_raw  = matrix_storage_dict["XZy"]
-        yZX_β_v2 = [copy(parent(yZX_raw[i])[1:nθ_v2[i]])              for i in 1:J]
-        yZX_γ_v2 = [copy(parent(yZX_raw[i])[nθ_v2[i]+1:end])          for i in 1:J]
-        XZy_β_v2 = [XZy_raw[i][1:nθ_v2[i]]                            for i in 1:J]
-        XZy_γ_v2 = [XZy_raw[i][nθ_v2[i]+1:end]                        for i in 1:J]
-        XX_ββ_v2 = [XX_raw[i][1:nθ_v2[i], 1:nθ_v2[i]]                for i in 1:J]
-        XX_βγ_v2 = [XX_raw[i][1:nθ_v2[i], nθ_v2[i]+1:end]            for i in 1:J]
-        XX_γγ_v2 = [XX_raw[i][nθ_v2[i]+1:end, nθ_v2[i]+1:end]        for i in 1:J]
-        matrix_storage_dict["yZX_β"]           = yZX_β_v2
-        matrix_storage_dict["XZy_β"]           = XZy_β_v2
-        matrix_storage_dict["XX_ββ"]           = XX_ββ_v2
-        matrix_storage_dict["XX_βγ"]           = XX_βγ_v2
-        matrix_storage_dict["yZX_γ_sum"]       = sum(yZX_γ_v2)
-        matrix_storage_dict["XZy_γ_sum"]       = sum(XZy_γ_v2)
-        matrix_storage_dict["XX_γγ_sum"]       = sum(XX_γγ_v2)
-        matrix_storage_dict["starts_params_v2"] = [1; cumsum(nbetas)[1:end-1] .+ 1]
-        matrix_storage_dict["ends_params_v2"]   = Vector(cumsum(nbetas))
-        matrix_storage_dict["group_for_product"] = [findfirst(j .∈ exchange) for j in 1:J]
+        matrix_storage_dict = gmm_fast_blocks(problem, nbetas)
 
         # Sample
         verbose && println("Beginning sampling....")
@@ -442,13 +415,18 @@ function smc!(problem::NPDemand.NPDProblem;
     adaptive_tolerance  = false,
     max_violations      = 0.01,
     extra_mh_loops      = 0,
-    penalize::String    = "frac"
+    penalty_type        = :frac
     )
 
-    try 
+    try
         @assert smc_method ∈ [:adaptive, :linear_grid, :geometric_grid, :logit_grid]
     catch
         error("`smc_method` must be one of [:adaptive, :linear_grid, :geometric_grid, :logit_grid]")
+    end
+    try
+        @assert penalty_type ∈ [:frac, :count, :magnitude]
+    catch
+        error("`penalty_type` must be one of [:frac, :count, :magnitude]")
     end
 
     burn_in_int = Int(burn_in * size(problem.chain,1));
@@ -457,21 +435,21 @@ function smc!(problem::NPDemand.NPDProblem;
     sieve_type = approximation_details[:sieve_type]
 
     # Add smc_results to problem
-    problem.smc_results = smc(problem::NPDemand.NPDProblem; 
-        grid_points         = grid_points, 
-        max_penalty         = max_penalty, 
-        ess_threshold       = ess_threshold, 
-        step_size           = step, 
+    problem.smc_results = smc(problem::NPDemand.NPDProblem;
+        grid_points         = grid_points,
+        max_penalty         = max_penalty,
+        ess_threshold       = ess_threshold,
+        step_size           = step,
         skip                = skip,
-        burn_in             = burn_in_int, 
+        burn_in             = burn_in_int,
         mh_steps            = mh_steps,
         seed                = seed,
-        smc_method          = smc_method, 
-        max_iter            = max_iter, 
-        adaptive_tolerance  = adaptive_tolerance, 
+        smc_method          = smc_method,
+        max_iter            = max_iter,
+        adaptive_tolerance  = adaptive_tolerance,
         max_violations      = max_violations,
         modulo_num          = modulo_num,
-        penalize            = penalize,
+        penalty_type        = penalty_type,
         approximation_details = approximation_details
         );
     

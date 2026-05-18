@@ -249,6 +249,30 @@ function unpack(θ_packed, exchange::Array, lengths; grad=true)
     return θ
 end
 
+function gmm_fast_blocks(problem::NPDemand.NPDProblem, nbetas)
+    J = length(problem.Xvec)
+    Xvec, Bvec, df = problem.Xvec, problem.Bvec, problem.data
+    augmented_X = [hcat(Xvec[i], -1 .* Bvec[i][:,2:end]) for i in 1:J]
+    yZX = [(-1 .* df[!,"prices$i"])' * problem.weight_matrices[i+1] * augmented_X[i+1] for i in 0:J-1]
+    XX  = [augmented_X[i+1]' * problem.weight_matrices[i+1] * augmented_X[i+1] for i in 0:J-1]
+    XZy = [augmented_X[i+1]' * problem.weight_matrices[i+1]' * (-1 .* df[!,"prices$i"]) for i in 0:J-1]
+    nθ  = size.(Xvec, 2)
+    yZX_γ = [copy(parent(yZX[i])[nθ[i]+1:end]) for i in 1:J]
+    XZy_γ = [XZy[i][nθ[i]+1:end] for i in 1:J]
+    XX_γγ = [XX[i][nθ[i]+1:end, nθ[i]+1:end] for i in 1:J]
+    return Dict(
+        "yZX_β" => [copy(parent(yZX[i])[1:nθ[i]]) for i in 1:J],
+        "XZy_β" => [XZy[i][1:nθ[i]] for i in 1:J],
+        "XX_ββ" => [XX[i][1:nθ[i], 1:nθ[i]] for i in 1:J],
+        "XX_βγ" => [XX[i][1:nθ[i], nθ[i]+1:end] for i in 1:J],
+        "yZX_γ_sum" => sum(yZX_γ),
+        "XZy_γ_sum" => sum(XZy_γ),
+        "XX_γγ_sum" => sum(XX_γγ),
+        "starts_params_v2" => [1; cumsum(nbetas)[1:end-1] .+ 1],
+        "ends_params_v2" => Vector(cumsum(nbetas)),
+        "group_for_product" => [findfirst(j .∈ problem.exchange) for j in 1:J])
+end
+
 # Allocation-free GMM objective: accepts (beta, gamma) directly without constructing all_params.
 # Uses pre-partitioned yZX/XZy/XX blocks (β-block and γ-block split by column),
 # and a precomputed permutation (group_for_product, starts_params, ends_params) that maps

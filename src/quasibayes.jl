@@ -67,7 +67,11 @@ end
 function inner_elast_loop(dsids_i::AbstractMatrix{T}, J::Int, at::AbstractVector{Float64}, svec::AbstractVector{Float64}; type::String = "jacobian") where T
     # J_s = [dsids_i[j1,j2] for j1 in 1:J, j2 in 1:J]
     # temp = -1*pinv(J_s);
-    temp = -1*pinv(dsids_i)
+    temp = try
+        -inv(dsids_i)
+    catch
+        -pinv(dsids_i)
+    end
 
     if type == "jacobian"
         return temp 
@@ -608,20 +612,20 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
 end
 
 function smc(problem::NPDemand.NPDProblem;
-    grid_points::Int    = 50, 
-    max_penalty::Real   = 5, 
-    ess_threshold::Real = 100, 
-    step_size::Real     = 0.1, 
+    grid_points::Int    = 50,
+    max_penalty::Real   = 5,
+    ess_threshold::Real = 100,
+    step_size::Real     = 0.1,
     skip::Int           = 5,
-    burn_in::Int        = 5000, 
+    burn_in::Int        = 5000,
     mh_steps            = 10,
-    smc_method          = :grid, 
-    seed                = 4132, 
-    max_iter            = 1000, 
-    adaptive_tolerance  = false, 
+    smc_method          = :grid,
+    seed                = 4132,
+    max_iter            = 1000,
+    adaptive_tolerance  = false,
     max_violations      = 0.01,
     modulo_num          = 1,
-    penalize::String    = "frac",
+    penalty_type        = :frac,
     approximation_details::Dict{Symbol, Any} = Dict()
     )
 
@@ -674,7 +678,18 @@ function smc(problem::NPDemand.NPDProblem;
                             problem;
                             sieve_type=st)
                          for i in 1:nparticles]...)
-    
+    matrix_storage_dict = gmm_fast_blocks(problem, nbetas)
+    nproducts = length(problem.Avec)
+    yZX_β, XZy_β = matrix_storage_dict["yZX_β"], matrix_storage_dict["XZy_β"]
+    XX_ββ, XX_βγ = matrix_storage_dict["XX_ββ"], matrix_storage_dict["XX_βγ"]
+    yZX_γ_sum, XZy_γ_sum = matrix_storage_dict["yZX_γ_sum"], matrix_storage_dict["XZy_γ_sum"]
+    XX_γγ_sum = matrix_storage_dict["XX_γγ_sum"]
+    starts_params = matrix_storage_dict["starts_params_v2"]
+    ends_params = matrix_storage_dict["ends_params_v2"]
+    group_for_product = matrix_storage_dict["group_for_product"]
+    gmm_loglike(beta, gamma) = -0.5 * gmm_fast_v2(beta, gamma, yZX_β, XZy_β, XX_ββ, XX_βγ,
+        yZX_γ_sum, XZy_γ_sum, XX_γγ_sum, starts_params, ends_params, group_for_product, nproducts)
+
     # 2. Set initial weights
     smc_weights     = fill(1.0 / nparticles, nparticles)
     penalty         = range(0, max_penalty, length = grid_points);
@@ -709,51 +724,55 @@ function smc(problem::NPDemand.NPDProblem;
     end
 
     t = 1;
-    beta_dist, gamma_dist = make_prior_dists(prior, gamma_length);
-    beta_μ = beta_dist.μ;
-    gamma_μ = gamma_dist.μ;
-    chol_beta   = cholesky(Matrix(beta_dist.Σ));  logdet_beta  = 2.0 * sum(log.(diag(chol_beta.L)))
-    chol_gamma  = cholesky(Matrix(gamma_dist.Σ)); logdet_gamma = 2.0 * sum(log.(diag(chol_gamma.L)))
-    logprior_t_minus_1 = Float64[];  # empty signals "not yet computed" to get_importance_weights
+    beta_μ, gamma_μ = _betabar, _gammabar
+    beta_inv_var, beta_logdet = inv.(_vbeta), sum(log.(_vbeta))
+    gamma_inv_var, gamma_logdet = fill(inv(_vgamma), gamma_length-1), (gamma_length-1) * log(_vgamma)
+    n_kernel_steps = Int(mh_steps)
 
     failure_count = 0;
     while (violation_dict[:any] > max_violations) & (prev_penalty < max_penalty) & (t < max_iter)
         t = t+1
         print("\n Iteration "*string(t-1)*"...\r")
+        penalty_distances = smc_penalty_distances(thetas_sieve, problem;
+            multithread = true, penalty_type = penalty_type)
+        current_logprior = zeros(eltype(thetas_sieve), nparticles)
 
         if (smc_method == :adaptive) & (mod(t,modulo_num) == 0)
             # Solve for next step penalty
             print("\n Optimizing penalty... \r")
-            # try 
-                if adaptive_tolerance 
-                    new_penalty = find_zero(f_ess, (prev_penalty, max_penalty), Bisection(); xatol = get_tolerance(prev_penalty))
+                _unused, current_logprior = get_importance_weights(thetas_sieve, smc_weights, Float64(prev_penalty), Float64(prev_penalty), problem,
+                    penalty_distances = penalty_distances, penalty_type = penalty_type);
+                if adaptive_tolerance
+                    new_penalty = find_zero(x -> f_ess(x, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold,
+                        logprior_t_minus_1 = current_logprior, penalty_distances = penalty_distances,
+                        penalty_type = penalty_type),
+                        (prev_penalty, max_penalty), Bisection(); xatol = get_tolerance(prev_penalty))
                 else
-                    if t>1
-                        ~, logprior_t_minus_1 = get_importance_weights(thetas_sieve, smc_weights, Float64(prev_penalty), Float64(prev_penalty), problem; logprior_t_minus_1 = logprior_t_minus_1, penalize = penalize);
-                    end
                     custom_ub = max(prev_penalty * 10.0, prev_penalty + 0.01);
                     xatol = 0.0002;
-                    try 
-                        new_penalty = find_zero(x -> f_ess(x, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold; logprior_t_minus_1 = logprior_t_minus_1, penalize = penalize), (prev_penalty, min(custom_ub, max_penalty)), Bisection(); xatol = xatol, verbose = false)
+                    try
+                        new_penalty = find_zero(x -> f_ess(x, thetas_sieve, smc_weights, prev_penalty, problem, ess_threshold,
+                            logprior_t_minus_1 = current_logprior, penalty_distances = penalty_distances,
+                            penalty_type = penalty_type),
+                            (prev_penalty, min(custom_ub, max_penalty)), Bisection(); xatol = xatol, verbose = false)
                         new_penalty = new_penalty - xatol;
-                    catch 
-                        new_penalty = custom_ub;
+                    catch
+                        new_penalty = min(custom_ub, max_penalty);
                     end
-                    if abs(prev_penalty - new_penalty) > 2 * xatol # adjustment to make sure tolerance isn't an issue
+                    if abs(prev_penalty - new_penalty) > 2 * xatol
                         new_penalty = new_penalty - xatol;
                     end
                 end
-            # catch
-                # error("Solving for penalty failed. Try reducing `ess_threshold` or increasing the number of particles (by reducing `burn_in` or `skip`)")
-            # end
-        elseif (smc_method == :adaptive) # every other iteration, use the previous penalty and re-sample again
+        elseif (smc_method == :adaptive)
             new_penalty = prev_penalty;
         else
             new_penalty = penalty_list[t]
         end
-        
+
         # Calculate normalized importance weights
-        log_smc_weights, ~ = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, new_penalty, problem; penalize = penalize)
+        log_smc_weights, _logprior_t = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, new_penalty, problem,
+            logprior_t_minus_1 = current_logprior, penalty_distances = penalty_distances,
+            penalty_type = penalty_type)
 
         smc_weights .= exp.(log_smc_weights .- maximum(log_smc_weights))
         smc_weights .= smc_weights ./ sum(smc_weights)
@@ -779,10 +798,6 @@ function smc(problem::NPDemand.NPDProblem;
         thetas_sieve = thetas_sieve[indices,:]
         smc_weights .= 1.0 / nparticles
 
-        # Stoage
-        logprior_storage = zeros(eltype(thetas), nparticles)
-        loglike_storage = zeros(eltype(thetas), nparticles)
-
         # 3.4 Perturb particles via MH step(s)
         n_accept = zeros(nparticles);
         proposal_distribution = [];
@@ -807,79 +822,72 @@ function smc(problem::NPDemand.NPDProblem;
         thread_rngs = [MersenneTwister(seed + tid) for tid in 1:Threads.maxthreadid()]
         reparameterization_bufs = [zeros(eltype(thetas_sieve), sum(nbetas)) for _ in 1:Threads.maxthreadid()]
 
-        prog           = Threads.Atomic{Int}(0)
+        prog = Threads.Atomic{Int}(0)
         monitor_active = Threads.Atomic{Bool}(true)
 
-        # Async monitor: reads the atomic counter every 0.5s and overwrites the progress line.
-        # monitor_active is set to false in the finally block so the task always exits cleanly,
-        # even if the threaded loop throws (which would otherwise leave this task running forever).
         monitor = @async begin
             while monitor_active[] && (n_done = prog[]) < nparticles
                 print(@sprintf("\r  MH steps: %d/%d (%.0f%%)", n_done, nparticles, 100.0*n_done/nparticles))
-                sleep(0.5)
+                sleep(0.05)
             end
-            prog[] >= nparticles && println(@sprintf("\r  MH steps: %d/%d (100%%)  ", nparticles, nparticles))
+            println(@sprintf("\r  MH steps: %d/%d (100%%)  ", nparticles, nparticles))
         end
 
-        _blas_threads = BLAS.get_num_threads()
-        BLAS.set_num_threads(1)
         try
             Threads.@threads for i in axes(thetas,1)
                 tid  = Threads.threadid()
                 rng  = thread_rngs[tid]
                 reparameterization_storage = reparameterization_bufs[tid]
-                for mh_iter in 1:mh_steps
+                betai_old = NPDemand.reparameterization(thetas[i,1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
+                gamma_old = @view thetas[i,(nbeta+1):size(thetas,2)]
+                logprior_old = logprior_smc(thetas[i,1:nbeta], gamma_old, beta_μ, beta_inv_var, beta_logdet, gamma_μ, gamma_inv_var, gamma_logdet) +
+                               logpenalty_smc(view(penalty_distances, i, :), new_penalty)
+                loglike_old = gmm_loglike(betai_old, gamma_old)
+
+                for mh_iter in 1:n_kernel_steps
                     # Re-seed per (particle, step) so each draw is independent
                     Random.seed!(rng, seed + i + mh_iter * nparticles)
 
                     # Propose new values + reparameterize + map to sieve
                     thetai_new       = thetas[i,:] + rand(rng, proposal_distribution)
                     betai_new        = NPDemand.reparameterization(thetai_new[1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
-                    thetai_sieve_new = NPDemand.map_to_sieve(betai_new, thetai_new[(nbeta+1):end], problem.exchange, nbetas, problem, sieve_type=st)
+                    gamma_new        = @view thetai_new[(nbeta+1):length(thetai_new)]
+                    thetai_sieve_new = NPDemand.map_to_sieve(betai_new, gamma_new, problem.exchange, nbetas, problem, sieve_type=st)
 
                     # Evaluate prior
-                    logprior_new     = logprior_smc(thetai_new[1:nbeta], thetai_new[(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetai_sieve_new, new_penalty, problem; penalize)
-                    if mh_iter == 1
-                        logprior_old = logprior_smc(thetas[i,1:nbeta], thetas[i,(nbeta+1):end], beta_μ, chol_beta, logdet_beta, gamma_μ, chol_gamma, logdet_gamma) + logpenalty_smc(thetas_sieve[i,:], new_penalty, problem; penalize)
-                    else
-                        logprior_old = logprior_storage[i]
-                    end
+                    logprior_new = logprior_smc(thetai_new[1:nbeta], gamma_new, beta_μ, beta_inv_var, beta_logdet, gamma_μ, gamma_inv_var, gamma_logdet) +
+                                   logpenalty_smc(thetai_sieve_new, new_penalty, problem;
+                                       penalty_type = penalty_type)
 
                     # Evaluate likelihood
-                    loglike_new     = -0.5 * gmm(reshape(thetai_sieve_new, size(thetas_sieve,2), 1), problem, problem.weight_matrices)
-                    if mh_iter == 1
-                        loglike_old = -0.5 * gmm(reshape(thetas_sieve[i,:], size(thetas_sieve,2), 1), problem, problem.weight_matrices)
-                    else
-                        loglike_old = loglike_storage[i]
-                    end
+                    loglike_new = gmm_loglike(betai_new, gamma_new)
 
                     # Calculate MH acceptance ratio
                     logratio = loglike_new + logprior_new - loglike_old - logprior_old
-                    if rand(rng) < exp(logratio)
-                        thetas[i,:]         = thetai_new
-                        thetas_sieve[i,:]   = thetai_sieve_new
-                        logprior_storage[i] = logprior_new
-                        loglike_storage[i]  = loglike_new
-                        n_accept[i]        += 1
+                    if log(rand(rng)) < logratio
+                        thetas[i,:]       = thetai_new
+                        thetas_sieve[i,:] = thetai_sieve_new
+                        logprior_old      = logprior_new
+                        loglike_old       = loglike_new
+                        n_accept[i]      += 1
                     end
                     GC.safepoint()
                 end
                 Threads.atomic_add!(prog, 1)
             end
-        finally
-            BLAS.set_num_threads(_blas_threads)
-            monitor_active[] = false
             wait(monitor)
+        finally
+            monitor_active[] = false
         end
-        n_accept = n_accept ./ mh_steps
+        n_accept = n_accept ./ n_kernel_steps
         accept_rate = round(mean(n_accept), digits = 2);
         # println("\n Average MH acceptance rate: $(accept_rate)")
 
-        # Check constraints 
-        violation_dict_array = [report_constraint_violations(problem, params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)];
+        # Check constraints
+        violation_dict_array = [report_constraint_violations_inner(problem, params = thetas_sieve[i,:], verbose = false) for i in axes(thetas_sieve,1)];
         violation_dict = Dict{Symbol, Float64}()
         for k in keys(violation_dict_array[1])
-            push!(violation_dict, k => 
+            push!(violation_dict, k =>
                 round(
                     mean([violation_dict_array[i][k] for i in axes(thetas_sieve,1)]),
                     digits = 3)
@@ -910,24 +918,37 @@ function smc(problem::NPDemand.NPDProblem;
     return (; thetas, smc_weights, violations = viol_store, ess = ess_store, penalties = penalty_vec);
 end
 
-# function logpdf_mvn(mu::Vector{T}, Sigma::Matrix{T}, theta::Vector{T}) where T<:Real
-#     n = length(mu)
-
-#     # Ensure that Sigma is positive definite
-#     L = cholesky(Sigma).L
-#     diff = theta - mu
-#     quadratic_form = sum((L \ diff) .^ 2)
-
-#     logdetSigma = 2.0 * sum(log.(diag(L))) # log determinant of Sigma
-#     logpdf = -0.5 * (n * log(2 * π) + logdetSigma + quadratic_form)
-
-#     return logpdf
-# end
+function logpdf_mvn(mu::Vector{T}, Sigma::Matrix{T}, theta::Vector{T}) where T<:Real
+    n = length(mu)
+    L = cholesky(Sigma).L
+    diff = theta - mu
+    quadratic_form = sum((L \ diff) .^ 2)
+    logdetSigma = 2.0 * sum(log.(diag(L)))
+    logpdf = -0.5 * (n * log(2 * π) + logdetSigma + quadratic_form)
+    return logpdf
+end
 
 function logpdf_mvn(mu::Vector, chol::Cholesky, logdet_sigma::Real, theta::AbstractVector)
     diff = theta .- mu
     quadratic_form = sum((chol.L \ diff) .^ 2)
     return -0.5 * (length(mu) * log(2π) + logdet_sigma + quadratic_form)
+end
+
+function logpdf_diag_mvn(mu::AbstractVector, inv_var::AbstractVector, logdet_sigma::Real, theta::AbstractVector)
+    q = zero(promote_type(eltype(theta), eltype(inv_var)))
+    @inbounds for i in eachindex(mu, inv_var, theta)
+        d = theta[i] - mu[i]
+        q += d * d * inv_var[i]
+    end
+    return -0.5 * (length(mu) * log(2π) + logdet_sigma + q)
+end
+
+function particle_logpenalty(thetas_sieve, penalty_distances, i, penalty, problem;
+    penalty_type = :frac)
+    if penalty_distances === nothing
+        return logpenalty_smc(thetas_sieve[i,:], penalty, problem; penalty_type = penalty_type)
+    end
+    return logpenalty_smc(view(penalty_distances, i, :), penalty)
 end
 
 # function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T}, 
@@ -952,18 +973,20 @@ function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T},
     prev_penalty::Real, problem::NPDemand.NPDProblem,
     ess_threshold::Real;
     logprior_t_minus_1 = zeros(T, size(thetas_sieve,1)),
-    penalize::String   = "frac") where T
+    penalty_distances = nothing,
+    penalty_type = :frac) where T
 
-    logwts, ~ = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, p[1],
-            problem;
+    logwts, _unused = get_importance_weights(thetas_sieve, smc_weights, prev_penalty, p[1],
+            problem,
             logprior_t_minus_1 = logprior_t_minus_1,
             multithread = true,
-            penalize = penalize)
+            penalty_distances = penalty_distances,
+            penalty_type = penalty_type)
 
     num = 2*maximum(logwts) + 2*log(sum(exp.(logwts .- maximum(logwts))))
     denom = maximum(2*logwts) + log(sum(exp.(2*logwts .- maximum(2*logwts))))
     log_ess = num - denom
-    exp_log_ess = exp(log_ess) 
+    exp_log_ess = exp(log_ess)
     if isfinite(exp_log_ess)
         return exp_log_ess - ess_threshold
     else
@@ -972,43 +995,28 @@ function f_ess(p::T, thetas_sieve::Matrix{T}, smc_weights::Vector{T},
 end
 
 function get_importance_weights(thetas_sieve::Matrix{T}, smc_weights::Vector{T},
-    penalty_prev::Real, penalty_new::Float64, problem::NPDemand.NPDProblem;
-    new_log_weights     = similar(smc_weights),
-    logprior_t          = zeros(T, size(thetas_sieve,1)),
-    logprior_t_minus_1  = Float64[],
-    multithread         = false,
-    penalize::String    = "frac") where T<:Real
+    penalty_prev::Real, penalty_new::Real, problem::NPDemand.NPDProblem;
+    new_log_weights    = similar(smc_weights),
+    logprior_t         = zeros(T, size(thetas_sieve,1)),
+    logprior_t_minus_1 = zeros(T, size(thetas_sieve,1)),
+    multithread        = false,
+    penalty_distances  = nothing,
+    penalty_type       = :frac) where T<:Real
 
-    # Use isempty rather than == zeros to avoid an O(n) allocation + comparison on every call,
-    # and removes the ambiguity when legitimately-zero penalties coincide with the sentinel value.
-    recompute_prev = isempty(logprior_t_minus_1)
-
+    has_old_logprior = any(!iszero, logprior_t_minus_1)
     if multithread == false
         for i in axes(thetas_sieve,1)
-            particle_sieve_i = thetas_sieve[i,:]
-            logprior_t[i]    = logpenalty_smc(particle_sieve_i, penalty_new, problem; penalize = penalize)
-            log_prior_ratio  = recompute_prev ?
-                logprior_t[i] - logpenalty_smc(particle_sieve_i, penalty_prev, problem; penalize = penalize) :
-                logprior_t[i] - logprior_t_minus_1[i]
-            new_log_weights[i] = log(smc_weights[i]) + log_prior_ratio
+            logprior_t[i]  = particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_new, problem; penalty_type = penalty_type)
+            logprior_old   = has_old_logprior ? logprior_t_minus_1[i] : particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_prev, problem; penalty_type = penalty_type)
+            new_log_weights[i] = log(smc_weights[i]) + logprior_t[i] - logprior_old
         end
     else
         Threads.@threads for i in axes(thetas_sieve,1)
-            particle_sieve_i = thetas_sieve[i,:]
-            logprior_t[i]    = logpenalty_smc(particle_sieve_i, penalty_new, problem; penalize = penalize)
-            log_prior_ratio  = recompute_prev ?
-                logprior_t[i] - logpenalty_smc(particle_sieve_i, penalty_prev, problem; penalize = penalize) :
-                logprior_t[i] - logprior_t_minus_1[i]
-            new_log_weights[i] = log(smc_weights[i]) + log_prior_ratio
+            logprior_t[i]  = particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_new, problem; penalty_type = penalty_type)
+            logprior_old   = has_old_logprior ? logprior_t_minus_1[i] : particle_logpenalty(thetas_sieve, penalty_distances, i, penalty_prev, problem; penalty_type = penalty_type)
+            new_log_weights[i] = log(smc_weights[i]) + logprior_t[i] - logprior_old
         end
     end
-    # println("weights before normalizing")
-    # println(mean(new_weights))
-    # if sum(new_weights) > 0 
-    #     new_weights = new_weights ./ sum(new_weights);
-    # end
-    # println("weights after normalizing")
-    # println(mean(new_weights))
 
     return new_log_weights, logprior_t
 end
@@ -1032,12 +1040,19 @@ function make_prior_dists(prior, gamma_length)
     return beta_dist, gamma_dist
 end
 
-# function logprior_smc(particle_betastar::AbstractArray{T}, particle_gamma::AbstractArray{T}, beta_dist, gamma_dist) where T
-# function logprior_smc(particle_betastar, particle_gamma, beta_μ, beta_Σ, gamma_μ, gamma_Σ)
-#     out_beta    = logpdf_mvn(beta_μ, beta_Σ, particle_betastar)
-#     out_gamma   = logpdf_mvn(gamma_μ, gamma_Σ, particle_gamma)
-#     return out_beta + out_gamma
-# end
+function logprior_smc(particle_betastar, particle_gamma, beta_μ, beta_Σ, gamma_μ, gamma_Σ)
+    out_beta    = logpdf_mvn(beta_μ, beta_Σ, particle_betastar)
+    out_gamma   = logpdf_mvn(gamma_μ, gamma_Σ, particle_gamma)
+    return out_beta + out_gamma
+end
+
+function logprior_smc(particle_betastar, particle_gamma,
+                      beta_μ, beta_inv_var::AbstractVector, beta_logdet::Real,
+                      gamma_μ, gamma_inv_var::AbstractVector, gamma_logdet::Real)
+    out_beta  = logpdf_diag_mvn(beta_μ, beta_inv_var, beta_logdet, particle_betastar)
+    out_gamma = logpdf_diag_mvn(gamma_μ, gamma_inv_var, gamma_logdet, particle_gamma)
+    return out_beta + out_gamma
+end
 
 function logprior_smc(particle_betastar, particle_gamma,
                       beta_μ, chol_beta::Cholesky, logdet_beta::Real,
@@ -1078,10 +1093,32 @@ function get_tolerance(p::Float64)
     return out
 end
 
-function logpenalty_smc(particle_sieve::Array{T}, penalty::Real, problem::NPDemand.NPDProblem;
-    penalize::String = "frac") where T
-    distance = report_constraint_violations_inner(problem; params = particle_sieve, verbose = false, output = penalize)
+function smc_penalty_distances(thetas_sieve::Matrix, problem::NPDemand.NPDProblem;
+    multithread = false,
+    penalty_type = :frac)
+    out = Matrix{Float64}(undef, size(thetas_sieve, 1), size(problem.data, 1))
+    loop = axes(thetas_sieve, 1)
+    output = String(penalty_type)
+    if multithread
+        Threads.@threads for i in loop
+            out[i,:] .= report_constraint_violations_inner(problem, params = thetas_sieve[i,:], verbose = false, output = output)
+        end
+    else
+        for i in loop
+            out[i,:] .= report_constraint_violations_inner(problem, params = thetas_sieve[i,:], verbose = false, output = output)
+        end
+    end
+    return out
+end
+
+function logpenalty_smc(distance::AbstractVector, penalty::Real)
     return sum(log.(2 .* approx_cdf_normal01.(-penalty .* distance)))
+end
+
+function logpenalty_smc(particle_sieve::Array{T}, penalty::Real, problem::NPDemand.NPDProblem;
+    penalty_type = :frac) where T
+    distance = report_constraint_violations_inner(problem, params = particle_sieve, verbose = false, output = String(penalty_type))
+    return logpenalty_smc(distance, penalty)
 end
 
 function loglikelihood(problem::NPDemand.NPDProblem, particle_betastar::Vector{T}, particle_gamma::Vector{T}, nbetas) where T
@@ -1110,7 +1147,7 @@ function fe_posteriors(problem; FE::Union{Array, String} = [])
     num_index_vars = length(problem.index_vars);
     
     df_fe = DataFrame()
-    for (~, i) in enumerate(coefs_for_this_fe)
+    for (_, i) in enumerate(coefs_for_this_fe)
         val = problem.fe_param_mapping[i].value
         column_name = "Value$val"
         if i ==1 
