@@ -379,7 +379,6 @@ function posterior_elasticities(j, k, betadraws, gammadraws, tempmats, problem)
     return tmpout
 end
 
-
 function find_starting_point(problem, prior, 
     tempmats, weight_matrices; 
     n_attempts = 1000)
@@ -444,9 +443,7 @@ function find_starting_point(problem, prior,
     return param_out, exit_flag
 end
 
-# Leapfrog HMC using fully analytical gradients — no AD overhead.
-# For the quasi-Bayes GMM log-posterior (quadratic in parameters, Gaussian NCP prior)
-# the gradient is a closed-form linear expression; no Turing model machinery needed.
+# Leapfrog HMC using fully analytical gradients
 function analytical_hmc(prior::Dict, msd::Dict, J::Int;
     n_samples::Int      = 1000,
     step_size::Real     = 0.01,
@@ -718,6 +715,282 @@ function logpenalty_smc(particle_sieve::Array{T}, penalty::Real, problem::NPDema
     return logpenalty_smc(distance, penalty)
 end
 
+# Allocation-efficient penalty evaluation for use inside the MH inner loop
+function _fill_neg_inv!(out::Matrix{Float64}, dsids::Matrix{Float64}, J::Int)
+    try
+        if J == 2
+            out .= -inv(SMatrix{2,2,Float64,4}(dsids))
+        elseif J == 3
+            out .= -inv(SMatrix{3,3,Float64,9}(dsids))
+        elseif J == 4
+            out .= -inv(SMatrix{4,4,Float64,16}(dsids))
+        elseif J == 5
+            out .= -inv(SMatrix{5,5,Float64,25}(dsids))
+        elseif J == 6
+            out .= -inv(SMatrix{6,6,Float64,36}(dsids))
+        else
+            out .= -inv(dsids)
+        end
+    catch
+        out .= -pinv(dsids)
+    end
+end
+
+# Zero-allocation constraint counter
+function _count_violations_fast(elast::Matrix{Float64}, constraints, exchange, J::Int)
+    n_viol = 0
+
+    if :monotone in constraints
+        ok = true
+        @inbounds for j in 1:J
+            if elast[j, j] > 0.0; ok = false; break; end
+        end
+        n_viol += !ok
+    end
+
+    if :all_substitutes in constraints
+        ok = true
+        @inbounds for j1 in 1:J
+            ok || break
+            for j2 in 1:J
+                j1 == j2 && continue
+                if elast[j1, j2] < 0.0; ok = false; break; end
+            end
+        end
+        n_viol += !ok
+    end
+
+    if :diagonal_dominance_all in constraints
+        ok = true
+        @inbounds for j1 in 1:J
+            s = 0.0
+            for j2 in 1:J; s += abs(elast[j1, j2]); end
+            if 2.0 * abs(elast[j1, j1]) < s; ok = false; break; end
+        end
+        n_viol += !ok
+    end
+
+    if :subs_in_group in constraints
+        ok = true
+        for grp in exchange
+            for a in grp
+                ok || break
+                for b in grp
+                    a == b && continue
+                    if elast[a, b] < 0.0; ok = false; break; end
+                end
+            end
+            ok || break
+        end
+        n_viol += !ok
+    end
+
+    if :subs_across_group in constraints
+        ok = true
+        for g1 in 1:length(exchange)
+            ok || break
+            for g2 in 1:length(exchange)
+                g1 == g2 && continue
+                for a in exchange[g1]
+                    ok || break
+                    for b in exchange[g2]
+                        if elast[a, b] < 0.0; ok = false; break; end
+                    end
+                end
+                ok || break
+            end
+        end
+        n_viol += !ok
+    end
+
+    if :all_complements in constraints
+        ok = true
+        @inbounds for j1 in 1:J
+            ok || break
+            for j2 in 1:J
+                j1 == j2 && continue
+                if elast[j1, j2] > 0.0; ok = false; break; end
+            end
+        end
+        n_viol += !ok
+    end
+
+    if :complements_in_group in constraints
+        ok = true
+        for grp in exchange
+            for a in grp
+                ok || break
+                for b in grp
+                    a == b && continue
+                    if elast[a, b] > 0.0; ok = false; break; end
+                end
+            end
+            ok || break
+        end
+        n_viol += !ok
+    end
+
+    if :complements_across_group in constraints
+        ok = true
+        for g1 in 1:length(exchange)
+            ok || break
+            for g2 in 1:length(exchange)
+                g1 == g2 && continue
+                for a in exchange[g1]
+                    ok || break
+                    for b in exchange[g2]
+                        if elast[a, b] > 0.0; ok = false; break; end
+                    end
+                end
+                ok || break
+            end
+        end
+        n_viol += !ok
+    end
+
+    return n_viol
+end
+
+# Inline magnitude violations
+function _magnitude_violations_fast(elast::Matrix{Float64}, constraints, exchange, J::Int)
+    total    = 0.0
+    n_active = 0
+
+    if :monotone in constraints
+        n_active += 1
+        num = 0.0; den = 0.0
+        @inbounds for j in 1:J
+            v = elast[j, j]; num += max(0.0, v); den += abs(v)
+        end
+        total += (num / J) / (den / J + 1e-10)
+    end
+
+    if :all_substitutes in constraints
+        n_active += 1
+        num = 0.0; den = 0.0; n_off = 0
+        @inbounds for j1 in 1:J, j2 in 1:J
+            j1 == j2 && continue
+            v = elast[j1, j2]; num += max(0.0, -v); den += abs(v); n_off += 1
+        end
+        n_off > 0 && (total += (num / n_off) / (den / n_off + 1e-10))
+    end
+
+    if :diagonal_dominance_all in constraints
+        n_active += 1
+        num = 0.0; den = 0.0
+        @inbounds for j1 in 1:J
+            col_sum = 0.0
+            for j2 in 1:J; j2 == j1 && continue; col_sum += elast[j2, j1]; end
+            num += max(0.0, abs(col_sum) - abs(elast[j1, j1]))
+            den += abs(elast[j1, j1])
+        end
+        total += (num / J) / (den / J + 1e-10)
+    end
+
+    if :subs_in_group in constraints
+        n_active += 1
+        grp_sum = 0.0
+        for grp in exchange
+            num = 0.0; den = 0.0; n_off = 0
+            for a in grp, b in grp
+                a == b && continue
+                v = elast[a, b]; num += max(0.0, -v); den += abs(v); n_off += 1
+            end
+            n_off > 0 && (grp_sum += (num / n_off) / (den / n_off + 1e-10))
+        end
+        total += grp_sum / length(exchange)
+    end
+
+    if :subs_across_group in constraints
+        n_active += 1
+        num = 0.0; den = 0.0; n_cross = 0
+        for g1 in 1:length(exchange), g2 in 1:length(exchange)
+            g1 == g2 && continue
+            for a in exchange[g1], b in exchange[g2]
+                v = elast[a, b]; num += max(0.0, -v); den += abs(v); n_cross += 1
+            end
+        end
+        n_cross > 0 && (total += (num / n_cross) / (den / n_cross + 1e-10))
+    end
+
+    if :all_complements in constraints
+        n_active += 1
+        num = 0.0; den = 0.0; n_off = 0
+        @inbounds for j1 in 1:J, j2 in 1:J
+            j1 == j2 && continue
+            v = elast[j1, j2]; num += max(0.0, v); den += abs(v); n_off += 1
+        end
+        n_off > 0 && (total += (num / n_off) / (den / n_off + 1e-10))
+    end
+
+    if :complements_in_group in constraints
+        n_active += 1
+        grp_sum = 0.0
+        for grp in exchange
+            num = 0.0; den = 0.0; n_off = 0
+            for a in grp, b in grp
+                a == b && continue
+                v = elast[a, b]; num += max(0.0, v); den += abs(v); n_off += 1
+            end
+            n_off > 0 && (grp_sum += (num / n_off) / (den / n_off + 1e-10))
+        end
+        total += grp_sum / length(exchange)
+    end
+
+    if :complements_across_group in constraints
+        n_active += 1
+        num = 0.0; den = 0.0; n_cross = 0
+        for g1 in 1:length(exchange), g2 in 1:length(exchange)
+            g1 == g2 && continue
+            for a in exchange[g1], b in exchange[g2]
+                v = elast[a, b]; num += max(0.0, v); den += abs(v); n_cross += 1
+            end
+        end
+        n_cross > 0 && (total += (num / n_cross) / (den / n_cross + 1e-10))
+    end
+
+    return n_active > 0 ? total / n_active : 0.0
+end
+
+# Log-penalty using BLAS mul! for cache-friendly Phase 1, SMatrix inv for zero-heap Phase 2
+function logpenalty_fast(θ, problem::NPDemand.NPDProblem, tempmats::Matrix{Matrix{Float64}},
+        penalty::Real;
+        penalty_type::Symbol = :frac)
+
+    J       = length(problem.Xvec)
+    indexes = [0; cumsum(size.(problem.Xvec, 2))]
+    T       = size(problem.data, 1)
+    ncon    = length(problem.constraints)
+    θ_slices = [view(θ, indexes[j]+1:indexes[j+1]) for j in 1:J]
+
+    dsids_all = Matrix{Float64}(undef, T, J*J)
+    dsids_buf = Matrix{Float64}(undef, J, J)
+    elast_buf = Matrix{Float64}(undef, J, J)
+
+    # Phase 1: one BLAS dgemv per (j1,j2) pair — writes contiguous columns, fully vectorized.
+    @inbounds for j1 in 1:J, j2 in 1:J
+        mul!(view(dsids_all, :, (j1-1)*J + j2), tempmats[j1, j2], θ_slices[j1])
+    end
+
+    # Phase 2: per-market inversion and constraint check.
+    log_pen = 0.0
+    for i in 1:T
+        @inbounds for j1 in 1:J, j2 in 1:J
+            dsids_buf[j1, j2] = dsids_all[i, (j1-1)*J + j2]
+        end
+        _fill_neg_inv!(elast_buf, dsids_buf, J)
+        dist = if penalty_type === :magnitude
+            _magnitude_violations_fast(elast_buf, problem.constraints, problem.exchange, J)
+        elseif penalty_type === :count
+            Float64(_count_violations_fast(elast_buf, problem.constraints, problem.exchange, J))
+        else  # :frac (default)
+            ncon > 0 ? Float64(_count_violations_fast(elast_buf, problem.constraints, problem.exchange, J)) / ncon : 0.0
+        end
+        log_pen += log(2.0 * approx_cdf_normal01(-penalty * dist))
+    end
+    return log_pen
+end
+
 function smc_penalty_distances(thetas_sieve::Matrix, problem::NPDemand.NPDProblem;
     multithread = false,
     penalty_type = :frac)
@@ -798,7 +1071,7 @@ end
 
 function smc(problem::NPDemand.NPDProblem;
     grid_points::Int    = 50,
-    max_penalty::Real   = 5,
+    max_penalty::Real   = 100,
     ess_threshold::Real = 100,
     step_size::Real     = 0.1,
     skip::Int           = 5,
@@ -979,9 +1252,10 @@ function smc(problem::NPDemand.NPDProblem;
             end
         end
 
-        thetas = thetas[indices,:]
-        thetas_sieve = thetas_sieve[indices,:]
-        smc_weights .= 1.0 / nparticles
+        thetas            = thetas[indices,:]
+        thetas_sieve      = thetas_sieve[indices,:]
+        penalty_distances = penalty_distances[indices,:]
+        smc_weights      .= 1.0 / nparticles
 
         # 3.4 Perturb particles via MH step(s)
         n_accept = zeros(nparticles);
@@ -1041,8 +1315,7 @@ function smc(problem::NPDemand.NPDProblem;
 
                     # Evaluate prior
                     logprior_new = logprior_smc(thetai_new[1:nbeta], gamma_new, beta_μ, beta_inv_var, beta_logdet, gamma_μ, gamma_inv_var, gamma_logdet) +
-                                   logpenalty_smc(thetai_sieve_new, new_penalty, problem;
-                                       penalty_type = penalty_type)
+                                   logpenalty_fast(thetai_sieve_new, problem, problem.tempmats, new_penalty; penalty_type = penalty_type)
 
                     # Evaluate likelihood
                     loglike_new = gmm_loglike(betai_new, gamma_new)
@@ -1113,7 +1386,6 @@ function loglikelihood(problem::NPDemand.NPDProblem, particle_betastar::Vector{T
    
     return -0.5 * gmm(x, problem, problem.weight_matrices)
 end
-
 
 function fe_posteriors(problem; FE::Union{Array, String} = [])
     if FE==[] 
