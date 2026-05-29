@@ -364,7 +364,7 @@ end
 """
     smc!(problem::NPDemand.NPDProblem;
         grid_points::Int    = 50, 
-        max_penalty::Real   = 5, 
+        max_penalty::Real   = 100, 
         ess_threshold::Real = 100, 
         step::Real          = 0.1, 
         skip::Int           = 5,
@@ -403,7 +403,7 @@ For harder or slower problems, it may be necessary to increase the number of Met
 """
 function smc!(problem::NPDemand.NPDProblem;
     grid_points::Int    = 50, 
-    max_penalty::Real   = 5, 
+    max_penalty::Real   = 100, 
     ess_threshold::Real = 100, 
     step::Real          = 0.1, 
     skip::Int           = 5,
