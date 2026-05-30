@@ -264,10 +264,11 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
                         [],
                         [], 
                         [], 
-                        [], 
-                        [], 
-                        [], 
-                        [], 
+                        [],
+                        [],
+                        [],
+                        [],
+                        [],
                         approximation_details)
 
     verbose && println("Constructing helper matrices for elasticities...")
@@ -282,12 +283,10 @@ end
     NPD_parameters
 
     Custom struct to store estimated parameters specifically. This can be used to replace the candidate parameters in an NPDProblem struct. The two key fields 
-    are `minimizer` and `filtered_chain`. The `minimizer` field stores the estimated parameters, while the `filtered_chain` field stores the Markov chain for quasi-Bayes
-    methods, after filtering out burn-in and thinning but before reformatting into the full parameter sieve.
+    is `minimizer`, which stores the estimated parameters.
 """
-mutable struct NPD_parameters 
+mutable struct NPD_parameters
     minimizer
-    filtered_chain
 end
 
 mutable struct NPDProblem
@@ -320,7 +319,8 @@ mutable struct NPDProblem
     all_elasticities
     all_jacobians
     converged
-    chain
+    chain_starparams
+    chain_params
     tempmats
     smc_results
     sampling_details
@@ -363,7 +363,7 @@ function Base.show(io::IO, problem::NPDProblem)
     FE = problem.FE;
     obj_xtol = problem.obj_xtol;
     obj_ftol = problem.obj_ftol;
-    estimated_TF = ((problem.results !=[]) || (problem.chain != []));
+    estimated_TF = ((problem.results !=[]) || (problem.chain_starparams != []));
     
     println(io, "NPD Problem:")
     println(io, "- Number of choices: $(J)")

@@ -25,7 +25,7 @@ function price_elasticities!(problem;
         error("CI must be a real number between 0 and 1. Use 0.95 for a 95% credible interval")
     end
 
-    if problem.chain ==[]
+    if problem.chain_starparams ==[]
         elast = price_elasticities_inner(
             problem, 
             sieve_type = sieve_type, 
@@ -40,7 +40,7 @@ function price_elasticities!(problem;
 
         elast_CI = [];
         if n_draws == []
-            n_draws = size(problem.results.filtered_chain,1)
+            n_draws = size(problem.chain_params,1)
         end
 
         if CI == []
@@ -48,7 +48,7 @@ function price_elasticities!(problem;
             jacob   = [zeros(J,J) for i in 1:T];
             nbetas = get_nbetas(problem);
             for i in ProgressBar(1:n_draws)
-                sample_i = problem.results.filtered_chain[i,:];
+                sample_i = problem.chain_params[i,:];
                 β_i = map_to_sieve(sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
                                 problem.exchange, 
@@ -75,14 +75,14 @@ function price_elasticities!(problem;
             jacob   = [zeros(J,J) for i in 1:T];
             alpha   = 1 - CI;
             try 
-                @assert ((n_draws > 0) & (n_draws <= size(problem.results.filtered_chain,1)))
+                @assert ((n_draws > 0) & (n_draws <= size(problem.chain_params,1)))
             catch 
                 error("`n_draws` must be greater than 0 and weakly less than the total number of draws in the final chain")
             end
             nbetas      = get_nbetas(problem);
 
             for i in ProgressBar(1:n_draws)
-                sample_i    = problem.results.filtered_chain[i,:];
+                sample_i    = problem.chain_params[i,:];
                 β_i = map_to_sieve(sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
                                 problem.exchange, 
@@ -328,7 +328,7 @@ function summarize_elasticities(problem, which_elasticities::String, stat::Strin
     J = length(problem.Xvec);
 
     # If we don't yet have a Markov chain, we can't integrate!
-    if (problem.chain == [])
+    if (problem.chain_starparams == [])
         if integrate == true
             @warn "No Markov chain available to integrate over, ignoring integration request"
         end
@@ -369,7 +369,7 @@ function summarize_elasticities(problem, which_elasticities::String, stat::Strin
             statprint = "";
             for i in 1:n_draws
                 elast_i = zeros(0);
-                sample_i    = problem.results.filtered_chain[i,:];
+                sample_i    = problem.chain_params[i,:];
                 β_i         = map_to_sieve(sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
                                 problem.exchange, 
@@ -437,7 +437,7 @@ function summarize_elasticities(problem, which_elasticities::String, stat::Strin
         else
             output = zeros(J,J,n_draws);
             for i in 1:n_draws
-                sample_i    = problem.results.filtered_chain[i,:];
+                sample_i    = problem.chain_params[i,:];
                 β_i         = map_to_sieve(
                                 sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
@@ -495,7 +495,7 @@ The user can control the set of quantiles to return and the number of draws (`n_
 function elasticity_quantiles(problem::NPDProblem, ind1::Int, ind2::Int; 
     quantiles = collect(0.01:0.01:0.99),
     n_draws::Int = 100)
-    if problem.chain ==[]
+    if problem.chain_starparams ==[]
         tempfunc(x) = summarize_elasticities(problem, "matrix", "quantile", integrate = false, q = x).Value[ind1,ind2];
         return quantiles, [tempfunc(x) for x ∈ quantiles]
     else

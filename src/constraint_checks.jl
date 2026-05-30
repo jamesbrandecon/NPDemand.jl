@@ -39,10 +39,10 @@ function report_constraint_violations(problem;
     lbs                   = sieve_type == "bernstein" ? NPDemand.get_lower_bounds(problem) : [];
     nbeta                 = sum(nbetas);
 
-    if (params ==[]) && (problem.chain == []) && (problem.results.filtered_chain == [])
+    if (params ==[]) && (problem.chain_starparams == []) && (problem.chain_params == [])
         param_vec = problem.results.minimizer; # if there's no chain, use the GMM result
-    elseif (params ==[]) && (problem.results.filtered_chain != [])
-        particles       = problem.results.filtered_chain;
+    elseif (params ==[]) && (problem.chain_params != [])
+        particles       = problem.chain_params;
         if (n_draws > 0)
             draw_subset = sample(1:size(particles,1), n_draws, replace = false);
             particles   = particles[draw_subset,:];
@@ -441,11 +441,11 @@ function check_linear_constraints(npd_problem)
 end
 
 # elseif (params == []) & (problem.sampling_details.smc == false)
-#     start_row       = Int(problem.sampling_details.burn_in *size(problem.chain,1)) + 1;
+#     start_row       = Int(problem.sampling_details.burn_in *size(problem.chain_starparams,1)) + 1;
 #     skiplen         = problem.sampling_details.skip;
 #     gamma_length    = size(problem.Bvec[1],2);
 
-#     particles       = problem.chain;    
+#     particles       = problem.chain_starparams;    
 #     betastardraws   = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)[start_row:end,:]
 #     betadraws       = NPDemand.reparameterization_draws(betastardraws, lbs, parameter_order)
 #     gammadraws      = hcat([particles["gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]

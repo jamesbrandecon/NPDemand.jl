@@ -1,12 +1,12 @@
-function estimate_fast!(problem::NPDProblem; 
-    linear_solver = "Ipopt", 
+function estimate_fast!(problem::NPDProblem;
+    linear_solver = "Ipopt",
     verbose = true)
 
-    β, γ = jmp_obj(problem, # was JMP_obj_constrained
-        linear_solver = linear_solver, 
+    β, γ = jmp_obj(problem,
+        linear_solver = linear_solver,
         verbose = verbose);
-        
-    problem.results = NPD_parameters([β;γ], []);
+
+    problem.results = NPD_parameters([β;γ]);
 end
 
 function jmp_obj(npd_problem::NPDProblem; linear_solver = "Ipopt", verbose = true)
@@ -22,17 +22,17 @@ function jmp_obj(npd_problem::NPDProblem; linear_solver = "Ipopt", verbose = tru
     indexes = vcat(0,cumsum(size.(Xvec,2)));
     J = length(Xvec);
 
-    # Define JuMP problem 
+    # Define JuMP problem
     if linear_solver =="Ipopt"
         verbose_int = 0;
         if verbose ==true
             verbose_int = 5;
         end
-        model = Model(optimizer_with_attributes(Ipopt.Optimizer, 
+        model = Model(optimizer_with_attributes(Ipopt.Optimizer,
             "constr_viol_tol" => constraint_tol,
             "print_level" => verbose_int));
     elseif linear_solver =="OSQP"
-        model = Model(optimizer_with_attributes(OSQP.Optimizer, 
+        model = Model(optimizer_with_attributes(OSQP.Optimizer,
             "check_termination" => 20000,
             "max_iter" => 20000));
     end
@@ -49,7 +49,7 @@ function jmp_obj(npd_problem::NPDProblem; linear_solver = "Ipopt", verbose = tru
         sum(npd_problem.Aineq[i,:] .* β) <= 0)
     @constraint(model, [i = 1:size(npd_problem.Aeq,1)], # Enforcing exchangeability
         sum(npd_problem.Aeq[i,:] .* β) == 0)
-    
+
     verbose && println("Solving problem in JuMP ....")
 
     # Solve problem and store results
@@ -64,10 +64,10 @@ function make_conmat(problem)
     J = length(problem.Xvec);
 
     conmat_monotone = [];
-    if :monotone_nonlinear in problem.constraints 
+    if :monotone_nonlinear in problem.constraints
         conmat_monotone = zeros(Float64,J,J);
         conmat_monotone .= Inf;
-        for j = 1:J    
+        for j = 1:J
             conmat_monotone[j,j] = 0.0;
         end
     end
@@ -85,25 +85,22 @@ function make_conmat(problem)
         conmat_complements = [];
     end
     if (:subs_in_group ∈ problem.constraints) | (:all_substitutes_nonlinear ∈ problem.constraints)
-        # If subs_in_group, then only need to constrain within groups
-        # All 
         for j1 = 1:J
             ej = getindex.(findall(j1 .∈ exchange),1)[1];
             for j2 = 1:J
                 if (j2!=j1) | (j2 ∈ exchange[ej])
                     conmat_subs[j1,j2] = 0;
-                end                
+                end
             end
         end
     end
     if (:subs_across_group ∈ problem.constraints) | (:all_substitutes_nonlinear ∈ problem.constraints)
-        # All products in different groups should have conmat[j1,j2] = 0
         for j1 = 1:J
             ej = getindex.(findall(j1 .∈ exchange),1)[1];
             for j2 = 1:J
                 if (j2 ∉ exchange[ej]) & (j1!=j2)
                     conmat_subs[j1,j2] = 0;
-                end                
+                end
             end
         end
     end
@@ -115,26 +112,24 @@ function make_conmat(problem)
             for j2 = 1:J
                 if (j2 ∈ exchange[ej])
                     conmat_complements[j1,j2] = 0;
-                end                
+                end
             end
         end
     end
     if :complements_across_group ∈ problem.constraints
-        # All products in different groups should have conmat[j1,j2] = 0
         for j1 = 1:J
             ej = getindex.(findall(j1 .∈ exchange),1)[1];
             for j2 = 1:J
                 if (j2 ∉ exchange[ej])
                     conmat_complements[j1,j2] = 0;
-                end                
+                end
             end
         end
-    end   
+    end
 
-    # conmat_subs = [-Inf 0.0; 0.0 -Inf];
     conmat = Dict(
         :subs => conmat_subs,
-        :complements => conmat_complements, 
+        :complements => conmat_complements,
         :monotone => conmat_monotone
     )
     return conmat
@@ -144,15 +139,13 @@ end
 """
     estimate!(problem::NPDProblem;
         verbose = true,
-        linear_solver = "Ipopt", 
+        linear_solver = "Ipopt",
         quasi_bayes = false,
-        sampler = [], 
         n_samples::Int = 50_000,
-        burn_in::Real = 0.25, 
+        burn_in::Real = 0.25,
         skip::Int = 5,
         n_attempts = 0,
-        penalty = 0, 
-        step::Union{Real, Symbol} = 0.01)
+        step::Real = 0.01)
 
 Estimates the problem using the specified parameters.
 
@@ -161,53 +154,43 @@ Estimates the problem using the specified parameters.
 - `verbose::Bool`: Whether to print verbose output. Default is `true`.
 - `linear_solver::String`: The linear solver to use. Must be either "Ipopt" or "OSQP". Default is "Ipopt".
 - `quasi_bayes::Bool`: Whether to use quasi-bayes sampling. Default is `false`.
-- `sampler`: The sampler to use for quasi-bayes sampling. Default is an empty array.
 - `n_samples::Int`: The number of samples to draw. Default is 50,000.
-- `burn_in::Real`: The fraction of samples to drop as burn-in. Must be less than 1. Default is 0.25.
-- `skip::Int`: The number of samples to skip between saved samples. Default is 5.
-- `n_attempts`: The number of attempts to find a valid starting point for the sampler. Default is 0.
-- `penalty`: The penalty value for the objective function. Default is 0.
-- `step::Union{Real, Symbol}`: The step size for the sampler. Can be a real number or the symbol `:auto` to automatically calculate the step size. Default is 0.01.
-
+- `burn_in::Real`: The fraction of samples to use for HMC adaptation and then discard. Must be less than 1. Default is 0.25.
+- `skip::Int`: The thinning factor for the saved chain. Default is 5.
+- `n_attempts`: The number of prior draws to search for a constraint-satisfying starting point. Default is 0 (single attempt).
+- `step::Real`: The HMC step size. Default is 0.01.
+- `n_leapfrog::Int`: Number of leapfrog steps per HMC proposal. Default is 10.
 """
 function estimate!(problem::NPDProblem;
     verbose = true,
-    linear_solver = "Ipopt", 
+    linear_solver = "Ipopt",
     quasi_bayes = false,
-    sampler = [], 
     n_samples::Int = 50_000,
-    burn_in::Real = 0.25, 
+    burn_in::Real = 0.25,
     skip::Int = 5,
     n_attempts = 0,
-    penalty = 0, 
-    step::Union{Real, Symbol} = 0.01, 
+    sampler = HMC(0.01, 10),
     custom_prior::Union{Dict, Nothing} = nothing
     )
 
-    try 
-        @assert (step isa Real) | (step == :auto)
-    catch 
-        error("`step` must either be a Real or the Symbol :auto, which indicates a desire to have the step size automatically calculated")
-    end
-
-    # Check that linear solver is Ipopt or OSQP 
+    # Check that linear solver is Ipopt or OSQP
     if linear_solver ∉ ["Ipopt", "OSQP"]
         error("Linear solver must be Ipopt or OSQP")
     end
 
-    # Unpack problem 
+    # Unpack problem
     df = problem.data;
     matrices = problem.matrices;
     Xvec = problem.Xvec;
     Bvec = problem.Bvec;
     Avec = problem.Avec;
-    Aineq = problem.Aineq; 
+    Aineq = problem.Aineq;
     Aeq = problem.Aeq;
-    mins = problem.mins;  
+    mins = problem.mins;
     maxs = problem.maxs;
     normalization = problem.normalization;
     design_width = problem.design_width;
-    elast_mats = problem.elast_mats; 
+    elast_mats = problem.elast_mats;
     elast_prices = problem.elast_prices;
     constraint_tol = problem.constraint_tol;
     obj_xtol = problem.obj_xtol;
@@ -227,80 +210,63 @@ function estimate!(problem::NPDProblem;
     # Estimate the problem only with linear constraints if not using quasi-bayes
     if !quasi_bayes
         verbose && println("Estimating problem in JuMP without nonlinear constraints....")
-        estimate_fast!(problem, 
-            linear_solver = linear_solver, 
-            verbose = verbose); 
+        estimate_fast!(problem,
+            linear_solver = linear_solver,
+            verbose = verbose);
     end
 
-    # Otherwise skip the linear solver and jump to MCMC
-    if quasi_bayes 
-        try 
-            @assert burn_in < 1 
+    # Otherwise skip the linear solver and jump to HMC
+    if quasi_bayes
+        try
+            @assert burn_in < 1
         catch
-            error("`burn_in` denotes the fraction of samples to drap. Must be less than 1")
+            error("`burn_in` denotes the fraction of samples to discard. Must be less than 1")
         end
-        
+
         burn_in_fraction = burn_in;
         burn_in = round(Int, burn_in * n_samples);
         gamma_length = size(Bvec[1],2);
 
-        # Define inputs to quasi-bayes sampling 
+        # Define prior
         nbetas          = get_nbetas(problem)
         lbs             = sieve_type == "bernstein" ? get_lower_bounds(problem) : []
         parameter_order = lbs != []                 ? get_parameter_order(lbs)  : 1:sum(nbetas)
         vbetastar       = 10;
         vbeta           = zeros(sum(nbetas))
 
-        if (sampler == "mh")
-            sampler = MH(
-                :gamma => AdvancedMH.RandomWalkProposal(MvNormal(zeros(gamma_length-1), diagm(step*ones(gamma_length-1)))),
-                :betastar =>  AdvancedMH.RandomWalkProposal(MvNormal(zeros(sum(nbetas)), diagm(step*ones(sum(nbetas))))))
-        elseif (sampler ==[]) | (sampler == "hmc")
-            sampler = HMC(0.01, 1; adtype = AutoReverseDiff(compile=true))
-        end
-        
-        if sieve_type == "bernstein" 
+        if sieve_type == "bernstein"
             for j in 1:sum(nbetas)
                 if isnothing(lbs[j])
                     vbeta[j] = vbetastar
-                else 
+                else
                     vbeta[j] = sqrt(log(1 + vbetastar))
                 end
             end
-        else 
+        else
             vbeta .= vbetastar
         end
 
         prior = Dict(
-            "betabar" => !isnothing(custom_prior) && haskey(custom_prior, "betabar") ? custom_prior["betabar"] .+ zeros(sum(nbetas)) : zeros(sum(nbetas)), 
-            "vbeta" => !isnothing(custom_prior) && haskey(custom_prior, "vbeta") ? custom_prior["vbeta"].*ones(size(vbeta)) : vbeta,
+            "betabar"  => !isnothing(custom_prior) && haskey(custom_prior, "betabar")  ? custom_prior["betabar"] .+ zeros(sum(nbetas))  : zeros(sum(nbetas)),
+            "vbeta"    => !isnothing(custom_prior) && haskey(custom_prior, "vbeta")    ? custom_prior["vbeta"].*ones(size(vbeta))        : vbeta,
             "gammabar" => !isnothing(custom_prior) && haskey(custom_prior, "gammabar") ? custom_prior["gammabar"] .+ zeros(gamma_length-1) : zeros(gamma_length-1),
-            "vgamma" => !isnothing(custom_prior) && haskey(custom_prior, "vgamma") ? custom_prior["vgamma"] : 10,
-            "lbs" => lbs,
+            "vgamma"   => !isnothing(custom_prior) && haskey(custom_prior, "vgamma")   ? custom_prior["vgamma"]                           : 10,
+            "lbs"            => lbs,
             "parameter_order" => collect(parameter_order),
-            "nbetas" => nbetas
+            "nbetas"         => nbetas
         )
-        
+
         # Find a starting point for sampling
-        # ((problem.results != []) & (n_attempts == 0))
-        # println("Using existing minimizer as the initial point")
-        # start = [problem.results.minimizer[NPDemand.sieve_to_betas_index(problem)]; problem.results.minimizer[problem.design_width+2:end]]
-        # elseif
         if (n_attempts == 0)
-            start, start_exit = find_starting_point(problem, prior, problem.tempmats, weight_matrices, n_attempts = 1);
+            start, start_exit = find_starting_point(problem, prior, problem.tempmats; n_attempts = 1);
         else
             verbose && println("Finding a valid starting point for sampler....")
-            start, start_exit = find_starting_point(problem, prior, problem.tempmats, weight_matrices, n_attempts = n_attempts);
+            start, start_exit = find_starting_point(problem, prior, problem.tempmats; n_attempts = n_attempts);
             if start_exit == "success"
                 println("Valid starting point found")
             else
-                println("Did not find a valid starting point. Running the sampler anyway, but you may wish to increase `n_attempts` to find a better starting point.")
+                println("Did not find a valid starting point. Running the sampler anyway, but you may wish to increase `n_attempts`.")
             end
-        end
-
-        if step == :auto
-            verbose && println("Sampling small chains with different step sizes to target 20% acceptance rate....")
-            step, step_grid, accept = pick_step_size(problem, prior, tempmats, weight_matrices; n_samples = n_samples);
         end
 
         J = length(Xvec);
@@ -308,72 +274,45 @@ function estimate!(problem::NPDProblem;
 
         # Sample
         verbose && println("Beginning sampling....")
-        no_penalty     = (penalty == 0) || (problem.constraints == [:exchangeability])
-        use_analytical = no_penalty && (sampler isa HMC)
-
-        if use_analytical
-            # Extract step size and leapfrog count from the HMC sampler object if provided,
-            # falling back to the auto-tuned step and a default of 10 leapfrog steps.
-            ε_hmc = (sampler isa HMC && hasproperty(sampler, :ϵ))            ? sampler.ϵ :
-                    (sampler isa HMC && hasproperty(sampler, :ε))            ? sampler.ε :
-                    (sampler isa HMC && hasproperty(sampler, :δ))            ? sampler.δ : step
-            L_hmc = (sampler isa HMC && hasproperty(sampler, :n_leapfrog))  ? sampler.n_leapfrog :
-                    (sampler isa HMC && hasproperty(sampler, :n))            ? sampler.n : 10
-            z_init_vec = vcat(start.z_beta, start.z_gamma)
-            chain = analytical_hmc(prior, matrix_storage_dict, J;
-                n_samples  = n_samples,
-                step_size  = ε_hmc,
-                n_leapfrog = L_hmc,
-                n_adapt    = burn_in,
-                z_init     = z_init_vec,
-                verbose    = verbose)
-        else
-            chain = Turing.sample(
-                sample_quasibayes(problem, prior, problem.tempmats, weight_matrices;
-                penalty = penalty, matrix_storage_dict = matrix_storage_dict),
-                sampler, n_samples,
-                initial_params = InitFromParams((;start)),
-                sieve_type = sieve_type,
-                chain_type = MCMCChains.Chains,
-                discard_initial = 1)
-        end
+        z_init_vec = vcat(start.z_beta, start.z_gamma)
+        chain = analytical_hmc(prior, matrix_storage_dict, J;
+            n_samples  = n_samples,
+            step_size  = sampler.ε,
+            n_leapfrog = sampler.n_leapfrog,
+            n_adapt    = burn_in,
+            thin       = skip,
+            z_init     = z_init_vec,
+            verbose    = verbose)
 
         # Convert chain from NCP (z) space back to parameter space
-        start_row = burn_in+1;
-        z_betadraws   = hcat([chain["z_beta[$i]"]  for i in 1:sum(nbetas)]...)[start_row:end,:]
-        z_gammadraws  = hcat([chain["z_gamma[$i]"] for i in 1:gamma_length-1]...)[start_row:end,:]
+        # chain already excludes adaptation steps and is thinned by skip
+        z_betadraws   = hcat([chain["z_beta[$i]"]  for i in 1:sum(nbetas)]...)
+        z_gammadraws  = hcat([chain["z_gamma[$i]"] for i in 1:gamma_length-1]...)
         betastardraws = prior["betabar"]' .+ sqrt.(prior["vbeta"]') .* z_betadraws
         gammadraws    = prior["gammabar"]' .+ sqrt(prior["vgamma"]) .* z_gammadraws
         betadraws     = reparameterization_draws(betastardraws, lbs, parameter_order)
-        
-        # thin the markov chain
-        L = size(betastardraws,1);
-        skip_inds = 1:skip:L
-        betadraws = betadraws[skip_inds,:];
-        gammadraws = gammadraws[skip_inds,:];
 
         # calculate posterior mean parameters
         qpm = map_to_sieve(mean(betadraws, dims=1)', mean(gammadraws, dims=1)', problem.exchange, nbetas, problem)
 
-        problem.sampling_details = (; burn_in = burn_in_fraction, skip = skip, smc = false, prior = prior)
-        problem.results  = NPD_parameters(qpm, hcat(betadraws, gammadraws));
-        problem.chain    = chain;
+        problem.sampling_details  = (; burn_in = burn_in_fraction, skip = skip, smc = false, prior = prior)
+        problem.results           = NPD_parameters(qpm);
+        problem.chain_params      = hcat(betadraws, gammadraws);
+        problem.chain_starparams  = chain;
     end
 end
 
 """
     smc!(problem::NPDemand.NPDProblem;
-        grid_points::Int    = 50, 
-        max_penalty::Real   = 100, 
-        ess_threshold::Real = 100, 
-        step::Real          = 0.1, 
-        skip::Int           = 5,
-        burn_in::Real       = 0.25, 
-        mh_steps            = max(5, floor(size(problem.results.filtered_chain, 2))/10),
+        grid_points::Int    = 50,
+        max_penalty::Real   = 100,
+        ess_threshold::Real = 100,
+        step::Real          = 0.1,
+        mh_steps            = 10,
         seed                = 4132,
         smc_method          = :adaptive,
         max_iter            = 1000,
-        adaptive_tolerance  = false, 
+        adaptive_tolerance  = false,
         max_violations      = 0.01)
 
 Run sequentially constrained Monte Carlo (SMC) on the problem.
@@ -383,12 +322,10 @@ Run sequentially constrained Monte Carlo (SMC) on the problem.
 
 # Optional Arguments
 - `grid_points::Int`: The number of grid points for the SMC grid. Default is 50.
-- `max_penalty::Real`: The maximum penalty value for the SMC algorithm. Default is 5.
+- `max_penalty::Real`: The maximum penalty value for the SMC algorithm. Default is 100.
 - `ess_threshold::Real`: The effective sample size threshold for the SMC algorithm. Default is 100.
 - `step::Real`: The step size for the SMC algorithm. Default is 0.1.
-- `skip::Int`: The thinning factor for the SMC chain. Default is 5.
-- `burn_in::Real`: The fraction of samples to be discarded as burn-in. Default is 0.25.
-- `mh_steps`: The number of Metropolis-Hastings steps per iteration. Default is calculated based on the size of the filtered chain.
+- `mh_steps`: The number of Metropolis-Hastings steps per iteration. Default is 10.
 - `seed`: The random seed for the SMC algorithm. Default is 4132.
 - `smc_method`: The method for choosing the SMC grid. Default is :adaptive. Other options are [:linear\\_grid, :geometric\\_grid, and :logit\\_grid], which specify grids of each form between zero and the maximum penalty.
 - `max_iter`: The maximum number of iterations for the SMC algorithm. Default is 1000.
@@ -398,17 +335,13 @@ Run sequentially constrained Monte Carlo (SMC) on the problem.
 The function will overwrite the results in the problem object with the resulting chain.
 
 For harder or slower problems, it may be necessary to increase the number of Metropolis-Hastings steps per iteration (`mh_steps`), the number of iterations (`max_iter`), or the maximum allowed fraction markets with violations (`max_violations`).
-
-`burn_in` and `skip` control the number of samples to drop and the thinning of the chain, respectively.
 """
 function smc!(problem::NPDemand.NPDProblem;
-    grid_points::Int    = 50, 
-    max_penalty::Real   = 100, 
-    ess_threshold::Real = 100, 
-    step::Real          = 0.1, 
-    skip::Int           = 5,
-    burn_in::Real       = 0.25, 
-    mh_steps            = max(5, floor(size(problem.results.filtered_chain, 2))/10),
+    grid_points::Int    = 50,
+    max_penalty::Real   = 100,
+    ess_threshold::Real = 100,
+    step::Real          = 0.1,
+    mh_steps            = 10,
     seed                = 4132,
     smc_method          = :adaptive,
     max_iter            = 1000,
@@ -429,7 +362,6 @@ function smc!(problem::NPDemand.NPDProblem;
         error("`penalty_type` must be one of [:frac, :count, :magnitude]")
     end
 
-    burn_in_int = Int(burn_in * size(problem.chain,1));
     modulo_num = Int(1 + extra_mh_loops);
     approximation_details = problem.approximation_details;
     sieve_type = approximation_details[:sieve_type]
@@ -440,8 +372,6 @@ function smc!(problem::NPDemand.NPDProblem;
         max_penalty         = max_penalty,
         ess_threshold       = ess_threshold,
         step_size           = step,
-        skip                = skip,
-        burn_in             = burn_in_int,
         mh_steps            = mh_steps,
         seed                = seed,
         smc_method          = smc_method,
@@ -452,21 +382,21 @@ function smc!(problem::NPDemand.NPDProblem;
         penalty_type        = penalty_type,
         approximation_details = approximation_details
         );
-    
-    # Calculate new posterior mean and replace problem results 
+
+    # Calculate new posterior mean and replace problem results
     lbs             = sieve_type == "bernstein" ? get_lower_bounds(problem) : []
     parameter_order = sieve_type == "bernstein" ? get_parameter_order(lbs) : 1:sum(get_nbetas(problem))
     nbetas          = get_nbetas(problem)
     nbeta           = sum(nbetas)
 
-    nparticles      = size(problem.smc_results.thetas,1);
-    
-    betas           = reparameterization_draws(problem.smc_results.thetas[:,1:nbeta], lbs, parameter_order)
-    gammas          = problem.smc_results.thetas[:,(nbeta+1):end]        
-    thetas_sieve    = vcat([map_to_sieve(betas[i,:], problem.smc_results.thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+    nparticles   = size(problem.smc_results.thetas,1);
 
-    problem.results.minimizer       = mean(thetas_sieve, dims = 1);
-    problem.results.filtered_chain  = hcat(betas, gammas)
-    problem.sampling_details        = (; burn_in = burn_in, 
-        skip = skip, smc = true, prior = problem.sampling_details.prior);
+    betas        = reparameterization_draws(problem.smc_results.thetas[:,1:nbeta], lbs, parameter_order)
+    gammas       = problem.smc_results.thetas[:,(nbeta+1):end]
+    thetas_sieve = vcat([map_to_sieve(betas[i,:], problem.smc_results.thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+
+    problem.results.minimizer    = mean(thetas_sieve, dims = 1);
+    problem.chain_starparams     = problem.smc_results.thetas
+    problem.chain_params         = hcat(betas, gammas)
+    problem.sampling_details     = (; smc = true, prior = problem.sampling_details.prior);
 end

@@ -28,7 +28,7 @@ function compute_demand_function!(problem, df;
         println("Using provided residual demand shifters in counterfactual calculations")
     end
 
-    if problem.chain ==[]
+    if problem.chain_starparams ==[]
         inverted = compute_demand_function_inner(problem, df, 
             max_iter = max_iter, 
             show_trace = show_trace, 
@@ -51,21 +51,21 @@ function compute_demand_function!(problem, df;
         converged_vec = [];
 
         if n_draws == []
-            n_draws = length(burn_in+1:skip:size(problem.chain,1))
+            n_draws = length(burn_in+1:skip:size(problem.chain_starparams,1))
         end
         try 
-            @assert ((n_draws > 0) & (n_draws <= length(burn_in+1:skip:size(problem.chain,1))))
+            @assert ((n_draws > 0) & (n_draws <= length(burn_in+1:skip:size(problem.chain_starparams,1))))
         catch 
             error("`n_draws` must be greater than 0 and weakly less than the total number of draws in the final chain")
         end
         println("Using $n_draws quasi-Bayes estimates. This may take a few minutes....")
         if CI == []
             nbetas = get_nbetas(problem);
-            draw_order  = sample(1:size(problem.results.filtered_chain,1), n_draws, replace = false);
+            draw_order  = sample(1:size(problem.chain_params,1), n_draws, replace = false);
 
             for i in ProgressBar(1:n_draws)
                 # print(".")
-                sample_i    = problem.results.filtered_chain[draw_order[i],:];
+                sample_i    = problem.chain_params[draw_order[i],:];
                 β_i = map_to_sieve(sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
                                 problem.exchange, 
@@ -91,11 +91,11 @@ function compute_demand_function!(problem, df;
             alpha = 1 - CI;
 
             nbetas      = get_nbetas(problem);
-            draw_order  = sample(1:size(problem.results.filtered_chain,1), n_draws, replace = false);
+            draw_order  = sample(1:size(problem.chain_params,1), n_draws, replace = false);
 
             for i in ProgressBar(1:n_draws)
                 # print(".")
-                sample_i    = problem.results.filtered_chain[draw_order[i],:];
+                sample_i    = problem.chain_params[draw_order[i],:];
                 β_i         = map_to_sieve(sample_i[1:sum(nbetas)], 
                                 sample_i[sum(nbetas)+1:end], 
                                 problem.exchange, 
