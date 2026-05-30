@@ -41,8 +41,6 @@ function compute_demand_function!(problem, df;
         end
         df[!,r"shares"] .= demand;
     else
-        burn_in     = problem.sampling_details.burn_in;
-        skip        = problem.sampling_details.skip;
         J           = length(problem.Xvec);
         T           = size(problem.data,1);
 
@@ -51,11 +49,11 @@ function compute_demand_function!(problem, df;
         converged_vec = [];
 
         if n_draws == []
-            n_draws = length(burn_in+1:skip:size(problem.chain_starparams,1))
+            n_draws = size(problem.chain_params, 1)
         end
-        try 
-            @assert ((n_draws > 0) & (n_draws <= length(burn_in+1:skip:size(problem.chain_starparams,1))))
-        catch 
+        try
+            @assert ((n_draws > 0) & (n_draws <= size(problem.chain_params, 1)))
+        catch
             error("`n_draws` must be greater than 0 and weakly less than the total number of draws in the final chain")
         end
         println("Using $n_draws quasi-Bayes estimates. This may take a few minutes....")

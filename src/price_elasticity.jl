@@ -33,8 +33,6 @@ function price_elasticities!(problem;
         problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast.all_elast_mat)
         problem.all_jacobians    = elast.Jmat;
     else
-        burn_in = problem.sampling_details.burn_in;
-        skip    = problem.sampling_details.skip;
         J       = length(problem.Xvec);
         T       = size(problem.data,1);
 
