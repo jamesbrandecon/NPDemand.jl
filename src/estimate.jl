@@ -244,9 +244,8 @@ function estimate!(problem::NPDProblem;
                     vbetasq[j] = vbetastarsq
                 else
                     depth      = length(dep_sets[j])
-                    m          = (1.0 + depth)^(-2) # target natural-scale mean of exp(betastar[j])
-                    vsq        = vbetastarsq        # target natural-scale variance (held constant across depth)
-                    vbetasq[j] = log(1 + vsq / m^2)
+                    m          = (1.0 + depth)^(-2)
+                    vbetasq[j] = log(1 + vbetastarsq)
                     betabar[j] = log(m) - vbetasq[j] / 2
                 end
             end
