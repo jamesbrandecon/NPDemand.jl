@@ -104,8 +104,8 @@ function find_starting_point(problem, prior, tempmats;
     gamma_length    = size(problem.Bvec[1], 2)
     betabar         = prior["betabar"]
     gammabar        = prior["gammabar"]
-    vbeta           = prior["vbeta"]
-    vgamma          = prior["vgamma"]
+    vbetasq         = prior["vbetasq"]
+    vgammasq        = prior["vgammasq"]
     J               = length(problem.Xvec)
 
     param_out = (z_beta = zeros(sum(nbetas)), z_gamma = zeros(gamma_length - 1))
@@ -113,8 +113,8 @@ function find_starting_point(problem, prior, tempmats;
     for _ in 1:n_attempts
         z_beta_i   = randn(sum(nbetas))
         z_gamma_i  = randn(gamma_length - 1)
-        betastar_i = betabar .+ sqrt.(vbeta) .* z_beta_i
-        gamma_i    = gammabar .+ sqrt(vgamma) .* z_gamma_i
+        betastar_i = betabar .+ sqrt.(vbetasq) .* z_beta_i
+        gamma_i    = gammabar .+ sqrt(vgammasq) .* z_gamma_i
         beta_i     = reparameterization(betastar_i, lbs, parameter_order)
         st         = problem.approximation_details[:sieve_type]
         sieve_params = map_to_sieve(beta_i, gamma_i, problem.exchange, nbetas, problem; sieve_type = st)
@@ -160,15 +160,15 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
     seed::Union{Int,Nothing} = nothing,
     verbose::Bool       = true)
 
-    betabar  = prior["betabar"];  vbeta    = prior["vbeta"]
-    gammabar = prior["gammabar"]; vgamma   = prior["vgamma"]
+    betabar  = prior["betabar"];  vbetasq  = prior["vbetasq"]
+    gammabar = prior["gammabar"]; vgammasq = prior["vgammasq"]
     lbs      = prior["lbs"];      parameter_order = prior["parameter_order"]
     lbs_trivial = all(lbs .== typemax(Int))
 
     nbeta  = length(betabar);   ngamma = length(gammabar)
     n      = nbeta + ngamma
 
-    sqrt_vbeta  = sqrt.(vbeta);  sqrt_vgamma = sqrt(vgamma)
+    sqrt_vbetasq  = sqrt.(vbetasq);  sqrt_vgammasq = sqrt(vgammasq)
 
     yZX_β     = msd["yZX_β"];    XZy_β     = msd["XZy_β"]
     XX_ββ     = msd["XX_ββ"];    XX_βγ     = msd["XX_βγ"]
@@ -189,8 +189,8 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
     function logpost_grad!(grad, z)
         z_β = @view z[1:nbeta];  z_γ = @view z[nbeta+1:end]
 
-        @. beta  = betabar + sqrt_vbeta * z_β
-        @. gamma = gammabar + sqrt_vgamma * z_γ
+        @. beta  = betabar + sqrt_vbetasq * z_β
+        @. gamma = gammabar + sqrt_vgammasq * z_γ
 
         repar_pb = nothing
         if !lbs_trivial
@@ -225,12 +225,12 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
         end
 
         if lbs_trivial
-            @. grad[1:nbeta]    = -z_β - 0.5*∂beta*sqrt_vbeta
+            @. grad[1:nbeta]    = -z_β - 0.5*∂beta*sqrt_vbetasq
         else
             _, ∂betastar, _, _ = repar_pb(∂beta)
-            @. grad[1:nbeta]    = -z_β - 0.5*∂betastar*sqrt_vbeta
+            @. grad[1:nbeta]    = -z_β - 0.5*∂betastar*sqrt_vbetasq
         end
-        @. grad[nbeta+1:end] = -z_γ - 0.5*∂gamma*sqrt_vgamma
+        @. grad[nbeta+1:end] = -z_γ - 0.5*∂gamma*sqrt_vgammasq
 
         return -0.5*(dot(z_β, z_β) + dot(z_γ, z_γ)) - 0.5*val
     end

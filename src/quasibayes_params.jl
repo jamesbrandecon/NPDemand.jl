@@ -74,6 +74,23 @@ function reparameterization(betastar::AbstractVector{T}, lbs::AbstractVector, pa
     end
 end
 
+function all_dependencies(i, lbs; seen=Set{Int}())
+    deps = lbs[i]
+
+    if isnothing(deps)
+        return seen
+    end
+
+    for j in deps
+        if j ∉ seen
+            push!(seen, j)
+            all_dependencies(j, lbs; seen=seen)
+        end
+    end
+
+    return seen
+end
+
 function ChainRulesCore.rrule(::typeof(reparameterization), betastar::AbstractVector, lbs::AbstractVector, parameter_order::AbstractVector)
     if all(lbs .== typemax(Int))
         trivial_pullback(ȳ) = ChainRulesCore.NoTangent(), ChainRulesCore.unthunk(ȳ), ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent()

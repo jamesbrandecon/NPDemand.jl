@@ -231,26 +231,34 @@ function estimate!(problem::NPDProblem;
         nbetas          = get_nbetas(problem)
         lbs             = sieve_type == "bernstein" ? get_lower_bounds(problem) : []
         parameter_order = lbs != []                 ? get_parameter_order(lbs)  : 1:sum(nbetas)
-        vbetastar       = 10;
-        vbeta           = zeros(sum(nbetas))
+        vbetastarsq     = 100;
+        vbetasq         = zeros(sum(nbetas))
+        betabar         = zeros(sum(nbetas))
+
+        # define sets of parameter dependencies (through constraint bounds)
+        dep_sets = [sort(collect(all_dependencies(i, lbs))) for i in eachindex(lbs)]
 
         if sieve_type == "bernstein"
             for j in 1:sum(nbetas)
                 if isnothing(lbs[j])
-                    vbeta[j] = vbetastar
+                    vbetasq[j] = vbetastarsq
                 else
-                    vbeta[j] = sqrt(log(1 + vbetastar))
+                    depth      = length(dep_sets[j])
+                    m          = (1.0 + depth)^(-2) # target natural-scale mean of exp(betastar[j])
+                    vsq        = vbetastarsq        # target natural-scale variance (held constant across depth)
+                    vbetasq[j] = log(1 + vsq / m^2)
+                    betabar[j] = log(m) - vbetasq[j] / 2
                 end
             end
         else
-            vbeta .= vbetastar
+            vbetasq .= vbetastarsq
         end
 
         prior = Dict(
-            "betabar"  => !isnothing(custom_prior) && haskey(custom_prior, "betabar")  ? custom_prior["betabar"] .+ zeros(sum(nbetas))  : zeros(sum(nbetas)),
-            "vbeta"    => !isnothing(custom_prior) && haskey(custom_prior, "vbeta")    ? custom_prior["vbeta"].*ones(size(vbeta))        : vbeta,
+            "betabar"  => !isnothing(custom_prior) && haskey(custom_prior, "betabar")  ? custom_prior["betabar"] .+ zeros(sum(nbetas))  : betabar,
+            "vbetasq"  => !isnothing(custom_prior) && haskey(custom_prior, "vbetasq")  ? custom_prior["vbetasq"].*ones(size(vbetasq))    : vbetasq,
             "gammabar" => !isnothing(custom_prior) && haskey(custom_prior, "gammabar") ? custom_prior["gammabar"] .+ zeros(gamma_length-1) : zeros(gamma_length-1),
-            "vgamma"   => !isnothing(custom_prior) && haskey(custom_prior, "vgamma")   ? custom_prior["vgamma"]                           : 10,
+            "vgammasq" => !isnothing(custom_prior) && haskey(custom_prior, "vgammasq") ? custom_prior["vgammasq"]                         : 10,
             "lbs"            => lbs,
             "parameter_order" => collect(parameter_order),
             "nbetas"         => nbetas
@@ -288,17 +296,24 @@ function estimate!(problem::NPDProblem;
         # chain already excludes adaptation steps and is thinned by skip
         z_betadraws   = hcat([chain["z_beta[$i]"]  for i in 1:sum(nbetas)]...)
         z_gammadraws  = hcat([chain["z_gamma[$i]"] for i in 1:gamma_length-1]...)
-        betastardraws = prior["betabar"]' .+ sqrt.(prior["vbeta"]') .* z_betadraws
-        gammadraws    = prior["gammabar"]' .+ sqrt(prior["vgamma"]) .* z_gammadraws
+        betastardraws = prior["betabar"]' .+ sqrt.(prior["vbetasq"]') .* z_betadraws
+        gammadraws    = prior["gammabar"]' .+ sqrt(prior["vgammasq"]) .* z_gammadraws
         betadraws     = reparameterization_draws(betastardraws, lbs, parameter_order)
 
         # calculate posterior mean parameters
         qpm = map_to_sieve(mean(betadraws, dims=1)', mean(gammadraws, dims=1)', problem.exchange, nbetas, problem)
 
+        starparams_names = vcat(
+            [Symbol("betastar[$i]")  for i in 1:sum(nbetas)],
+            [Symbol("gammastar[$i]") for i in 1:gamma_length-1])
+        starparams = hcat(betastardraws, gammadraws)
+
         problem.sampling_details  = (; burn_in = burn_in_fraction, skip = skip, smc = false, prior = prior)
         problem.results           = NPD_parameters(qpm);
         problem.chain_params      = hcat(betadraws, gammadraws);
-        problem.chain_starparams  = chain;
+        problem.chain_starparams  = MCMCChains.Chains(
+            reshape(starparams, size(starparams,1), size(starparams,2), 1),
+            starparams_names);
     end
 end
 

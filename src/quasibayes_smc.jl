@@ -61,12 +61,12 @@ end
 function make_prior_dists(prior, gamma_length)
     betabar  = prior["betabar"]
     gammabar = prior["gammabar"]
-    vbeta    = prior["vbeta"]
-    vgamma   = prior["vgamma"]
+    vbetasq  = prior["vbetasq"]
+    vgammasq = prior["vgammasq"]
     ngamma   = gamma_length-1;
 
-    beta_dist  = MvNormal(betabar, Diagonal(vbeta))
-    gamma_dist = MvNormal(gammabar, Diagonal(fill(vgamma, ngamma)))
+    beta_dist  = MvNormal(betabar, Diagonal(vbetasq))
+    gamma_dist = MvNormal(gammabar, Diagonal(fill(vgammasq, ngamma)))
 
     return beta_dist, gamma_dist
 end
@@ -465,12 +465,10 @@ function smc(problem::NPDemand.NPDProblem;
 
     _betabar      = prior["betabar"]
     _gammabar     = prior["gammabar"]
-    _vbeta        = prior["vbeta"]
-    _vgamma       = prior["vgamma"]
-    z_betadraws   = hcat([particles["z_beta[$i]"]  for i in 1:sum(nbetas)]...)
-    z_gammadraws  = hcat([particles["z_gamma[$i]"] for i in 1:gamma_length-1]...)
-    betastardraws = _betabar' .+ sqrt.(_vbeta') .* z_betadraws
-    gammadraws    = _gammabar' .+ sqrt(_vgamma) .* z_gammadraws
+    _vbetasq      = prior["vbetasq"]
+    _vgammasq     = prior["vgammasq"]
+    betastardraws = hcat([particles["betastar[$i]"]  for i in 1:sum(nbetas)]...)
+    gammadraws    = hcat([particles["gammastar[$i]"] for i in 1:gamma_length-1]...)
     betadraws     = reparameterization_draws(betastardraws, lbs, parameter_order)
     nparticles    = size(betastardraws,1);
 
@@ -526,8 +524,8 @@ function smc(problem::NPDemand.NPDProblem;
 
     t = 1;
     beta_μ, gamma_μ = _betabar, _gammabar
-    beta_inv_var, beta_logdet   = inv.(_vbeta), sum(log.(_vbeta))
-    gamma_inv_var, gamma_logdet = fill(inv(_vgamma), gamma_length-1), (gamma_length-1) * log(_vgamma)
+    beta_inv_var, beta_logdet   = inv.(_vbetasq), sum(log.(_vbetasq))
+    gamma_inv_var, gamma_logdet = fill(inv(_vgammasq), gamma_length-1), (gamma_length-1) * log(_vgammasq)
     n_kernel_steps = Int(mh_steps)
 
     failure_count = 0;
