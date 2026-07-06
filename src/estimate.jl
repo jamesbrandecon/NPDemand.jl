@@ -144,7 +144,6 @@ end
         n_samples::Int = 50_000,
         burn_in::Real = 0.25,
         skip::Int = 5,
-        n_attempts = 0,
         step::Real = 0.01)
 
 Estimates the problem using the specified parameters.
@@ -157,7 +156,6 @@ Estimates the problem using the specified parameters.
 - `n_samples::Int`: The number of samples to draw. Default is 50,000.
 - `burn_in::Real`: The fraction of samples to use for HMC adaptation and then discard. Must be less than 1. Default is 0.25.
 - `skip::Int`: The thinning factor for the saved chain. Default is 5.
-- `n_attempts`: The number of prior draws to search for a constraint-satisfying starting point. Default is 0 (single attempt).
 - `step::Real`: The HMC step size. Default is 0.01.
 - `n_leapfrog::Int`: Number of leapfrog steps per HMC proposal. Default is 10.
 """
@@ -168,7 +166,6 @@ function estimate!(problem::NPDProblem;
     n_samples::Int = 50_000,
     burn_in::Real = 0.25,
     skip::Int = 5,
-    n_attempts = 0,
     sampler = HMC(0.01, 10),
     custom_prior::Union{Dict, Nothing} = nothing
     )
@@ -263,32 +260,17 @@ function estimate!(problem::NPDProblem;
             "nbetas"         => nbetas
         )
 
-        # Find a starting point for sampling
-        if (n_attempts == 0)
-            start, start_exit = find_starting_point(problem, prior, problem.tempmats; n_attempts = 1);
-        else
-            verbose && println("Finding a valid starting point for sampler....")
-            start, start_exit = find_starting_point(problem, prior, problem.tempmats; n_attempts = n_attempts);
-            if start_exit == "success"
-                println("Valid starting point found")
-            else
-                println("Did not find a valid starting point. Running the sampler anyway, but you may wish to increase `n_attempts`.")
-            end
-        end
-
         J = length(Xvec);
         matrix_storage_dict = gmm_fast_blocks(problem, nbetas)
 
-        # Sample
+        # Sample (z_init defaults to zeros(n) inside analytical_hmc)
         verbose && println("Beginning sampling....")
-        z_init_vec = vcat(start.z_beta, start.z_gamma)
         chain = analytical_hmc(prior, matrix_storage_dict, J;
             n_samples  = n_samples,
             step_size  = sampler.ε,
             n_leapfrog = sampler.n_leapfrog,
             n_adapt    = burn_in,
             thin       = skip,
-            z_init     = z_init_vec,
             verbose    = verbose)
 
         # Convert chain from NCP (z) space back to parameter space

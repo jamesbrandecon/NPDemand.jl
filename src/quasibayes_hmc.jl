@@ -95,42 +95,6 @@ function elast_mat_zygote(θ::AbstractArray{T},
     return all_elast_mat
 end
 
-function find_starting_point(problem, prior, tempmats;
-    n_attempts = 1000)
-
-    nbetas          = prior["nbetas"]
-    lbs             = prior["lbs"]
-    parameter_order = prior["parameter_order"]
-    gamma_length    = size(problem.Bvec[1], 2)
-    betabar         = prior["betabar"]
-    gammabar        = prior["gammabar"]
-    vbetasq         = prior["vbetasq"]
-    vgammasq        = prior["vgammasq"]
-    J               = length(problem.Xvec)
-
-    param_out = (z_beta = zeros(sum(nbetas)), z_gamma = zeros(gamma_length - 1))
-
-    for _ in 1:n_attempts
-        z_beta_i   = randn(sum(nbetas))
-        z_gamma_i  = randn(gamma_length - 1)
-        betastar_i = betabar .+ sqrt.(vbetasq) .* z_beta_i
-        gamma_i    = gammabar .+ sqrt(vgammasq) .* z_gamma_i
-        beta_i     = reparameterization(betastar_i, lbs, parameter_order)
-        st         = problem.approximation_details[:sieve_type]
-        sieve_params = map_to_sieve(beta_i, gamma_i, problem.exchange, nbetas, problem; sieve_type = st)
-
-        elasts_i = elast_mat_zygote(sieve_params, problem, tempmats;
-            at = Matrix(problem.data[!, r"prices"]),
-            s  = Matrix(problem.data[!, r"shares"]))
-        elasts_i = [elasts_i[ii][j1, j2] for j1 in 1:J, j2 in 1:J, ii in 1:size(problem.data, 1)]
-
-        if run_elasticity_check(elasts_i, problem.constraints, problem.exchange)
-            return (z_beta = z_beta_i, z_gamma = z_gamma_i), "success"
-        end
-    end
-
-    return param_out, "failed"
-end
 
 function posterior_elasticities(j, k, betadraws, gammadraws, tempmats, problem)
     ndraws = min(size(betadraws,1), 1_000)
