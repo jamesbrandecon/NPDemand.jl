@@ -1,7 +1,9 @@
 using NPDemand
+using Statistics
 using DataFrames
-using Turing
+using Random
 using Plots
+using StatsPlots
 
 function simulate_comp2g(T, beta, gamma_own, gamma_other, sdxi, J1, J2)
     # J -- num of goods
@@ -10,17 +12,12 @@ function simulate_comp2g(T, beta, gamma_own, gamma_other, sdxi, J1, J2)
     # gamma_own -- coefficient on index of other goods within the own category
     # gamma_other -- coefficient on index of other goods in the other category
     # sdxi -- standard deviation of xi
-    
-    # z = 0.9 .* rand(T,J) .+ 0.05;
-    # xi = randn(T,J).*sdxi;
-    # p = 2 .*(z .+ rand(T,J)*0.1).+xi;
-    J = J1+J2;
+
     z = rand(T,J);
     xi = randn(T,J).*sdxi;
-    p = max.(2*z .+ 0.1*rand(T,J) .+ xi, 1e-2);
-    
+    p = max.(2*z .+ 0.1*rand(T,J) .+ xi, 1e-6);
     x = 2 .* rand(T,J);
-    # x = rand(T,J);
+
     delta = beta*p + x + xi;
     q = zeros(T,J);
     for j = 1:1:J1
@@ -34,17 +31,19 @@ function simulate_comp2g(T, beta, gamma_own, gamma_other, sdxi, J1, J2)
         index_other = collect(1:J1);
         q[:,temp_J2[j]] = exp.(delta[:,temp_J2[j]] + gamma_own*mean(delta[:,index_own],dims=2) + gamma_other*mean(delta[:,index_other],dims=2));
     end
-    s = q./(maximum(sum(q,dims=2))*1.1);
+    # s = q./(maximum(sum(q,dims=2))*1.1);
+    s = q./(quantile(vec(sum(q,dims=2)), 0.95)*1.25);
 
     df = toDataFrame(s,p,z,x);
     return df
 end
 
 # Simulate logit data
-J = 4; # of products
-T = 500; # # of markets
+J = 2; # of products
+T = 100; # # of markets
 beta = -1; # price coefficient
 sdxi = 1; # standard deviation of xi
+Random.seed!(T*10)
 s, p, z, x, xi  = simulate_logit(J, T, beta, sdxi);
 df = toDataFrame(s,p,z,x);
 exchange = [collect(1:J)] 
@@ -52,11 +51,12 @@ constraints = [:exchangeability, :monotone, :all_substitutes, :diagonal_dominanc
 
 # simulate complements data
 J = 4; # of products
-T = 500; # # of markets
+T = 1000; # # of markets
 beta = -1; # price coefficient
-sdxi = 0.1; # standard deviation of xi
+sdxi = 1; # standard deviation of xi
 gamma_own = 0.25
 gamma_other = 0.25
+Random.seed!(T*2)
 df = simulate_comp2g(T, beta, -abs(gamma_own), abs(gamma_other), sdxi, Int(J/2), Int(J/2));
 exchange = [collect(1:Int(J/2)), collect(Int(J/2)+1:J)] 
 constraints = [:exchangeability, :monotone, :subs_in_group, :complements_across_group]; 
@@ -69,45 +69,61 @@ approximation_details = Dict(
 );
 
 # count parameters
-NPDemand.count_params(; n_products=J, exchange=exchange, approximation_details=approximation_details)
+nbetas = NPDemand.count_params(; n_products=J, exchange=exchange, approximation_details=approximation_details)[:unique_params]
 
-# define problem
-npd_problem = define_problem(df; 
-                        exchange = exchange, 
-                        index_vars = ["prices", "x"], 
-                        constraints = constraints,
-                        FE = [], 
-                        approximation_details = approximation_details, 
-                        verbose = true
+# gmm-constrained
+problem_gmmc = define_problem(df; 
+                    exchange = exchange, 
+                    index_vars = ["prices", "x"], 
+                    constraints = constraints,
+                    FE = [], 
+                    approximation_details = approximation_details, 
+                    verbose = true
                     );
-
-# estimate baseline model
-@time estimate!(npd_problem, 
-    quasi_bayes = true,
-    sampler = HMC(0.1, 10), 
-    # sampler = NUTS(1000, 0.65), 
-    n_samples = 1000, 
-    skip = 1); 
-
-# trace plots
-Plots.plot(npd_problem.results.filtered_chain[:,1:4])
+estimate!(problem_gmmc)
 
 # check constraint violations
-report_constraint_violations(npd_problem; constraints=[:monotone, :all_substitutes, :diagonal_dominance_all])
+# report_constraint_violations(problem_gmmc; constraints=constraints)
 
-price_elasticities!(npd_problem)
-emat = summarize_elasticities(npd_problem, "matrix", "quantile"; q=0.5, integrate=true, CI=0.95)
+# price elasticities
+price_elasticities!(problem_gmmc)
+emat = summarize_elasticities(problem_gmmc, "matrix", "quantile")
+emat.Value
+
+# estimate baseline qb model
+problem_hmc = deepcopy(problem_gmmc)
+@time estimate!(problem_hmc, 
+    quasi_bayes = true,
+    sampler = HMC(0.1, 10), 
+    n_samples = 1250, 
+    burn_in = 0.2,
+    skip = 1); 
+
+# compare estimates
+Plots.boxplot(problem_hmc.chain_params[:,1:nbetas], color=:lightblue, label=false, ylims=(-5,6))
+Plots.scatter!(problem_gmmc.results.minimizer[1:nbetas,:], color=:red, label=:false)
+
+# check constraint violations
+report_constraint_violations(problem_hmc; constraints=constraints)
+
+# price elasticities
+price_elasticities!(problem_hmc)
+emat = summarize_elasticities(problem_hmc, "matrix", "quantile"; q=0.5, integrate=true, CI=0.95)
 emat.Posterior_Median
 
 # run smc
-@time smc!(npd_problem,
-    seed = 1024,
-    burn_in = 0.2,
-    skip = 1,
-    mh_steps = 20,
-    max_iter = 10,
-    step = 0.01,
-    # max_penalty = 10,
+problem_smc = deepcopy(problem_hmc)
+@time smc!(problem_smc,
+    mh_steps = 10,
+    max_iter = 11,
     ess_threshold = 500,
     smc_method = :adaptive
 )
+
+# check constraint violations
+report_constraint_violations(problem_smc; constraints=constraints)
+
+# price elasticities
+price_elasticities!(problem_smc)
+emat = summarize_elasticities(problem_smc, "matrix", "quantile"; q=0.5, integrate=true, CI=0.95)
+emat.Posterior_Median
