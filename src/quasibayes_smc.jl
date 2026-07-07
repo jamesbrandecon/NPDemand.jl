@@ -467,8 +467,15 @@ function smc(problem::NPDemand.NPDProblem;
     _gammabar     = prior["gammabar"]
     _vbetasq      = prior["vbetasq"]
     _vgammasq     = prior["vgammasq"]
-    betastardraws = hcat([particles["betastar[$i]"]  for i in 1:sum(nbetas)]...)
-    gammadraws    = hcat([particles["gammastar[$i]"] for i in 1:gamma_length-1]...)
+    if particles isa MCMCChains.Chains
+        betastardraws = hcat([particles["betastar[$i]"]  for i in 1:sum(nbetas)]...)
+        gammadraws    = hcat([particles["gammastar[$i]"] for i in 1:gamma_length-1]...)
+    else
+        # `chain_starparams` was set from a previous `smc!` call (a plain matrix,
+        # see estimate.jl), which stores columns in the same [betastar gammastar] order.
+        betastardraws = particles[:, 1:sum(nbetas)]
+        gammadraws    = particles[:, sum(nbetas)+1:sum(nbetas)+gamma_length-1]
+    end
     betadraws     = reparameterization_draws(betastardraws, lbs, parameter_order)
     nparticles    = size(betastardraws,1);
 
