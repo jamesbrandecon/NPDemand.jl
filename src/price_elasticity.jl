@@ -9,111 +9,61 @@ Currently does not calculate out-of-sample price elasticities. For this, use the
 Results of this function are stored as a `DataFrame` in problem.all_elasticities. Results can be summarized by hand or using the `summarize_elasticities` function. 
 We also store the Jacobian of the demand function with respect to prices, which can be used to calculate other quantities of interest.
 """
-function price_elasticities!(problem; 
-        CI::Union{Vector{Any}, Real} = [], 
-        n_draws::Union{Vector{Any}, Int} = [])
-    
-    # Unpack approximation details
-    approximation_details = problem.approximation_details;
-    order = approximation_details[:order]
-    max_interaction = approximation_details[:max_interaction]
-    sieve_type = approximation_details[:sieve_type]
+function price_elasticities!(problem; stat="median")
 
-    try 
-        @assert (CI==[]) | (CI isa Real)
-    catch 
-        error("CI must be a real number between 0 and 1. Use 0.95 for a 95% credible interval")
-    end
+    statfun = stat == "mean" ? mean :
+              stat == "median" ? median :
+              error("Unsupported stat: $stat (use \"mean\" or \"median\")")
 
-    if problem.chain_starparams ==[]
+    max_interaction = problem.approximation_details[:max_interaction]
+    sieve_type = problem.approximation_details[:sieve_type]
+
+    if problem.sampling_details ==[]
+
         elast = price_elasticities_inner(
-            problem, 
+            problem; 
+            β = problem.results.minimizer,
             sieve_type = sieve_type, 
-            max_interaction = max_interaction);
-        problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast.all_elast_mat)
-        problem.all_jacobians    = elast.Jmat;
+            max_interaction = max_interaction)
+        problem.all_elasticities = elast.all_elast_mat
+        problem.all_jacobians = elast.Jmat
+
     else
-        J       = length(problem.Xvec);
-        T       = size(problem.data,1);
 
-        elast_CI = [];
-        if n_draws == []
-            n_draws = size(problem.chain_params,1)
+        J = size(problem.data[:,r"shares"],2)
+        T = size(problem.data,1)
+        ndraws = size(problem.chain_params, 1)
+        nbetas = get_nbetas(problem)
+        elast_draws = Array{Float64}(undef, J, J, T, ndraws)
+        jacob_draws = Array{Float64}(undef, J, J, T, ndraws)
+
+        for i in ProgressBar(1:ndraws)
+
+            β_i = map_to_sieve(
+                problem.chain_params[i,1:sum(nbetas)],
+                problem.chain_params[i,(sum(nbetas)+1):end],
+                problem.exchange,
+                nbetas,
+                problem
+            )
+            elast = price_elasticities_inner(
+                problem; 
+                β = β_i, 
+                sieve_type = sieve_type, 
+                max_interaction = max_interaction
+            )
+            elast_i = elast.all_elast_mat
+            jacob_i = elast.Jmat
+            elast_draws[:,:,:,i] = reshape(reduce(hcat, elast_i), J, J, T)
+            jacob_draws[:,:,:,i] = reshape(reduce(hcat, jacob_i), J, J, T)
+        
         end
 
-        if CI == []
-            elast   = [zeros(J,J) for i in 1:T];
-            jacob   = [zeros(J,J) for i in 1:T];
-            nbetas = get_nbetas(problem);
-            for i in ProgressBar(1:n_draws)
-                sample_i = problem.chain_params[i,:];
-                β_i = map_to_sieve(sample_i[1:sum(nbetas)], 
-                                sample_i[sum(nbetas)+1:end], 
-                                problem.exchange, 
-                                nbetas, 
-                                problem, 
-                                sieve_type = sieve_type)
-                elast_i = price_elasticities_inner(
-                    problem, 
-                    β = β_i, 
-                    sieve_type = sieve_type,
-                    max_interaction = max_interaction);
-                # if typeof(elast_i) <:NamedTuple
-                #     elast_i = elast_i.all_elast_mat;
-                # end
-                elast = elast .+ elast_i.all_elast_mat;
-                jacob = jacob .+ elast_i.Jmat;
-            end
-            elast .= elast ./ n_draws; # Calculate the mean posterior elasticities
-            jacob .= jacob ./ n_draws;
-            problem.all_elasticities = DataFrame(market_ids = problem.data.market_ids, all_elasticities = elast);
-            problem.all_jacobians    = jacob;
-        else
-            elast   = [zeros(J,J) for i in 1:T];
-            jacob   = [zeros(J,J) for i in 1:T];
-            alpha   = 1 - CI;
-            try 
-                @assert ((n_draws > 0) & (n_draws <= size(problem.chain_params,1)))
-            catch 
-                error("`n_draws` must be greater than 0 and weakly less than the total number of draws in the final chain")
-            end
-            nbetas      = get_nbetas(problem);
+        problem.all_elasticities = [statfun(elast_draws[:,:,t,:]; dims=3)[:,:,1] for t in 1:T]
+        problem.all_jacobians = [statfun(jacob_draws[:,:,t,:]; dims=3)[:,:,1] for t in 1:T]
 
-            for i in ProgressBar(1:n_draws)
-                sample_i    = problem.chain_params[i,:];
-                β_i = map_to_sieve(sample_i[1:sum(nbetas)], 
-                                sample_i[sum(nbetas)+1:end], 
-                                problem.exchange, 
-                                nbetas, 
-                                problem, 
-                                sieve_type = sieve_type)
-                elast_i = price_elasticities_inner(
-                    problem, 
-                    β = β_i, 
-                    sieve_type = sieve_type,
-                    max_interaction = max_interaction)
-                elast       = elast + elast_i.all_elast_mat;
-                jacob       = jacob + elast_i.Jmat;
-                push!(elast_CI, elast_i.all_elast_mat);
-            end
-            ub = [
-                [quantile(getindex.(getindex.(elast_CI, t),j1,j2), 1-alpha/2) for j1 = 1:J, j2 = 1:J] 
-                for t in 1:T
-                    ]
-            lb = [
-                [quantile(getindex.(getindex.(elast_CI, t),j1,j2), alpha/2) for j1 = 1:J, j2 = 1:J] 
-                for t in 1:T
-                    ]
-            elast .= elast ./ n_draws; # Calculate the mean posterior elasticities
-            jacob .= jacob ./ n_draws;
-            problem.all_elasticities = DataFrame(
-                market_ids = problem.data.market_ids, 
-                all_elasticities = elast, 
-                ub = ub, 
-                lb = lb);
-            problem.all_jacobians    = jacob;
-        end
     end
+
 end
 
 function price_elasticities_inner(npd_problem; 
@@ -290,242 +240,43 @@ function calc_derivative_sieve(j1, j2;
 end
 
 """
-    summarize_elasticities(problem::NPDProblem, which_elasticities::String, stat::String; 
-        q = [],
-        integrate = false,
-        n_draws::Int = 100,
-        CI::Real = 0.95)
+    summarize_elasticities(problem::NPDProblem, which_elasticities::String, stat::String;
+        q = 0.5)
 
-Convenience function for summarizing price elasticities. `problem` should be a solved `NPDProblem` after running `price_elasticities!`. 
-`stat` should be in ["mean", "quantile"], and if `stat`=="quantile", the option `q` should include the quantile of interest (e.g., 0.75 for the 75th percentile price elasticities).
+Convenience function for summarizing the market-level price elasticities stored in `problem.all_elasticities`
+(populated by running `price_elasticities!(problem)`).
 
-When a problem has been estimated via quasi-Bayesian methods, the function can integrate over the posterior distribution of the parameters to provide a posterior distribution of the summarized value. 
-`n_draws` controls the number of draws from the posterior to use in the integration, and `CI` controls the with of the credible interval to use in the integration (0.95 for a 95% credible interval).
+`which_elasticities` must be one of:
+- `"matrix"`: returns a JxJ matrix, with `stat` applied across markets to each entry of the elasticity matrix
+- `"own"`: returns a single number, pooling all own-price elasticities across products and markets
+- `"cross"`: returns a single number, pooling all cross-price elasticities across products and markets
 
-Output is a NamedTuple: (;Statistic, Posterior_Mean, Posterior_Median, Posterior_CI)
+`stat` must be one of `"mean"`, `"median"`, or `"quantile"`. If `stat == "quantile"`, `q` gives the quantile of interest
+(e.g., 0.75 for the 75th percentile).
 """
-function summarize_elasticities(problem, which_elasticities::String, stat::String; 
-    q = [], integrate = false, n_draws::Int = 100, CI::Real = 0.95, 
-    approximation_details = Dict(
-        :order => 2, 
-        :max_interaction => 2,
-        :sieve_type => "bernstein"
-    ))
+function summarize_elasticities(problem::NPDProblem, which_elasticities::String, stat::String; q = 0.5)
 
-    # Unpack approximation details
-    max_interaction = approximation_details[:max_interaction]
-    order           = approximation_details[:order]
-    sieve_type      = approximation_details[:sieve_type]
-
-    # Add input checks
-    if stat ∉ ["mean", "quantile"]; error("stat must be in ['mean', 'quantile']"); end
-    if which_elasticities ∉ ["own","cross","matrix"]; error("which_elasticities must be in ['own', 'cross', 'matrix']"); end
-    if ((CI > 1) | (CI<0)); error("CI must be a real number between 0 and 1. Use 0.95 for a 95% credible interval"); end
-    if problem.all_elasticities ==[]; error("No price elasticities calculated yet -- run price_elasticity!(problem)"); end
-
-    J = length(problem.Xvec);
-
-    # If we don't yet have a Markov chain, we can't integrate!
-    if (problem.chain_starparams == [])
-        if integrate == true
-            @warn "No Markov chain available to integrate over, ignoring integration request"
-        end
-        integrate = false;
+    if which_elasticities ∉ ["own", "cross", "matrix"]
+        error("which_elasticities must be in ['own', 'cross', 'matrix']")
     end
-    nbetas = get_nbetas(problem);
-    if which_elasticities ∈ ["own","cross"]
-        # elast_vec = [];
-        if integrate == false # if we are running an aggregation on the pre-integrated elasticities
-            if which_elasticities == "own"
-                tmp = zeros(0)
-                for j ∈ 1:J
-                    append!(tmp, getindex.(problem.all_elasticities[!,:all_elasticities], j, j));
-                end
-            end
-    
-            if which_elasticities == "cross"
-                tmp = zeros(0)
-                for j1 ∈ 1:J
-                    for j2 ∈ collect(setdiff(1:J, j1))
-                        append!(tmp, getindex.(problem.all_elasticities[!,:all_elasticities], j1, j2));
-                    end
-                end
-            end
-
-            if stat == "mean"
-                output = mean(tmp);
-
-            elseif stat =="quantile" 
-                if q==[]
-                    println("Quantile q not specified -- assuming median")
-                    q = 0.5;
-                end
-                output = quantile(tmp, q);
-            end
-        else # If we are calculating a statistic and doing inference on the aggregation via the posterior
-            stat_vec = [];
-            statprint = "";
-            for i in 1:n_draws
-                elast_i = zeros(0);
-                sample_i    = problem.chain_params[i,:];
-                β_i         = map_to_sieve(sample_i[1:sum(nbetas)], 
-                                sample_i[sum(nbetas)+1:end], 
-                                problem.exchange, 
-                                nbetas, 
-                                problem, 
-                                sieve_type = sieve_type)
-                elast_i_matrix     = price_elasticities_inner(
-                    problem, 
-                    β = β_i, 
-                    sieve_type = sieve_type,
-                    max_interaction = max_interaction);
-                if typeof(elast_i_matrix) <:NamedTuple
-                    elast_i_matrix = elast_i_matrix.all_elast_mat;
-                end
-                if which_elasticities == "own"
-                    for j ∈ 1:J
-                        append!(elast_i, getindex.(elast_i_matrix, j, j));
-                    end
-                else # if which_elasticities == "cross"
-                    for j1 ∈ 1:J
-                        for j2 ∈ collect(setdiff(1:J, j1))
-                            append!(elast_i, getindex.(elast_i_matrix, j1, j2));
-                        end
-                    end
-                end
-                # elast_vec = vcat(elast_vec, elast_i);
-                if stat == "mean"
-                    push!(stat_vec, mean(elast_i));
-                    if i==1; statprint = stat; end
-                elseif stat =="quantile" 
-                    if q==[]
-                        println("Quantile q not specified -- assuming median")
-                        q = 0.5;
-                    end
-                    push!(stat_vec, quantile(elast_i, q));
-                    if i==1; statprint = string(stat, " ", q); end
-                end
-            end
-            output = (;Statistic = statprint, 
-                Posterior_Mean = mean(stat_vec), 
-                Posterior_Median = median(stat_vec), 
-                Posterior_CI = (quantile(stat_vec, (1-CI)/2), quantile(stat_vec, 1 - (1-CI)/2)))
-        end
+    if stat ∉ ["mean", "median", "quantile"]
+        error("stat must be in ['mean', 'median', 'quantile']")
     end
+    if problem.all_elasticities == []
+        error("No price elasticities calculated yet -- run price_elasticities!(problem)")
+    end
+
+    statfun = stat == "mean"   ? mean :
+              stat == "median" ? median :
+              x -> quantile(x, q)
+
+    J = size(problem.all_elasticities[1], 1)
 
     if which_elasticities == "matrix"
-        statprint = "";
-        if integrate == false
-            output = zeros(J,J);
-            for j1 ∈ 1:J
-                for j2 ∈ 1:J
-                    if stat=="mean"
-                        statprint = stat;
-                        output[j1,j2] = mean(getindex.(problem.all_elasticities[!,:all_elasticities], j1, j2));
-                    elseif stat =="quantile" 
-                        if q==[]
-                            println("Quantile q not specified -- assuming median")
-                            q = 0.5;
-                        end
-                        output[j1,j2] = quantile(getindex.(problem.all_elasticities[!,:all_elasticities], j1, j2), q);
-                        statprint = string(stat, " ", q);
-                    end
-                end
-            end
-        else
-            output = zeros(J,J,n_draws);
-            for i in 1:n_draws
-                sample_i    = problem.chain_params[i,:];
-                β_i         = map_to_sieve(
-                                sample_i[1:sum(nbetas)], 
-                                sample_i[sum(nbetas)+1:end], 
-                                problem.exchange, 
-                                nbetas, 
-                                problem, 
-                                sieve_type = sieve_type)
-                elast_i_matrix  = price_elasticities_inner(
-                    problem, 
-                    β = β_i, 
-                    sieve_type = sieve_type,
-                    max_interaction = max_interaction);
-                if typeof(elast_i_matrix) <:NamedTuple
-                    elast_i_matrix = elast_i_matrix.all_elast_mat;
-                end
-                for j1 ∈ 1:J
-                    for j2 ∈ 1:J
-                        if stat=="mean"
-                            output[j1,j2,i] = mean(getindex.(elast_i_matrix, j1, j2));
-                            if i==1; statprint = stat; end
-                        elseif stat =="quantile" 
-                            if i==1; statprint = string(stat, " ", q); end
-                            if q==[]
-                                println("Quantile q not specified -- assuming median")
-                                q = 0.5;
-                            end
-                            output[j1,j2,i] = quantile(getindex.(elast_i_matrix, j1, j2), q);
-                        end
-                    end
-                end
-            end
-        end
-        if length(size(output)) ==3
-            output = (;Statistic = statprint, 
-                    Posterior_Mean = dropdims(mean(output, dims = 3), dims=3), 
-                    Posterior_Median = dropdims(median(output, dims = 3), dims=3), 
-                    Posterior_CI = ([quantile(output[j1,j2,:], (1-CI)/2) for j1=1:J, j2=1:J], [quantile(output[j1,j2,:], 1 - (1-CI)/2) for j1=1:J, j2=1:J]))
-        else
-            output = (;Statistic = statprint, 
-                    Value = output)
-        end
+        return [statfun(getindex.(problem.all_elasticities, j1, j2)) for j1 in 1:J, j2 in 1:J]
+    elseif which_elasticities == "own"
+        return statfun(reduce(vcat, [getindex.(problem.all_elasticities, j, j) for j in 1:J]))
+    elseif which_elasticities == "cross"
+        return statfun(reduce(vcat, [getindex.(problem.all_elasticities, j1, j2) for j1 in 1:J for j2 in setdiff(1:J, j1)]))
     end
-    return output
-end
-
-""" 
-    elasticity_quantiles(problem::NPDProblem, ind1::Int, ind2::Int; 
-        quantiles = collect(0.01:0.01:0.99),
-        n_draws::Int = 100)
-
-Convenience function for calculating quantiles of price elasticities. `problem` should be a solved `NPDProblem` after running `price_elasticities!`.
-`ind1` and `ind2` are the indices of the products for which you want to calculate the quantiles. E.g., ind1=1, ind2=1 returns quantiles of the own-price elasticity for product 1. 
-The user can control the set of quantiles to return and the number of draws (`n_draws`) to use in the posterior integration.
-"""
-function elasticity_quantiles(problem::NPDProblem, ind1::Int, ind2::Int; 
-    quantiles = collect(0.01:0.01:0.99),
-    n_draws::Int = 100)
-    if problem.chain_starparams ==[]
-        tempfunc(x) = summarize_elasticities(problem, "matrix", "quantile", integrate = false, q = x).Value[ind1,ind2];
-        return quantiles, [tempfunc(x) for x ∈ quantiles]
-    else
-        tempfunc2(x) = summarize_elasticities(problem, "matrix", "quantile", q = x, integrate = true, n_draws = n_draws);
-        median_temp_vec = [];
-        ub_temp_vec = [];
-        lb_temp_vec = [];
-        for x ∈ ProgressBar(quantiles)
-            summarized_elasticities = tempfunc2(x);
-            push!(median_temp_vec, summarized_elasticities.Posterior_Median[ind1, ind2])
-            push!(ub_temp_vec, summarized_elasticities.Posterior_CI[2][ind1, ind2])
-            push!(lb_temp_vec, summarized_elasticities.Posterior_CI[1][ind1, ind2])
-        end
-        return quantiles, median_temp_vec, lb_temp_vec, ub_temp_vec
-    end
-end
-
-function own_elasticities(problem::NPDProblem)
-    try
-        @assert problem.all_elasticities !=[]
-    catch
-        error("No price elasticities calculated yet -- run price_elasticity!(problem)")
-    end
-    J = length(problem.Xvec);
-    N = size(problem.Xvec[1],1);
-    output = zeros(N,J);
-    for j1 ∈ 1:J
-        output[:,j1] = getindex.(problem.all_elasticities[!,:all_elasticities], j1, j1);
-    end
-    output = DataFrame(output, :auto);
-    for j1 ∈ 1:J
-        rename!(output, Symbol("x$j1") => "product_"*string(j1));
-    end
-    return output
 end
