@@ -240,9 +240,9 @@ function estimate!(problem::NPDProblem;
                 if isnothing(lbs[j])
                     vbetasq[j] = vbetastarsq
                 else
-                    depth      = length(dep_sets[j])
-                    m          = (1.0 + depth)^(-2)
                     vbetasq[j] = log(1 + vbetastarsq)
+                    depth      = length(dep_sets[j])
+                    m          = max((1.0 + depth)^(-2), 1e-3)
                     betabar[j] = log(m) - vbetasq[j] / 2
                 end
             end
