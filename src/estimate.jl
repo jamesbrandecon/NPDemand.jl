@@ -167,7 +167,10 @@ function estimate!(problem::NPDProblem;
     burn_in::Real = 0.25,
     skip::Int = 5,
     sampler = HMC(0.01, 10),
-    custom_prior::Union{Dict, Nothing} = nothing
+    custom_prior::Union{Dict, Nothing} = nothing,
+    horseshoe::Bool = false,
+    local_shrinkage::Bool = false,
+    depth_decay::Bool = false
     )
 
     # Check that linear solver is Ipopt or OSQP
@@ -242,12 +245,28 @@ function estimate!(problem::NPDProblem;
                 else
                     vbetasq[j] = log(1 + vbetastarsq)
                     depth      = length(dep_sets[j])
-                    m          = max((1.0 + depth)^(-2), 1e-3)
-                    betabar[j] = log(m) - vbetasq[j] / 2
+                    # m          = max((1.0 + depth)^(-2), 1e-3)
+                    betabar[j] = 0
+                    # betabar[j] = -log(1 + length(dep_sets[j]))
+                    # betabar[j] = log(m) - vbetasq[j] / 2
                 end
             end
         else
             vbetasq .= vbetastarsq
+        end
+
+        # τ_0: global-scale prior for the horseshoe τ ~ Half-Cauchy(0, τ_0), with τ_0 set
+        # from the maximum depth of the constrained-parameter tree (fixed decay rate 2,
+        # mirroring the original convergent-series argument, applied once to the global
+        # scale rather than per coefficient). Defaults to 1 (no adjustment) unless
+        # `depth_decay` is set.
+        is_constrained_for_tau0 = .!isnothing.(lbs)
+        if depth_decay && any(is_constrained_for_tau0)
+            pathlen  = compute_pathlen(lbs, parameter_order)
+            depth_max = maximum(pathlen[is_constrained_for_tau0])
+            tau0      = (1.0 + depth_max)^(-2)
+        else
+            tau0 = 1.0
         end
 
         prior = Dict(
@@ -257,7 +276,10 @@ function estimate!(problem::NPDProblem;
             "vgammasq" => !isnothing(custom_prior) && haskey(custom_prior, "vgammasq") ? custom_prior["vgammasq"]                         : 10,
             "lbs"            => lbs,
             "parameter_order" => collect(parameter_order),
-            "nbetas"         => nbetas
+            "nbetas"         => nbetas,
+            "horseshoe"      => horseshoe,
+            "local_shrinkage" => local_shrinkage,
+            "tau0"           => tau0
         )
 
         J = length(Xvec);
@@ -271,15 +293,42 @@ function estimate!(problem::NPDProblem;
             n_leapfrog = sampler.n_leapfrog,
             n_adapt    = burn_in,
             thin       = skip,
-            verbose    = verbose)
+            verbose    = verbose,
+            horseshoe  = horseshoe,
+            local_shrinkage = local_shrinkage)
 
         # Convert chain from NCP (z) space back to parameter space
         # chain already excludes adaptation steps and is thinned by skip
         z_betadraws   = hcat([chain["z_beta[$i]"]  for i in 1:sum(nbetas)]...)
         z_gammadraws  = hcat([chain["z_gamma[$i]"] for i in 1:gamma_length-1]...)
-        betastardraws = prior["betabar"]' .+ sqrt.(prior["vbetasq"]') .* z_betadraws
         gammadraws    = prior["gammabar"]' .+ sqrt(prior["vgammasq"]) .* z_gammadraws
-        betadraws     = reparameterization_draws(betastardraws, lbs, parameter_order)
+
+        if horseshoe && !all(lbs .== typemax(Int))
+            # Global-scale horseshoe: increments are τ_0*τ*λ_i*z^2 for constrained
+            # coefficients (shrinking the increment itself toward 0, not its log); τ_0 is
+            # a fixed depth-based constant (1 unless `depth_decay`), τ is shared/learned
+            # across all constrained coefficients, λ_i is per-coefficient (local_shrinkage).
+            is_constrained  = .!isnothing.(lbs)
+            tau_raw_draws   = tan.(0.5*π .* cdf.(Normal(), vec(chain["u_tau"])))
+            tau_draws       = prior["tau0"] .* tau_raw_draws  # effective global scale actually used
+            lambda_draws    = local_shrinkage ?
+                Dict(i => tan.(0.5*π .* cdf.(Normal(), vec(chain["u_lambda[$i]"]))) for i in findall(is_constrained)) :
+                nothing
+            increment_draws = similar(z_betadraws)
+            for i in 1:sum(nbetas)
+                if is_constrained[i]
+                    λ_i = local_shrinkage ? lambda_draws[i] : 1.0
+                    increment_draws[:,i] = tau_draws .* λ_i .* z_betadraws[:,i].^2
+                else
+                    increment_draws[:,i] = prior["betabar"][i] .+ sqrt(prior["vbetasq"][i]) .* z_betadraws[:,i]
+                end
+            end
+            betadraws     = reparameterization_increments_draws(increment_draws, lbs, parameter_order)
+            betastardraws = increment_draws
+        else
+            betastardraws = prior["betabar"]' .+ sqrt.(prior["vbetasq"]') .* z_betadraws
+            betadraws     = reparameterization_draws(betastardraws, lbs, parameter_order)
+        end
 
         # calculate posterior mean parameters
         qpm = map_to_sieve(mean(betadraws, dims=1)', mean(gammadraws, dims=1)', problem.exchange, nbetas, problem)
@@ -288,6 +337,16 @@ function estimate!(problem::NPDProblem;
             [Symbol("betastar[$i]")  for i in 1:sum(nbetas)],
             [Symbol("gammastar[$i]") for i in 1:gamma_length-1])
         starparams = hcat(betastardraws, gammadraws)
+
+        if horseshoe && !all(lbs .== typemax(Int))
+            starparams_names = vcat(starparams_names, [Symbol("tau")])
+            starparams       = hcat(starparams, tau_draws)
+            if local_shrinkage
+                lambda_idx = findall(.!isnothing.(lbs))
+                starparams_names = vcat(starparams_names, [Symbol("lambda[$i]") for i in lambda_idx])
+                starparams       = hcat(starparams, hcat([lambda_draws[i] for i in lambda_idx]...))
+            end
+        end
 
         problem.sampling_details  = (; burn_in = burn_in_fraction, skip = skip, smc = false, prior = prior)
         problem.results           = NPD_parameters(qpm);
@@ -385,11 +444,40 @@ function smc!(problem::NPDemand.NPDProblem;
     nbetas          = get_nbetas(problem)
     nbeta           = sum(nbetas)
 
-    nparticles   = size(problem.smc_results.thetas,1);
+    prior_hs   = problem.sampling_details.prior
+    use_hs     = get(prior_hs, "horseshoe", false) && !all(lbs .== typemax(Int))
+    use_local  = use_hs && get(prior_hs, "local_shrinkage", false)
+    nparticles = size(problem.smc_results.thetas,1);
 
-    betas        = reparameterization_draws(problem.smc_results.thetas[:,1:nbeta], lbs, parameter_order)
-    gammas       = problem.smc_results.thetas[:,(nbeta+1):end]
-    thetas_sieve = vcat([map_to_sieve(betas[i,:], problem.smc_results.thetas[i,(nbeta+1):end], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
+    if use_hs
+        gamma_length    = size(problem.Bvec[1],2)
+        ngamma          = gamma_length - 1
+        is_constrained  = .!isnothing.(lbs)
+        constrained_idx = findall(is_constrained)
+        local_pos       = zeros(Int, nbeta)
+        use_local && (local_pos[constrained_idx] .= 1:length(constrained_idx))
+
+        tau0            = get(prior_hs, "tau0", 1.0)
+        _betabar        = prior_hs["betabar"]; _vbetasq = prior_hs["vbetasq"]
+        zdraws          = problem.smc_results.thetas[:, 1:nbeta]
+        gammas          = problem.smc_results.thetas[:, (nbeta+1):(nbeta+ngamma)]
+        tau_draws       = exp.(problem.smc_results.thetas[:, nbeta+ngamma+1])
+        lambda_draws    = use_local ? exp.(problem.smc_results.thetas[:, (nbeta+ngamma+2):end]) : nothing
+        increment_draws = similar(zdraws)
+        for i in 1:nbeta
+            if is_constrained[i]
+                λ_i = use_local ? lambda_draws[:, local_pos[i]] : 1.0
+                increment_draws[:,i] = tau0 .* tau_draws .* λ_i .* zdraws[:,i].^2
+            else
+                increment_draws[:,i] = _betabar[i] .+ sqrt(_vbetasq[i]) .* zdraws[:,i]
+            end
+        end
+        betas = reparameterization_increments_draws(increment_draws, lbs, parameter_order)
+    else
+        betas  = reparameterization_draws(problem.smc_results.thetas[:,1:nbeta], lbs, parameter_order)
+        gammas = problem.smc_results.thetas[:,(nbeta+1):end]
+    end
+    thetas_sieve = vcat([map_to_sieve(betas[i,:], gammas[i,:], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
 
     problem.results.minimizer    = mean(thetas_sieve, dims = 1);
     problem.chain_starparams     = problem.smc_results.thetas

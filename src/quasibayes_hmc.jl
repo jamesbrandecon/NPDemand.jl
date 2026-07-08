@@ -122,15 +122,27 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
     adapt_L::Bool       = true,
     z_init              = nothing,
     seed::Union{Int,Nothing} = nothing,
-    verbose::Bool       = true)
+    verbose::Bool       = true,
+    horseshoe::Bool     = false,
+    local_shrinkage::Bool = false)
 
     betabar  = prior["betabar"];  vbetasq  = prior["vbetasq"]
     gammabar = prior["gammabar"]; vgammasq = prior["vgammasq"]
     lbs      = prior["lbs"];      parameter_order = prior["parameter_order"]
+    tau0     = get(prior, "tau0", 1.0)
     lbs_trivial = all(lbs .== typemax(Int))
+    use_hs      = horseshoe && !lbs_trivial
+    use_local   = use_hs && local_shrinkage
+    is_constrained  = use_hs ? .!isnothing.(lbs) : falses(length(betabar))
+    constrained_idx = use_local ? findall(is_constrained) : Int[]
+    n_constrained   = length(constrained_idx)
+    local_pos       = zeros(Int, length(betabar))
+    use_local && (local_pos[constrained_idx] .= 1:n_constrained)
 
     nbeta  = length(betabar);   ngamma = length(gammabar)
-    n      = nbeta + ngamma
+    tau_idx      = nbeta + ngamma + 1
+    lambda_start = tau_idx + 1
+    n      = nbeta + ngamma + (use_hs ? 1 : 0) + (use_local ? n_constrained : 0)
 
     sqrt_vbetasq  = sqrt.(vbetasq);  sqrt_vgammasq = sqrt(vgammasq)
 
@@ -148,16 +160,38 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
     buf_γ   = zeros(ngamma)
     beta    = zeros(nbeta);   gamma  = zeros(ngamma)
     ∂beta   = zeros(nbeta);   ∂gamma = zeros(ngamma)
+    x_hs    = zeros(nbeta)   # increments fed to reparameterization_increments (horseshoe path only)
+    λ_buf   = zeros(n_constrained)  # cached λ_j per constrained coefficient (local_shrinkage only)
 
     # Computes log-posterior and fills grad in-place. Zero heap allocations for lbs_trivial.
     function logpost_grad!(grad, z)
-        z_β = @view z[1:nbeta];  z_γ = @view z[nbeta+1:end]
+        z_β = @view z[1:nbeta];  z_γ = @view z[nbeta+1:nbeta+ngamma]
 
         @. beta  = betabar + sqrt_vbetasq * z_β
         @. gamma = gammabar + sqrt_vgammasq * z_γ
 
         repar_pb = nothing
-        if !lbs_trivial
+        τ = 0.0; τ_raw = 0.0; u_τ = 0.0
+        if use_hs
+            u_τ   = z[tau_idx]
+            τ_raw = tan(0.5*π*cdf(Normal(), u_τ))
+            τ     = tau0*τ_raw
+            if use_local
+                @inbounds for k in 1:n_constrained
+                    λ_buf[k] = tan(0.5*π*cdf(Normal(), z[lambda_start-1+k]))
+                end
+            end
+            @inbounds for i in 1:nbeta
+                if is_constrained[i]
+                    λi   = use_local ? λ_buf[local_pos[i]] : 1.0
+                    x_hs[i] = τ*λi*z_β[i]^2
+                else
+                    x_hs[i] = beta[i]
+                end
+            end
+            beta_out, repar_pb = ChainRulesCore.rrule(reparameterization_increments, x_hs, lbs, parameter_order)
+            beta .= beta_out
+        elseif !lbs_trivial
             betastar = copy(beta)
             beta_out, repar_pb = ChainRulesCore.rrule(reparameterization, betastar, lbs, parameter_order)
             beta .= beta_out
@@ -188,15 +222,45 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
             @. ∂gamma += 2*buf_γ
         end
 
-        if lbs_trivial
+        if use_hs
+            _, ∂x, _, _ = repar_pb(∂beta)
+            sum_dxz2_tau = 0.0
+            @inbounds for i in 1:nbeta
+                if is_constrained[i]
+                    λi = use_local ? λ_buf[local_pos[i]] : 1.0
+                    grad[i]      = -z_β[i] - ∂x[i]*τ*λi*z_β[i]
+                    sum_dxz2_tau += ∂x[i]*λi*z_β[i]^2
+                    if use_local
+                        k       = local_pos[i]
+                        uk      = z[lambda_start-1+k]
+                        dxi_dλi = ∂x[i]*τ*z_β[i]^2
+                        dλi_duk = 0.5*π*(1 + λi^2)*pdf(Normal(), uk)
+                        grad[lambda_start-1+k] = -uk - 0.5*dxi_dλi*dλi_duk
+                    end
+                else
+                    grad[i]   = -z_β[i] - 0.5*∂x[i]*sqrt_vbetasq[i]
+                end
+            end
+            dτ_duτ         = tau0 * 0.5*π*(1 + τ_raw^2)*pdf(Normal(), u_τ)
+            grad[tau_idx]  = -u_τ - 0.5*sum_dxz2_tau*dτ_duτ
+        elseif lbs_trivial
             @. grad[1:nbeta]    = -z_β - 0.5*∂beta*sqrt_vbetasq
         else
             _, ∂betastar, _, _ = repar_pb(∂beta)
             @. grad[1:nbeta]    = -z_β - 0.5*∂betastar*sqrt_vbetasq
         end
-        @. grad[nbeta+1:end] = -z_γ - 0.5*∂gamma*sqrt_vgammasq
+        @. grad[nbeta+1:nbeta+ngamma] = -z_γ - 0.5*∂gamma*sqrt_vgammasq
 
-        return -0.5*(dot(z_β, z_β) + dot(z_γ, z_γ)) - 0.5*val
+        logprior_extra = 0.0
+        if use_hs
+            logprior_extra -= 0.5*u_τ^2
+            if use_local
+                @inbounds for k in 1:n_constrained
+                    logprior_extra -= 0.5*z[lambda_start-1+k]^2
+                end
+            end
+        end
+        return -0.5*(dot(z_β, z_β) + dot(z_γ, z_γ)) - 0.5*val + logprior_extra
     end
 
     # Leapfrog HMC with optional dual-averaging adaptation (Hoffman & Gelman 2014, Algorithm 5)
@@ -270,7 +334,9 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
 
     param_names = vcat(
         [Symbol("z_beta[$i]")  for i in 1:nbeta],
-        [Symbol("z_gamma[$i]") for i in 1:ngamma])
+        [Symbol("z_gamma[$i]") for i in 1:ngamma],
+        use_hs ? [Symbol("u_tau")] : Symbol[],
+        use_local ? [Symbol("u_lambda[$i]") for i in constrained_idx] : Symbol[])
     return MCMCChains.Chains(
         reshape(samples, n_stored, n, 1),
         param_names)

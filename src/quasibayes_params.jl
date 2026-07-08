@@ -91,6 +91,20 @@ function all_dependencies(i, lbs; seen=Set{Int}())
     return seen
 end
 
+# True longest path to a root (depth-0 coefficient) along the order-restriction DAG —
+# unlike `length(all_dependencies(i, lbs))` (ancestor-*set* size, which overcounts for
+# nodes with multiple converging constraints), this is the quantity that actually
+# governs how many increments accumulate on top of coefficient i.
+function compute_pathlen(lbs::AbstractVector, parameter_order::AbstractVector)
+    pathlen = zeros(Int, length(lbs))
+    if !all(lbs .== typemax(Int))
+        for i in parameter_order
+            pathlen[i] = isnothing(lbs[i]) ? 0 : 1 + maximum(pathlen[k] for k in lbs[i])
+        end
+    end
+    return pathlen
+end
+
 function ChainRulesCore.rrule(::typeof(reparameterization), betastar::AbstractVector, lbs::AbstractVector, parameter_order::AbstractVector)
     if all(lbs .== typemax(Int))
         trivial_pullback(ȳ) = ChainRulesCore.NoTangent(), ChainRulesCore.unthunk(ȳ), ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent()
@@ -125,6 +139,58 @@ function ChainRulesCore.rrule(::typeof(reparameterization), betastar::AbstractVe
     end
 end
 
+# Like `reparameterization`, but `increments` are used directly as the non-negative
+# step added on top of a coefficient's dependencies (no internal exp()). Used by the
+# horseshoe-shrinkage prior, where the increment itself (not its log) is shrunk toward 0.
+function reparameterization_increments(increments::AbstractVector{T}, lbs::AbstractVector, parameter_order::AbstractVector; buffer_beta = similar(increments)) where T<:Real
+    if all(lbs .== typemax(Int))
+        return increments
+    else
+        for i in parameter_order
+            if isnothing(lbs[i])
+                buffer_beta[i] = increments[i]
+            else
+                buffer_beta[i] = maximum(buffer_beta[lbs[i]]) + increments[i]
+            end
+        end
+        return copy(buffer_beta)
+    end
+end
+
+function ChainRulesCore.rrule(::typeof(reparameterization_increments), increments::AbstractVector, lbs::AbstractVector, parameter_order::AbstractVector)
+    if all(lbs .== typemax(Int))
+        trivial_pullback(ȳ) = ChainRulesCore.NoTangent(), ChainRulesCore.unthunk(ȳ), ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent()
+        return increments, trivial_pullback
+    else
+        beta = similar(increments)
+        jmax = zeros(Int, length(increments))
+        for i in parameter_order
+            if isnothing(lbs[i])
+                beta[i] = increments[i]
+            else
+                am      = argmax(beta[lbs[i]])
+                jmax[i] = lbs[i][am]
+                beta[i] = beta[jmax[i]] + increments[i]
+            end
+        end
+        beta_out = copy(beta)
+        function ordering_pullback(ȳ)
+            ȳ_work      = copy(ChainRulesCore.unthunk(ȳ))
+            ∂increments = zeros(eltype(increments), length(increments))
+            for i in Iterators.reverse(parameter_order)
+                if isnothing(lbs[i])
+                    ∂increments[i] = ȳ_work[i]
+                else
+                    ∂increments[i]  = ȳ_work[i]
+                    ȳ_work[jmax[i]] += ȳ_work[i]
+                end
+            end
+            return ChainRulesCore.NoTangent(), ∂increments, ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent()
+        end
+        return beta_out, ordering_pullback
+    end
+end
+
 function reparameterization_draws(betastar_draws, lbs, parameter_order)
     nbeta  = size(betastar_draws, 2)
     ndraws = size(betastar_draws, 1)
@@ -138,6 +204,29 @@ function reparameterization_draws(betastar_draws, lbs, parameter_order)
                     beta_draws[r,i] = betastar_draws[r,i]
                 else
                     beta_draws[r,i] = findmax(beta_draws[r, lbs[i]])[1] + exp(betastar_draws[r,i])
+                end
+            end
+        end
+    end
+    return beta_draws
+end
+
+# Batched analogue of `reparameterization_increments` (see there for the rationale):
+# `increment_draws` already holds the non-negative step for each draw/coefficient, so
+# no exp() is applied here.
+function reparameterization_increments_draws(increment_draws, lbs, parameter_order)
+    nbeta  = size(increment_draws, 2)
+    ndraws = size(increment_draws, 1)
+    beta_draws = zeros(eltype(increment_draws), ndraws, nbeta)
+    if all(lbs .== typemax(Int)) || (lbs == [])
+        beta_draws .= increment_draws;
+    else
+        for r in 1:ndraws
+            for i in parameter_order
+                if isnothing(lbs[i])
+                    beta_draws[r,i] = increment_draws[r,i]
+                else
+                    beta_draws[r,i] = findmax(beta_draws[r, lbs[i]])[1] + increment_draws[r,i]
                 end
             end
         end

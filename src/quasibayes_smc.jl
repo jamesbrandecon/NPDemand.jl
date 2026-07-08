@@ -79,6 +79,40 @@ function logprior_smc(particle_betastar, particle_gamma,
     return out_beta + out_gamma
 end
 
+# log-density of log(τ) when τ ~ Half-Cauchy(0,1): a hyperbolic-secant distribution,
+# f(u) = (1/π) sech(u). Computed via a numerically stable log(cosh(u)).
+function _logcosh(u::Real)
+    au = abs(u)
+    return au + log1p(exp(-2*au)) - log(2)
+end
+log_halfcauchy_logscale(u::Real) = -_logcosh(u) - log(π)
+
+# Horseshoe-shrinkage version of logprior_smc: `particle_z` is the standard-normal
+# latent for every beta coefficient (both constrained and unconstrained — the
+# depth-dependent betabar/vbetasq only shape the *deterministic* map to β for
+# unconstrained coefficients, not the prior on z itself, exactly mirroring
+# analytical_hmc's NCP structure), and `log_tau` is the (unconstrained) log of the
+# shared global horseshoe scale, log(τ) ~ hyperbolic-secant (i.e. τ ~ Half-Cauchy(0,1)).
+function logprior_smc(particle_z, particle_gamma, log_tau::Real,
+                      gamma_μ, gamma_inv_var::AbstractVector, gamma_logdet::Real)
+    out_z     = -0.5*(dot(particle_z, particle_z) + length(particle_z)*log(2π))
+    out_gamma = logpdf_diag_mvn(gamma_μ, gamma_inv_var, gamma_logdet, particle_gamma)
+    out_tau   = log_halfcauchy_logscale(log_tau)
+    return out_z + out_gamma + out_tau
+end
+
+# Local+global horseshoe: as above, plus a per-constrained-coefficient log(λ_j),
+# each also log(λ_j) ~ hyperbolic-secant (λ_j ~ Half-Cauchy(0,1)), independent of τ
+# and of each other.
+function logprior_smc(particle_z, particle_gamma, log_tau::Real, log_lambda::AbstractVector,
+                      gamma_μ, gamma_inv_var::AbstractVector, gamma_logdet::Real)
+    out_z      = -0.5*(dot(particle_z, particle_z) + length(particle_z)*log(2π))
+    out_gamma  = logpdf_diag_mvn(gamma_μ, gamma_inv_var, gamma_logdet, particle_gamma)
+    out_tau    = log_halfcauchy_logscale(log_tau)
+    out_lambda = sum(log_halfcauchy_logscale, log_lambda)
+    return out_z + out_gamma + out_tau + out_lambda
+end
+
 function logpenalty_smc(distance::AbstractVector, penalty::Real)
     return sum(log.(2 .* approx_cdf_normal01.(-penalty .* distance)))
 end
@@ -467,19 +501,85 @@ function smc(problem::NPDemand.NPDProblem;
     _gammabar     = prior["gammabar"]
     _vbetasq      = prior["vbetasq"]
     _vgammasq     = prior["vgammasq"]
-    if particles isa MCMCChains.Chains
-        betastardraws = hcat([particles["betastar[$i]"]  for i in 1:sum(nbetas)]...)
-        gammadraws    = hcat([particles["gammastar[$i]"] for i in 1:gamma_length-1]...)
-    else
-        # `chain_starparams` was set from a previous `smc!` call (a plain matrix,
-        # see estimate.jl), which stores columns in the same [betastar gammastar] order.
-        betastardraws = particles[:, 1:sum(nbetas)]
-        gammadraws    = particles[:, sum(nbetas)+1:sum(nbetas)+gamma_length-1]
-    end
-    betadraws     = reparameterization_draws(betastardraws, lbs, parameter_order)
-    nparticles    = size(betastardraws,1);
+    tau0            = get(prior, "tau0", 1.0)
+    ngamma_smc      = gamma_length - 1
+    use_hs          = get(prior, "horseshoe", false) && !all(lbs .== typemax(Int))
+    use_local       = use_hs && get(prior, "local_shrinkage", false)
+    is_constrained  = use_hs ? .!isnothing.(lbs) : falses(sum(nbetas))
+    constrained_idx = use_local ? findall(is_constrained) : Int[]
+    n_constrained   = length(constrained_idx)
+    local_pos       = zeros(Int, sum(nbetas))
+    use_local && (local_pos[constrained_idx] .= 1:n_constrained)
 
-    thetas       = [betastardraws gammadraws]
+    if particles isa MCMCChains.Chains
+        gammadraws = hcat([particles["gammastar[$i]"] for i in 1:ngamma_smc]...)
+        if use_hs
+            # HMC's chain_starparams stores the increment itself (τλz²) under "betastar[i]"
+            # and the *effective* shared/local scales (i.e. already including τ_0) under
+            # "tau"/"lambda[i]" (see estimate.jl) — divide τ_0 back out to recover this
+            # sampler's own τ_raw = τ/τ_0 representation.
+            # Recover z (only its square matters, so the positive root is as good as any)
+            # and log(τ), log(λ_i).
+            increment_or_beta = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)
+            tau_init   = vec(particles["tau"]) ./ tau0
+            lambda0    = use_local ? Dict(i => vec(particles["lambda[$i]"]) for i in constrained_idx) : nothing
+            zdraws     = similar(increment_or_beta)
+            for i in 1:sum(nbetas)
+                if is_constrained[i]
+                    scale_i     = tau0 .* (use_local ? tau_init .* lambda0[i] : tau_init)
+                    zdraws[:,i] = sqrt.(max.(increment_or_beta[:,i], 0.0) ./ scale_i)
+                else
+                    zdraws[:,i] = (increment_or_beta[:,i] .- _betabar[i]) ./ sqrt(_vbetasq[i])
+                end
+            end
+            logtau0    = log.(tau_init)
+            loglambda0 = use_local ? hcat([log.(lambda0[i]) for i in constrained_idx]...) : nothing
+        else
+            betastardraws = hcat([particles["betastar[$i]"] for i in 1:sum(nbetas)]...)
+        end
+    else
+        # `chain_starparams` was set from a previous `smc!` call (a plain matrix, see
+        # estimate.jl); it already stores columns in this sampler's own internal
+        # representation ([z gamma log(τ) log(λ)] if local, [z gamma log(τ)] if global
+        # horseshoe, [betastar gamma] otherwise).
+        gammadraws = particles[:, sum(nbetas)+1:sum(nbetas)+ngamma_smc]
+        if use_hs
+            zdraws = particles[:, 1:sum(nbetas)]
+            if use_local
+                logtau0    = particles[:, sum(nbetas)+ngamma_smc+1]
+                loglambda0 = particles[:, (sum(nbetas)+ngamma_smc+2):end]
+            else
+                logtau0 = particles[:, end]
+            end
+        else
+            betastardraws = particles[:, 1:sum(nbetas)]
+        end
+    end
+
+    nparticles = use_hs ? size(zdraws,1) : size(betastardraws,1);
+
+    if use_hs
+        tau_init_draws  = exp.(logtau0)
+        increment_draws = similar(zdraws)
+        for i in 1:sum(nbetas)
+            if is_constrained[i]
+                if use_local
+                    lambda_i_draws = exp.(loglambda0[:, local_pos[i]])
+                    increment_draws[:,i] = tau0 .* tau_init_draws .* lambda_i_draws .* zdraws[:,i].^2
+                else
+                    increment_draws[:,i] = tau0 .* tau_init_draws .* zdraws[:,i].^2
+                end
+            else
+                increment_draws[:,i] = _betabar[i] .+ sqrt(_vbetasq[i]) .* zdraws[:,i]
+            end
+        end
+        betadraws = reparameterization_increments_draws(increment_draws, lbs, parameter_order)
+        thetas    = use_local ? [zdraws gammadraws logtau0 loglambda0] : [zdraws gammadraws logtau0]
+    else
+        betadraws = reparameterization_draws(betastardraws, lbs, parameter_order)
+        thetas    = [betastardraws gammadraws]
+    end
+
     st           = approximation_details[:sieve_type]
     thetas_sieve = vcat([map_to_sieve(
                             betadraws[i,:],
@@ -534,6 +634,8 @@ function smc(problem::NPDemand.NPDProblem;
     beta_inv_var, beta_logdet   = inv.(_vbetasq), sum(log.(_vbetasq))
     gamma_inv_var, gamma_logdet = fill(inv(_vgammasq), gamma_length-1), (gamma_length-1) * log(_vgammasq)
     n_kernel_steps = Int(mh_steps)
+    ngamma          = gamma_length - 1
+    _sqrt_vbetasq   = sqrt.(_vbetasq)
 
     failure_count = 0;
     while (violation_dict[:any] > max_violations) & (prev_penalty < max_penalty) & (t < max_iter)
@@ -610,6 +712,25 @@ function smc(problem::NPDemand.NPDProblem;
         # One RNG per thread — independent, reproducible streams; mh_iter mixed into seed
         thread_rngs             = [MersenneTwister(seed + tid) for tid in 1:Threads.maxthreadid()]
         reparameterization_bufs = [zeros(eltype(thetas_sieve), sum(nbetas)) for _ in 1:Threads.maxthreadid()]
+        x_hs_bufs                = use_hs ? [zeros(eltype(thetas_sieve), sum(nbetas)) for _ in 1:Threads.maxthreadid()] : Vector{Float64}[]
+        tau_pos                  = nbeta + ngamma + 1
+
+        # Horseshoe forward map: build the per-coefficient increment (τλz² for
+        # constrained, the usual affine map otherwise) and push it through the
+        # max-chain, exactly mirroring analytical_hmc's horseshoe path.
+        # `log_lambda` is empty when local_shrinkage is off (λ≡1 for every coefficient).
+        hs_beta(z, log_tau, log_lambda, x_buf, beta_buf) = begin
+            τ = tau0*exp(log_tau)
+            @inbounds for k in eachindex(z)
+                if is_constrained[k]
+                    λk = use_local ? exp(log_lambda[local_pos[k]]) : 1.0
+                    x_buf[k] = τ*λk*z[k]^2
+                else
+                    x_buf[k] = _betabar[k] + _sqrt_vbetasq[k]*z[k]
+                end
+            end
+            reparameterization_increments(x_buf, lbs, parameter_order, buffer_beta = beta_buf)
+        end
 
         prog           = Threads.Atomic{Int}(0)
         monitor_active = Threads.Atomic{Bool}(true)
@@ -627,22 +748,49 @@ function smc(problem::NPDemand.NPDProblem;
                 tid  = Threads.threadid()
                 rng  = thread_rngs[tid]
                 reparameterization_storage = reparameterization_bufs[tid]
-                betai_old    = reparameterization(thetas[i,1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
-                gamma_old    = @view thetas[i,(nbeta+1):size(thetas,2)]
-                logprior_old = logprior_smc(thetas[i,1:nbeta], gamma_old, beta_μ, beta_inv_var, beta_logdet, gamma_μ, gamma_inv_var, gamma_logdet) +
-                               logpenalty_smc(view(penalty_distances, i, :), new_penalty)
+
+                if use_hs
+                    x_buf         = x_hs_bufs[tid]
+                    z_old         = @view thetas[i,1:nbeta]
+                    gamma_old     = @view thetas[i,(nbeta+1):(nbeta+ngamma)]
+                    logtau_old    = thetas[i,tau_pos]
+                    loglambda_old = use_local ? (@view thetas[i,(tau_pos+1):end]) : Float64[]
+                    betai_old     = hs_beta(z_old, logtau_old, loglambda_old, x_buf, reparameterization_storage)
+                    logprior_old  = use_local ?
+                        logprior_smc(z_old, gamma_old, logtau_old, loglambda_old, gamma_μ, gamma_inv_var, gamma_logdet) :
+                        logprior_smc(z_old, gamma_old, logtau_old, gamma_μ, gamma_inv_var, gamma_logdet)
+                    logprior_old += logpenalty_smc(view(penalty_distances, i, :), new_penalty)
+                else
+                    betai_old    = reparameterization(thetas[i,1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
+                    gamma_old    = @view thetas[i,(nbeta+1):size(thetas,2)]
+                    logprior_old = logprior_smc(thetas[i,1:nbeta], gamma_old, beta_μ, beta_inv_var, beta_logdet, gamma_μ, gamma_inv_var, gamma_logdet) +
+                                   logpenalty_smc(view(penalty_distances, i, :), new_penalty)
+                end
                 loglike_old  = gmm_loglike(betai_old, gamma_old)
 
                 for mh_iter in 1:n_kernel_steps
                     Random.seed!(rng, seed + i + mh_iter * nparticles)
 
-                    thetai_new       = thetas[i,:] + rand(rng, proposal_distribution)
-                    betai_new        = reparameterization(thetai_new[1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
-                    gamma_new        = @view thetai_new[(nbeta+1):length(thetai_new)]
-                    thetai_sieve_new = map_to_sieve(betai_new, gamma_new, problem.exchange, nbetas, problem, sieve_type=st)
+                    thetai_new = thetas[i,:] + rand(rng, proposal_distribution)
 
-                    logprior_new = logprior_smc(thetai_new[1:nbeta], gamma_new, beta_μ, beta_inv_var, beta_logdet, gamma_μ, gamma_inv_var, gamma_logdet) +
-                                   logpenalty_fast(thetai_sieve_new, problem, problem.tempmats, new_penalty; penalty_type = penalty_type)
+                    if use_hs
+                        z_new            = @view thetai_new[1:nbeta]
+                        gamma_new        = @view thetai_new[(nbeta+1):(nbeta+ngamma)]
+                        logtau_new       = thetai_new[tau_pos]
+                        loglambda_new    = use_local ? (@view thetai_new[(tau_pos+1):end]) : Float64[]
+                        betai_new        = hs_beta(z_new, logtau_new, loglambda_new, x_buf, reparameterization_storage)
+                        thetai_sieve_new = map_to_sieve(betai_new, gamma_new, problem.exchange, nbetas, problem, sieve_type=st)
+                        logprior_new     = use_local ?
+                            logprior_smc(z_new, gamma_new, logtau_new, loglambda_new, gamma_μ, gamma_inv_var, gamma_logdet) :
+                            logprior_smc(z_new, gamma_new, logtau_new, gamma_μ, gamma_inv_var, gamma_logdet)
+                        logprior_new    += logpenalty_fast(thetai_sieve_new, problem, problem.tempmats, new_penalty; penalty_type = penalty_type)
+                    else
+                        betai_new        = reparameterization(thetai_new[1:nbeta], lbs, parameter_order, buffer_beta = reparameterization_storage)
+                        gamma_new        = @view thetai_new[(nbeta+1):length(thetai_new)]
+                        thetai_sieve_new = map_to_sieve(betai_new, gamma_new, problem.exchange, nbetas, problem, sieve_type=st)
+                        logprior_new     = logprior_smc(thetai_new[1:nbeta], gamma_new, beta_μ, beta_inv_var, beta_logdet, gamma_μ, gamma_inv_var, gamma_logdet) +
+                                           logpenalty_fast(thetai_sieve_new, problem, problem.tempmats, new_penalty; penalty_type = penalty_type)
+                    end
 
                     loglike_new  = gmm_loglike(betai_new, gamma_new)
 
