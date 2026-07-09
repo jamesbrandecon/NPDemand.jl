@@ -271,7 +271,7 @@ function estimate!(problem::NPDProblem;
         if depth_decay && any(is_constrained_for_tau0)
             pathlen  = compute_pathlen(lbs, parameter_order)
             depth_max = maximum(pathlen[is_constrained_for_tau0])
-            tau0      = (1.0 + depth_max)^(-2)
+            tau0      = (1.0 + depth_max)^(-4)
         else
             tau0 = 1.0
         end
