@@ -235,10 +235,17 @@ function estimate!(problem::NPDProblem;
         vbetasq         = zeros(sum(nbetas))
         betabar         = zeros(sum(nbetas))
 
-        # define sets of parameter dependencies (through constraint bounds)
-        dep_sets = [sort(collect(all_dependencies(i, lbs))) for i in eachindex(lbs)]
+        # lbs is either a per-coefficient vector of `nothing`/dependency-index-lists, or
+        # (when there are no Aineq/Aeq constraints at all) a whole-vector sentinel of
+        # typemax(Int) meaning "no dependency structure" -- must be checked before treating
+        # entries as real dependencies (typemax(Int) is not `nothing`, so isnothing-based
+        # checks below would otherwise misread every coefficient as constrained).
+        lbs_trivial = all(lbs .== typemax(Int))
 
-        if sieve_type == "bernstein"
+        # define sets of parameter dependencies (through constraint bounds)
+        dep_sets = lbs_trivial ? [Int[] for _ in eachindex(lbs)] : [sort(collect(all_dependencies(i, lbs))) for i in eachindex(lbs)]
+
+        if sieve_type == "bernstein" && !lbs_trivial
             for j in 1:sum(nbetas)
                 if isnothing(lbs[j])
                     vbetasq[j] = vbetastarsq
@@ -260,7 +267,7 @@ function estimate!(problem::NPDProblem;
         # mirroring the original convergent-series argument, applied once to the global
         # scale rather than per coefficient). Defaults to 1 (no adjustment) unless
         # `depth_decay` is set.
-        is_constrained_for_tau0 = .!isnothing.(lbs)
+        is_constrained_for_tau0 = lbs_trivial ? falses(length(lbs)) : .!isnothing.(lbs)
         if depth_decay && any(is_constrained_for_tau0)
             pathlen  = compute_pathlen(lbs, parameter_order)
             depth_max = maximum(pathlen[is_constrained_for_tau0])
