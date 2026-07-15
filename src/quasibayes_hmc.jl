@@ -123,8 +123,7 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
     z_init              = nothing,
     seed::Union{Int,Nothing} = nothing,
     verbose::Bool       = true,
-    horseshoe::Bool     = false,
-    local_shrinkage::Bool = false)
+    horseshoe::Bool     = false)
 
     betabar  = prior["betabar"];  vbetasq  = prior["vbetasq"]
     gammabar = prior["gammabar"]; vgammasq = prior["vgammasq"]
@@ -132,17 +131,16 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
     tau0     = get(prior, "tau0", 1.0)
     lbs_trivial = all(lbs .== typemax(Int))
     use_hs      = horseshoe && !lbs_trivial
-    use_local   = use_hs && local_shrinkage
     is_constrained  = use_hs ? .!isnothing.(lbs) : falses(length(betabar))
-    constrained_idx = use_local ? findall(is_constrained) : Int[]
+    constrained_idx = use_hs ? findall(is_constrained) : Int[]
     n_constrained   = length(constrained_idx)
     local_pos       = zeros(Int, length(betabar))
-    use_local && (local_pos[constrained_idx] .= 1:n_constrained)
+    use_hs && (local_pos[constrained_idx] .= 1:n_constrained)
 
     nbeta  = length(betabar);   ngamma = length(gammabar)
     tau_idx      = nbeta + ngamma + 1
     lambda_start = tau_idx + 1
-    n      = nbeta + ngamma + (use_hs ? 1 : 0) + (use_local ? n_constrained : 0)
+    n      = nbeta + ngamma + (use_hs ? 1 + n_constrained : 0)
 
     sqrt_vbetasq  = sqrt.(vbetasq);  sqrt_vgammasq = sqrt(vgammasq)
 
@@ -161,7 +159,7 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
     beta    = zeros(nbeta);   gamma  = zeros(ngamma)
     ∂beta   = zeros(nbeta);   ∂gamma = zeros(ngamma)
     x_hs    = zeros(nbeta)   # increments fed to reparameterization_increments (horseshoe path only)
-    λ_buf   = zeros(n_constrained)  # cached λ_j per constrained coefficient (local_shrinkage only)
+    λ_buf   = zeros(n_constrained)  # cached λ_j per constrained coefficient
 
     # Computes log-posterior and fills grad in-place. Zero heap allocations for lbs_trivial.
     function logpost_grad!(grad, z)
@@ -176,15 +174,13 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
             u_τ   = z[tau_idx]
             τ_raw = tan(0.5*π*cdf(Normal(), u_τ))
             τ     = tau0*τ_raw
-            if use_local
-                @inbounds for k in 1:n_constrained
-                    λ_buf[k] = tan(0.5*π*cdf(Normal(), z[lambda_start-1+k]))
-                end
+            @inbounds for k in 1:n_constrained
+                λ_buf[k] = tan(0.5*π*cdf(Normal(), z[lambda_start-1+k]))
             end
             @inbounds for i in 1:nbeta
                 if is_constrained[i]
-                    λi   = use_local ? λ_buf[local_pos[i]] : 1.0
-                    x_hs[i] = τ*λi*z_β[i]^2
+                    λi   = λ_buf[local_pos[i]]
+                    x_hs[i] = τ*λi*abs(z_β[i])
                 else
                     x_hs[i] = beta[i]
                 end
@@ -224,25 +220,23 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
 
         if use_hs
             _, ∂x, _, _ = repar_pb(∂beta)
-            sum_dxz2_tau = 0.0
+            sum_dxz_tau = 0.0
             @inbounds for i in 1:nbeta
                 if is_constrained[i]
-                    λi = use_local ? λ_buf[local_pos[i]] : 1.0
-                    grad[i]      = -z_β[i] - ∂x[i]*τ*λi*z_β[i]
-                    sum_dxz2_tau += ∂x[i]*λi*z_β[i]^2
-                    if use_local
-                        k       = local_pos[i]
-                        uk      = z[lambda_start-1+k]
-                        dxi_dλi = ∂x[i]*τ*z_β[i]^2
-                        dλi_duk = 0.5*π*(1 + λi^2)*pdf(Normal(), uk)
-                        grad[lambda_start-1+k] = -uk - 0.5*dxi_dλi*dλi_duk
-                    end
+                    λi = λ_buf[local_pos[i]]
+                    grad[i]      = -z_β[i] - 0.5*∂x[i]*τ*λi*sign(z_β[i])
+                    sum_dxz_tau += ∂x[i]*λi*abs(z_β[i])
+                    k       = local_pos[i]
+                    uk      = z[lambda_start-1+k]
+                    dxi_dλi = ∂x[i]*τ*abs(z_β[i])
+                    dλi_duk = 0.5*π*(1 + λi^2)*pdf(Normal(), uk)
+                    grad[lambda_start-1+k] = -uk - 0.5*dxi_dλi*dλi_duk
                 else
                     grad[i]   = -z_β[i] - 0.5*∂x[i]*sqrt_vbetasq[i]
                 end
             end
             dτ_duτ         = tau0 * 0.5*π*(1 + τ_raw^2)*pdf(Normal(), u_τ)
-            grad[tau_idx]  = -u_τ - 0.5*sum_dxz2_tau*dτ_duτ
+            grad[tau_idx]  = -u_τ - 0.5*sum_dxz_tau*dτ_duτ
         elseif lbs_trivial
             @. grad[1:nbeta]    = -z_β - 0.5*∂beta*sqrt_vbetasq
         else
@@ -254,10 +248,8 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
         logprior_extra = 0.0
         if use_hs
             logprior_extra -= 0.5*u_τ^2
-            if use_local
-                @inbounds for k in 1:n_constrained
-                    logprior_extra -= 0.5*z[lambda_start-1+k]^2
-                end
+            @inbounds for k in 1:n_constrained
+                logprior_extra -= 0.5*z[lambda_start-1+k]^2
             end
         end
         return -0.5*(dot(z_β, z_β) + dot(z_γ, z_γ)) - 0.5*val + logprior_extra
@@ -336,7 +328,7 @@ function analytical_hmc(prior::Dict, msd::Dict, J::Int;
         [Symbol("z_beta[$i]")  for i in 1:nbeta],
         [Symbol("z_gamma[$i]") for i in 1:ngamma],
         use_hs ? [Symbol("u_tau")] : Symbol[],
-        use_local ? [Symbol("u_lambda[$i]") for i in constrained_idx] : Symbol[])
+        use_hs ? [Symbol("u_lambda[$i]") for i in constrained_idx] : Symbol[])
     return MCMCChains.Chains(
         reshape(samples, n_stored, n, 1),
         param_names)

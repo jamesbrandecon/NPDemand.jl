@@ -168,8 +168,7 @@ function estimate!(problem::NPDProblem;
     skip::Int = 5,
     sampler = HMC(0.01, 10),
     custom_prior::Union{Dict, Nothing} = nothing,
-    horseshoe::Bool = false,
-    local_shrinkage::Bool = false,
+    regularization::String = "normal",
     depth_decay::Bool = false
     )
 
@@ -177,6 +176,12 @@ function estimate!(problem::NPDProblem;
     if linear_solver ∉ ["Ipopt", "OSQP"]
         error("Linear solver must be Ipopt or OSQP")
     end
+
+    # Check that regularization is normal or horseshoe
+    if regularization ∉ ["normal", "horseshoe"]
+        error("`regularization` must be either \"normal\" or \"horseshoe\"")
+    end
+    horseshoe = regularization == "horseshoe"
 
     # Unpack problem
     df = problem.data;
@@ -285,7 +290,6 @@ function estimate!(problem::NPDProblem;
             "parameter_order" => collect(parameter_order),
             "nbetas"         => nbetas,
             "horseshoe"      => horseshoe,
-            "local_shrinkage" => local_shrinkage,
             "tau0"           => tau0
         )
 
@@ -301,8 +305,7 @@ function estimate!(problem::NPDProblem;
             n_adapt    = burn_in,
             thin       = skip,
             verbose    = verbose,
-            horseshoe  = horseshoe,
-            local_shrinkage = local_shrinkage)
+            horseshoe  = horseshoe)
 
         # Convert chain from NCP (z) space back to parameter space
         # chain already excludes adaptation steps and is thinned by skip
@@ -311,21 +314,18 @@ function estimate!(problem::NPDProblem;
         gammadraws    = prior["gammabar"]' .+ sqrt(prior["vgammasq"]) .* z_gammadraws
 
         if horseshoe && !all(lbs .== typemax(Int))
-            # Global-scale horseshoe: increments are τ_0*τ*λ_i*z^2 for constrained
+            # Global-scale horseshoe: increments are τ_0*τ*λ_i*|z| for constrained
             # coefficients (shrinking the increment itself toward 0, not its log); τ_0 is
             # a fixed depth-based constant (1 unless `depth_decay`), τ is shared/learned
-            # across all constrained coefficients, λ_i is per-coefficient (local_shrinkage).
+            # across all constrained coefficients, λ_i is per-coefficient (always on).
             is_constrained  = .!isnothing.(lbs)
             tau_raw_draws   = tan.(0.5*π .* cdf.(Normal(), vec(chain["u_tau"])))
             tau_draws       = prior["tau0"] .* tau_raw_draws  # effective global scale actually used
-            lambda_draws    = local_shrinkage ?
-                Dict(i => tan.(0.5*π .* cdf.(Normal(), vec(chain["u_lambda[$i]"]))) for i in findall(is_constrained)) :
-                nothing
+            lambda_draws    = Dict(i => tan.(0.5*π .* cdf.(Normal(), vec(chain["u_lambda[$i]"]))) for i in findall(is_constrained))
             increment_draws = similar(z_betadraws)
             for i in 1:sum(nbetas)
                 if is_constrained[i]
-                    λ_i = local_shrinkage ? lambda_draws[i] : 1.0
-                    increment_draws[:,i] = tau_draws .* λ_i .* z_betadraws[:,i].^2
+                    increment_draws[:,i] = tau_draws .* lambda_draws[i] .* abs.(z_betadraws[:,i])
                 else
                     increment_draws[:,i] = prior["betabar"][i] .+ sqrt(prior["vbetasq"][i]) .* z_betadraws[:,i]
                 end
@@ -348,11 +348,9 @@ function estimate!(problem::NPDProblem;
         if horseshoe && !all(lbs .== typemax(Int))
             starparams_names = vcat(starparams_names, [Symbol("tau")])
             starparams       = hcat(starparams, tau_draws)
-            if local_shrinkage
-                lambda_idx = findall(.!isnothing.(lbs))
-                starparams_names = vcat(starparams_names, [Symbol("lambda[$i]") for i in lambda_idx])
-                starparams       = hcat(starparams, hcat([lambda_draws[i] for i in lambda_idx]...))
-            end
+            lambda_idx = findall(.!isnothing.(lbs))
+            starparams_names = vcat(starparams_names, [Symbol("lambda[$i]") for i in lambda_idx])
+            starparams       = hcat(starparams, hcat([lambda_draws[i] for i in lambda_idx]...))
         end
 
         problem.sampling_details  = (; burn_in = burn_in_fraction, skip = skip, smc = false, prior = prior)
@@ -453,7 +451,6 @@ function smc!(problem::NPDemand.NPDProblem;
 
     prior_hs   = problem.sampling_details.prior
     use_hs     = get(prior_hs, "horseshoe", false) && !all(lbs .== typemax(Int))
-    use_local  = use_hs && get(prior_hs, "local_shrinkage", false)
     nparticles = size(problem.smc_results.thetas,1);
 
     if use_hs
@@ -462,19 +459,19 @@ function smc!(problem::NPDemand.NPDProblem;
         is_constrained  = .!isnothing.(lbs)
         constrained_idx = findall(is_constrained)
         local_pos       = zeros(Int, nbeta)
-        use_local && (local_pos[constrained_idx] .= 1:length(constrained_idx))
+        local_pos[constrained_idx] .= 1:length(constrained_idx)
 
         tau0            = get(prior_hs, "tau0", 1.0)
         _betabar        = prior_hs["betabar"]; _vbetasq = prior_hs["vbetasq"]
         zdraws          = problem.smc_results.thetas[:, 1:nbeta]
         gammas          = problem.smc_results.thetas[:, (nbeta+1):(nbeta+ngamma)]
         tau_draws       = exp.(problem.smc_results.thetas[:, nbeta+ngamma+1])
-        lambda_draws    = use_local ? exp.(problem.smc_results.thetas[:, (nbeta+ngamma+2):end]) : nothing
+        lambda_draws    = exp.(problem.smc_results.thetas[:, (nbeta+ngamma+2):end])
         increment_draws = similar(zdraws)
         for i in 1:nbeta
             if is_constrained[i]
-                λ_i = use_local ? lambda_draws[:, local_pos[i]] : 1.0
-                increment_draws[:,i] = tau0 .* tau_draws .* λ_i .* zdraws[:,i].^2
+                λ_i = lambda_draws[:, local_pos[i]]
+                increment_draws[:,i] = tau0 .* tau_draws .* λ_i .* abs.(zdraws[:,i])
             else
                 increment_draws[:,i] = _betabar[i] .+ sqrt(_vbetasq[i]) .* zdraws[:,i]
             end
