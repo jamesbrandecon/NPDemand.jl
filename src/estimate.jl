@@ -236,8 +236,8 @@ function estimate!(problem::NPDProblem;
         nbetas = get_nbetas(problem)
         lbs = sieve_type == "bernstein" ? get_lower_bounds(problem) : []
         parameter_order = lbs != [] ? get_parameter_order(lbs)  : 1:sum(nbetas)
-        vbetastarsq = !isnothing(custom_prior) && haskey(custom_prior, "vbetastarsq")  ? custom_prior["vbetastarsq"].*ones(sum(nbetas)) : 100
-        vbetasq = deepcopy(vbetastarsq)
+        vbetastarsq = !isnothing(custom_prior) && haskey(custom_prior, "vbetastarsq")  ? custom_prior["vbetastarsq"] : 100
+        vbetasq = ones(sum(nbetas))
         betabar = !isnothing(custom_prior) && haskey(custom_prior, "betabar")  ? custom_prior["betabar"] .+ zeros(sum(nbetas))  : zeros(sum(nbetas))
         gammabar = !isnothing(custom_prior) && haskey(custom_prior, "gammabar") ? custom_prior["gammabar"] .+ zeros(gamma_length-1) : zeros(gamma_length-1)
         vgammasq = !isnothing(custom_prior) && haskey(custom_prior, "vgammasq") ? custom_prior["vgammasq"] : 100
