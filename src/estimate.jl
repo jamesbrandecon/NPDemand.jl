@@ -233,12 +233,14 @@ function estimate!(problem::NPDProblem;
         gamma_length = size(Bvec[1],2);
 
         # Define prior
-        nbetas          = get_nbetas(problem)
-        lbs             = sieve_type == "bernstein" ? get_lower_bounds(problem) : []
-        parameter_order = lbs != []                 ? get_parameter_order(lbs)  : 1:sum(nbetas)
-        vbetastarsq     = 100;
-        vbetasq         = zeros(sum(nbetas))
-        betabar         = zeros(sum(nbetas))
+        nbetas = get_nbetas(problem)
+        lbs = sieve_type == "bernstein" ? get_lower_bounds(problem) : []
+        parameter_order = lbs != [] ? get_parameter_order(lbs)  : 1:sum(nbetas)
+        vbetastarsq = !isnothing(custom_prior) && haskey(custom_prior, "vbetastarsq")  ? custom_prior["vbetastarsq"].*ones(sum(nbetas)) : 100
+        vbetasq = deepcopy(vbetastarsq)
+        betabar = !isnothing(custom_prior) && haskey(custom_prior, "betabar")  ? custom_prior["betabar"] .+ zeros(sum(nbetas))  : zeros(sum(nbetas))
+        gammabar = !isnothing(custom_prior) && haskey(custom_prior, "gammabar") ? custom_prior["gammabar"] .+ zeros(gamma_length-1) : zeros(gamma_length-1)
+        vgammasq = !isnothing(custom_prior) && haskey(custom_prior, "vgammasq") ? custom_prior["vgammasq"] : 100
 
         # lbs is either a per-coefficient vector of `nothing`/dependency-index-lists, or
         # (when there are no Aineq/Aeq constraints at all) a whole-vector sentinel of
@@ -282,11 +284,11 @@ function estimate!(problem::NPDProblem;
         end
 
         prior = Dict(
-            "betabar"  => !isnothing(custom_prior) && haskey(custom_prior, "betabar")  ? custom_prior["betabar"] .+ zeros(sum(nbetas))  : betabar,
-            "vbetasq"  => !isnothing(custom_prior) && haskey(custom_prior, "vbetasq")  ? custom_prior["vbetasq"].*ones(size(vbetasq))    : vbetasq,
-            "gammabar" => !isnothing(custom_prior) && haskey(custom_prior, "gammabar") ? custom_prior["gammabar"] .+ zeros(gamma_length-1) : zeros(gamma_length-1),
-            "vgammasq" => !isnothing(custom_prior) && haskey(custom_prior, "vgammasq") ? custom_prior["vgammasq"]                         : 10,
-            "lbs"            => lbs,
+            "betabar"  => betabar,
+            "vbetasq"  => vbetasq,
+            "gammabar" => gammabar,
+            "vgammasq" => vgammasq,
+            "lbs" => lbs,
             "parameter_order" => collect(parameter_order),
             "nbetas"         => nbetas,
             "horseshoe"      => horseshoe,
