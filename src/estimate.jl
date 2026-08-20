@@ -6,7 +6,7 @@ function estimate_fast!(problem::NPDProblem;
         linear_solver = linear_solver,
         verbose = verbose);
 
-    problem.results = NPD_parameters([β;γ]);
+    problem.estimates = NPD_parameters([β;γ]);
 end
 
 function jmp_obj(npd_problem::NPDProblem; linear_solver = "Ipopt", verbose = true)
@@ -356,7 +356,7 @@ function estimate!(problem::NPDProblem;
         end
 
         problem.sampling_details  = (; burn_in = burn_in_fraction, skip = skip, smc = false, prior = prior)
-        problem.results           = NPD_parameters(qpm);
+        problem.estimates         = NPD_parameters(qpm);
         problem.chain_params      = hcat(betadraws, gammadraws);
         problem.chain_starparams  = MCMCChains.Chains(
             reshape(starparams, size(starparams,1), size(starparams,2), 1),
@@ -485,7 +485,7 @@ function smc!(problem::NPDemand.NPDProblem;
     end
     thetas_sieve = vcat([map_to_sieve(betas[i,:], gammas[i,:], problem.exchange, nbetas, problem) for i in 1:nparticles]...)
 
-    problem.results.minimizer    = mean(thetas_sieve, dims = 1);
+    problem.estimates.minimizer  = mean(thetas_sieve, dims = 1);
     problem.chain_starparams     = problem.smc_results.thetas
     problem.chain_params         = hcat(betas, gammas)
     problem.sampling_details     = (; smc = true, prior = problem.sampling_details.prior);

@@ -22,7 +22,7 @@ function price_elasticities!(problem; stat="median")
 
         elast = price_elasticities_inner(
             problem; 
-            β = problem.results.minimizer,
+            β = problem.estimates.minimizer,
             sieve_type = sieve_type, 
             max_interaction = max_interaction)
         problem.all_elasticities = elast.all_elast_mat
@@ -67,7 +67,7 @@ function price_elasticities!(problem; stat="median")
 end
 
 function price_elasticities_inner(npd_problem; 
-    β = npd_problem.results.minimizer, 
+    β = npd_problem.estimates.minimizer, 
     sieve_type = "bernstein", 
     max_interaction = 1)
 

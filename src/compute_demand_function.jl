@@ -32,7 +32,7 @@ function compute_demand_function!(problem, df;
         inverted = compute_demand_function_inner(problem, df, 
             max_iter = max_iter, 
             show_trace = show_trace, 
-            β = problem.results.minimizer,
+            β = problem.estimates.minimizer,
             average_over = average_over)
         
         demand = inverted.solved_zero;
@@ -151,7 +151,7 @@ end
 
 function compute_demand_function_inner(problem, df; 
     max_iter = 1000, show_trace = false,
-    β = problem.results.minimizer, 
+    β = problem.estimates.minimizer, 
     average_over::Vector{String} = [])
 
     J = length(problem.Xvec);

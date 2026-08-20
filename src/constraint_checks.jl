@@ -40,7 +40,7 @@ function report_constraint_violations(problem;
     nbeta                 = sum(nbetas);
 
     if (params ==[]) && (problem.chain_starparams == []) && (problem.chain_params == [])
-        param_vec = problem.results.minimizer; # if there's no chain, use the GMM result
+        param_vec = problem.estimates.minimizer; # if there's no chain, use the GMM result
     elseif (params ==[]) && (problem.chain_params != [])
         particles       = problem.chain_params;
         if (n_draws > 0)
@@ -85,7 +85,7 @@ function report_constraint_violations_inner(problem;
     J = length(problem.Xvec)
 
     if params == []
-        param_vec = problem.results.minimizer;
+        param_vec = problem.estimates.minimizer;
     else 
         param_vec = params;
     end
@@ -417,7 +417,7 @@ end
 function check_linear_constraints(npd_problem)
     if npd_problem.Aineq != []
         # Modify theta as in objective function 
-        β = npd_problem.results.minimizer;
+        β = npd_problem.estimates.minimizer;
         θ = β[1:npd_problem.design_width]
         problem_has_linear_constraints = false;
         
