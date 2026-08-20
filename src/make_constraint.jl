@@ -1,4 +1,4 @@
-function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
+function make_constraint(df::DataFrame, constraints, exchange, combo_vec; progress_bar = nothing)
     J = length(combo_vec)
     try 
         @assert J<20
@@ -43,9 +43,11 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
         end
     end
     
-    # Initialize constraint matrices 
-    Aineq = zeros(1, sum(lengths));
-    Aeq = zeros(1, sum(lengths));
+    # Accumulate constraint rows as (ind_1, ind_neg1) pairs; materialized into dense
+    # matrices once at the end (see "Clean up" below) instead of growing a matrix via
+    # vcat on every add_constraint call.
+    Aineq = Tuple{Int,Int}[];
+    Aeq = Tuple{Int,Int}[];
 
     # Find first product in each group of exchangeable products 
     first_in_exchange = getindex.(exchange, 1);
@@ -98,6 +100,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             end
         end
     end
+    progress_bar !== nothing && update(progress_bar)
 
     if :all_substitutes ∈ constraints
     #     # Monotonicity in all shares
@@ -153,6 +156,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             end
         end
     end
+    progress_bar !== nothing && update(progress_bar)
 
     if :subs_in_group ∈ constraints
         for e ∈ eachindex(exchange)
@@ -172,6 +176,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             end
         end
     end
+    progress_bar !== nothing && update(progress_bar)
 
     if :subs_across_group ∈ constraints
         length(exchange) == 2 || error("Cannot use `subs_across_group` constraint with only one exchangeable group")
@@ -192,6 +197,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             end
         end
     end
+    progress_bar !== nothing && update(progress_bar)
 
     if :complements_across_group ∈ constraints
         length(exchange) == 2 || error("Cannot use `complements_across_group` constraint with only one exchangeable group")
@@ -212,6 +218,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             end
         end
     end
+    progress_bar !== nothing && update(progress_bar)
 
     # diagonal dominance
         # currently only within group
@@ -246,6 +253,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             end
         end
     end
+    progress_bar !== nothing && update(progress_bar)
 
     if :diagonal_dominance_all ∈ constraints
         for inv_j ∈ first_in_exchange
@@ -278,6 +286,7 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             end
         end
     end
+    progress_bar !== nothing && update(progress_bar)
 
     # Exchangeability within groups
     if :exchangeability ∈ constraints
@@ -296,16 +305,31 @@ function make_constraint(df::DataFrame, constraints, exchange, combo_vec)
             end
         end
     end
+    progress_bar !== nothing && update(progress_bar)
     # @show size(Aineq)
 
     # ------------------------
-    # Clean up 
-    Aineq = Aineq[2:end,:];
-    Aineq = Matrix(hcat(unique(eachrow(Aineq))...)') # Drop redundant inequality constraints
-    Aeq = Aeq[2:end,:];
-    if size(Aineq,2)==0
+    # Clean up
+    ncols = sum(lengths);
+
+    Aineq_rows = unique(Aineq); # Drop redundant inequality constraints (same dedup as before, O(1) equality check on index pairs instead of O(ncols) row comparisons)
+    if isempty(Aineq_rows)
         Aineq = [];
+    else
+        Aineq_mat = zeros(length(Aineq_rows), ncols);
+        for (r, (ind_1, ind_neg1)) in enumerate(Aineq_rows)
+            Aineq_mat[r, ind_1] = 1;
+            Aineq_mat[r, ind_neg1] = -1;
+        end
+        Aineq = Aineq_mat;
     end
+
+    Aeq_mat = zeros(length(Aeq), ncols);
+    for (r, (ind_1, ind_neg1)) in enumerate(Aeq)
+        Aeq_mat[r, ind_1] = 1;
+        Aeq_mat[r, ind_neg1] = -1;
+    end
+    Aeq = Aeq_mat;
 
     mins = dropdims(getindex.(argmin(Aeq, dims=2),2), dims=2);
     order = sortperm(mins, rev=true);

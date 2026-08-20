@@ -12,11 +12,29 @@ function list_constraints()
     :exchangeability => "Impose that all products within provided groups (in `exchange`) are exchangeable",
     :subs_in_group => "Impose that all products within provided groups (in `exchange`) are substitutes. This constraint is imposed only via quasi-bayes.",
     :complements_in_group => "Impose that all products within provided groups (in `exchange`) are complements. This constraint is only imposed via quasi-bayes.",
-    :subs_across_group => "Impose that all products *across* provided groups (in `exchange`) are substitutes. No constraints are imposed within group. This constraint is only imposed via quasi-bayes.", 
+    :subs_across_group => "Impose that all products *across* provided groups (in `exchange`) are substitutes. No constraints are imposed within group. This constraint is only imposed via quasi-bayes.",
     :complements_across_group => "Impose that all products *across* provided groups (in `exchange`) are complements. No constraints are imposed within group. This constraint is only imposed via quasi-bayes."
-   ) 
+   )
    return result
 end
+
+"""
+    stage_bar(verbose, n_units, description)
+
+Creates a fresh `ProgressBar` (own line, own 0-100% range) for one construction
+stage of `define_problem`, sized to that stage's actual number of work units
+(e.g. number of products, number of constraint blocks). Returns `nothing` when
+`verbose = false`, in which case `stage_tick!` becomes a no-op.
+"""
+function stage_bar(verbose::Bool, n_units::Int, description::AbstractString)
+    verbose || return nothing
+    bar = ProgressBar(1:max(n_units, 1))
+    set_description(bar, description)
+    return bar
+end
+
+stage_tick!(::Nothing) = nothing
+stage_tick!(bar::ProgressBar) = update(bar)
 
 """
     define_problem(df::DataFrame; exchange = [], index_vars = ["prices"], FE = [], constraints = [], bO = 2, tol = 1e-5)
@@ -38,15 +56,15 @@ and second are exchangeable and so are the third and fourth, set `exchange` = [[
     - :diagonal\\_dominance\\_group 
     - :diagonal\\_dominance\\_all 
     - :subs\\_in\\_group (Note: this constraint is the only available nonlinear constraint and will slow down estimation considerably)
-- `verbose`: if `false`, will not print updates as problem is generated
+- `verbose`: if `true` (default), prints progress bars for each problem-construction stage; set to `false` to suppress
 """
 function define_problem(df::DataFrame; exchange::Vector = [Int64[]], 
     index_vars = ["prices"], price_iv = [], FE = [], 
     constraints = [], bO = 2, 
     obj_xtol = 1e-5, obj_ftol = 1e-5, 
     constraint_tol = 1e-5, # these inputs are no longer used 
-    normalization=[], 
-    verbose = false, 
+    normalization=[],
+    verbose = true,
     approximation_details = Dict())
     
     if approximation_details != Dict()
@@ -172,13 +190,31 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
         end
     end
 
+    # Set up progress tracking across the remaining construction stages. Each stage
+    # gets its own progress bar (own line, sized to that stage's real work), printed
+    # one after another, rather than one bar shared across every stage.
+    t_total_start = time()
+    stage_labels = String[]
+    FE != [] && push!(stage_labels, "Reshaping fixed effects")
+    push!(stage_labels, "Building polynomial approximations")
+    build_constraint_mats = (sieve_type == "bernstein") && (approximation_details[:tensor] == true)
+    build_constraint_mats && push!(stage_labels, "Building constraint matrices")
+    push!(stage_labels, "Reformulating problem")
+    push!(stage_labels, "Constructing elasticity helper matrices")
+    n_stages = length(stage_labels)
+    stage_idx = 0
+    next_stage_bar(n_units) = begin
+        stage_idx += 1
+        stage_bar(verbose, n_units, "[$stage_idx/$n_stages] $(stage_labels[stage_idx])")
+    end
+
     # Reshape FEs into matrix of dummy variables
     FEmat = [];
     fe_param_mapping = Dict{Int, NamedTuple}(); # Map the index in the FE mat which corresponds to a given FE name and value
     if FE!=[]
         FEmat = [];
         column_counter = 1;
-        verbose && println("Reshaping fixed-effects into dummy variables....")
+        bar = next_stage_bar(length(FE))
         for f ∈ FE
             if f != "product"
                 unique_vals = unique(df[!,f]);
@@ -193,6 +229,7 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
                     column_counter += 1
                 end
             end
+            stage_tick!(bar)
         end
     end
 
@@ -210,30 +247,35 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
         end
     end
     
-    verbose && println("Making polynomial approximations....")
+    bar = next_stage_bar(J)
     Xvec, Avec, Bvec, syms, combos = prep_matrices(
-        df, exchange, index_vars, FEmat, product_FEs, bO; 
-        price_iv = price_iv, verbose = verbose, 
-        approximation_details = approximation_details, 
-        constraints = constraints);
-    
-    if sieve_type == "bernstein" && (approximation_details[:tensor] == true)
-        verbose && println("Making linear constraint matrices....")
-        Aineq, Aeq, maxs, mins = make_constraint(df, constraints, exchange, syms);
-    else 
+        df, exchange, index_vars, FEmat, product_FEs, bO;
+        price_iv = price_iv, verbose = false, # per-choice logging suppressed; the stage bar reports this progress instead
+        approximation_details = approximation_details,
+        constraints = constraints,
+        progress_bar = bar);
+
+    if build_constraint_mats
+        bar = next_stage_bar(8) # make_constraint processes up to 8 named constraint blocks
+        Aineq, Aeq, maxs, mins = make_constraint(df, constraints, exchange, syms; progress_bar = bar);
+    else
         Aineq = [];
         Aeq = [];
-        mins = []; ## NEED TO FIX FOR NON-BERNSTEIN, NON-TENSOR SIEVES 
+        mins = []; ## NEED TO FIX FOR NON-BERNSTEIN, NON-TENSOR SIEVES
         maxs = [];
     end
-    
-    verbose && println("Reformulating problem....")
+
+    bar = next_stage_bar(length(Xvec))
 
     design_width = sum(size.(Xvec,2));
     elast_mats = Matrix[];
     elast_prices = Matrix[];
 
-    weight_matrices = [Avec[i]*pinv(Avec[i]'*Avec[i])*Avec[i]' for i in 1:length(Xvec)]; 
+    weight_matrices = Matrix{Float64}[];
+    for i in 1:length(Xvec)
+        push!(weight_matrices, Avec[i]*pinv(Avec[i]'*Avec[i])*Avec[i]');
+        stage_tick!(bar)
+    end
 
     problem = NPDProblem(df,
                         [], 
@@ -271,11 +313,16 @@ function define_problem(df::DataFrame; exchange::Vector = [Int64[]],
                         [],
                         approximation_details)
 
-    verbose && println("Constructing helper matrices for elasticities...")
+    bar = next_stage_bar(J*J)
     problem.tempmats = calc_tempmats(
-        problem);
+        problem; progress_bar = bar);
 
-    verbose && println("Done constructing problem.")
+    if verbose
+        elapsed = time() - t_total_start
+        mins = floor(Int, elapsed / 60)
+        secs = elapsed - 60 * mins
+        println("Done constructing problem in $(mins)m $(round(secs, digits = 2))s")
+    end
     return problem
 end
 
@@ -310,9 +357,9 @@ mutable struct NPDProblem
     design_width 
     obj_xtol
     obj_ftol
-    constraint_tol 
+    constraint_tol
     bO
-    results
+    estimates
     elast_mats
     elast_prices
     cfg
@@ -363,7 +410,7 @@ function Base.show(io::IO, problem::NPDProblem)
     FE = problem.FE;
     obj_xtol = problem.obj_xtol;
     obj_ftol = problem.obj_ftol;
-    estimated_TF = ((problem.results !=[]) || (problem.chain_starparams != []));
+    estimated_TF = ((problem.estimates !=[]) || (problem.chain_starparams != []));
     
     println(io, "NPD Problem:")
     println(io, "- Number of choices: $(J)")

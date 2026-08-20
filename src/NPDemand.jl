@@ -15,7 +15,7 @@ import ChainRulesCore
 using MCMCChains
 using Distributions
 using Roots: find_zero, Bisection
-using ProgressBars: ProgressBar, set_description
+using ProgressBars: ProgressBar, set_description, set_postfix, update
 
 using Printf
 
@@ -28,6 +28,7 @@ include("toDataFrame.jl")
 include("sieve_functions.jl")
 include("prep_matrices.jl")
 include("define_problem.jl")
+include("define_results.jl")
 include("objective_functions.jl")
 include("make_interactions.jl")
 include("make_constraint.jl")
@@ -45,5 +46,6 @@ include("constraint_checks.jl")
 export estimate!, define_problem, show, price_elasticities!, toDataFrame, simulate_logit, update_constraints!
 export bern, dbern, compute_demand_function!, summarize_elasticities, own_elasticities, are_constraints_satisfied
 export elasticity_quantiles, report_constraint_violations, smc!, list_constraints, HMC
+export define_results, NPDResults
 
 end

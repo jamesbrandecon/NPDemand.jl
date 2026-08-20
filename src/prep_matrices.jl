@@ -1,12 +1,13 @@
-function prep_matrices(df::DataFrame, exchange, index_vars, 
-    FEmat, product_FEs, order; price_iv = [], inner = false, 
-    verbose = true, 
+function prep_matrices(df::DataFrame, exchange, index_vars,
+    FEmat, product_FEs, order; price_iv = [], inner = false,
+    verbose = true,
     approximation_details = Dict(
-        :sieve_type => "bernstein", 
-        :order => 2, 
-        :max_interaction => 1, 
-        :tensor => true), 
-    constraints = [])
+        :sieve_type => "bernstein",
+        :order => 2,
+        :max_interaction => 1,
+        :tensor => true),
+    constraints = [],
+    progress_bar = nothing)
 
     sieve_type = approximation_details[:sieve_type]
     tensor = haskey(approximation_details, :tensor) ? approximation_details[:tensor] : true
@@ -232,6 +233,7 @@ function prep_matrices(df::DataFrame, exchange, index_vars,
         if (!inner) & (verbose)
             println("Done with choice $(xj-1)")
         end
+        (!inner) && (progress_bar !== nothing) && update(progress_bar)
         push!(Xvec, full_interaction)
         if !inner
             push!(Avec, A_xj)

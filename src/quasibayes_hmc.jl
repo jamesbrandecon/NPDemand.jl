@@ -4,7 +4,8 @@ struct HMC
 end
 
 function calc_tempmats(problem::NPDProblem;
-    recipe = nothing)
+    recipe = nothing,
+    progress_bar = nothing)
 
     J = length(problem.Xvec);
 
@@ -53,6 +54,7 @@ function calc_tempmats(problem::NPDProblem;
                 tensor            = haskey(approximation_details, :tensor) ? approximation_details[:tensor] : true
                 )
             push!(tempmats, tempmat_s)
+            progress_bar !== nothing && update(progress_bar)
         end
     end
     temp_storage_mat = reshape(tempmats, J,J);
