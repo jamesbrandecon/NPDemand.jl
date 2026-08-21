@@ -240,11 +240,12 @@ function calc_derivative_sieve(j1, j2;
 end
 
 """
-    summarize_elasticities(problem::NPDProblem, which_elasticities::String, stat::String;
+    summarize_elasticities(problem::Union{NPDProblem, NPDResults}, which_elasticities::String, stat::String;
         q = 0.5)
 
 Convenience function for summarizing the market-level price elasticities stored in `problem.all_elasticities`
-(populated by running `price_elasticities!(problem)`).
+(populated by running `price_elasticities!(problem)`). Accepts either an `NPDProblem` or the lightweight
+`NPDResults` produced by `define_results`, since both store `all_elasticities` in the same form.
 
 `which_elasticities` must be one of:
 - `"matrix"`: returns a JxJ matrix, with `stat` applied across markets to each entry of the elasticity matrix
@@ -254,7 +255,7 @@ Convenience function for summarizing the market-level price elasticities stored 
 `stat` must be one of `"mean"`, `"median"`, or `"quantile"`. If `stat == "quantile"`, `q` gives the quantile of interest
 (e.g., 0.75 for the 75th percentile).
 """
-function summarize_elasticities(problem::NPDProblem, which_elasticities::String, stat::String; q = 0.5)
+function summarize_elasticities(problem::Union{NPDProblem, NPDResults}, which_elasticities::String, stat::String; q = 0.5)
 
     if which_elasticities ∉ ["own", "cross", "matrix"]
         error("which_elasticities must be in ['own', 'cross', 'matrix']")
